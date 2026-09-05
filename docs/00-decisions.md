@@ -58,7 +58,18 @@ Shoulder does not use Supabase's browser Data API for product data. Application 
 
 Publishing three to six judgments is represented by `review_publication` and `review_publication_item` rows. The requested set, order, idempotency key, clip versions, failures, and final visibility therefore survive worker restarts. The set becomes player-visible only in one transaction after every item points to a ready isolated clip.
 
-## Open decisions that must be tested, not guessed
+## Reconciliation decisions
+
+The following reconciliation decisions supplement D1–D14 and govern the detailed contracts:
+
+- **D15 — Identity before roles, protection with schema.** Task 3 proves verified session identity only. Task 4 completes role-aware `/v1/me`, memberships, baseline RLS, and runtime-role isolation tests for every table it creates. Task 5 extends that harness. See [ADR 0006](decisions/0006-foundation-auth-and-rls-sequence.md).
+- **D16 — Author-controlled reflections.** Reflections are mutable by their player author and permanently deletable from active storage, with no retained text history. Backup expiry and restore suppression are explicit operational limits. See [ADR 0007](decisions/0007-author-controlled-reflections.md).
+- **D17 — Versioned human judgments.** Creation and every content edit create immutable snapshots; edits require optimistic concurrency. Publication pins exact revisions and isolated clips. Replacement keeps the old published set visible until an atomic swap; withdrawal is immediate for new requests. See [ADR 0008](decisions/0008-judgment-revisions-and-republication.md), which extends ADR 0005.
+- **D18 — Bounded retention and conservative shared-footage deletion.** Source retention starts at upload completion and never extends on retries. Failed work has earlier deadlines; season expiry has an explicit timestamp. A verified player-erasure request removes shared team footage and its dependent evidence rather than claiming selective anonymization. Operational ownership, collateral deletion, and backup limits need owner confirmation before real data. See [ADR 0009](decisions/0009-retention-and-shared-footage-deletion.md).
+- **D19 — Review shell and asset gate.** Review has no global navigation rail; three visible accessible verdict choices include coach-only `not_relevant`. Approved vector logos and licensed Inter Tight files are required inputs before Task 1. See [ADR 0010](decisions/0010-review-workspace-and-asset-prerequisites.md).
+- **D20 — Phase D provenance deletion.** A CV observation referenced by a judgment is retained as a minimal observation with machine provenance cleared. Only unreferenced CV observations can be deleted during run cleanup. The non-null judgment relationship stays intact. See [ADR 0011](decisions/0011-cv-provenance-deletion.md).
+
+## Open decisions that require measurements
 
 | Decision | Test | Owner task |
 |---|---|---|

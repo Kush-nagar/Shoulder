@@ -50,6 +50,8 @@ Do not add green success banners to the player experience. Completion is communi
 
 Load Inter Tight locally with `next/font`. Use variable optical behavior if the approved files provide it; otherwise use weights 400, 500, and 600. Apply font-feature settings for `tnum` on timecodes and numeric metadata.
 
+Licensed Inter Tight files, version/provenance, and approved SVG logo inputs are required before Task 1, as tracked in `assets/README.md`. They are currently missing; the reference PNG is not a production asset. Do not substitute a font-rendered or traced wordmark.
+
 | Role | Desktop | Mobile | Weight | Line height |
 |---|---:|---:|---:|---:|
 | Display | 40 px | 32 px | 600 | 1.08 |
@@ -100,11 +102,11 @@ Coach content max width is 1440 px except the review workspace, which may fill t
 - The content header is 64 px tall with page title, optional breadcrumb, and one right-aligned primary action.
 - The page background is paper. Surfaces are introduced only where grouping helps scanning.
 
-At widths above 1280 px, the rail may expand to 216 px only on list/form pages. The review workspace keeps the narrow rail to protect video width.
+At widths above 1280 px, the rail may expand to 216 px only on list/form pages. These global rails never appear in the review workspace, at any viewport. Review uses the dedicated top bar defined below.
 
 ### Tablet and small desktop, 768–1023 px
 
-- Use a 60 px rail or a top bar when landscape width is constrained.
+- On ordinary coach pages, use a 60 px rail or a top bar when landscape width is constrained. Review has no global rail.
 - Review retains video above a full-width moment editor; it does not squeeze both into unusable columns.
 - Tables convert low-priority columns to secondary row text before horizontal scrolling is considered.
 
@@ -126,10 +128,10 @@ Coach upload status and basic list/detail pages remain usable. Full match review
 ### Dashboard
 
 - Header: “Matches” with primary “Upload match.”
-- First section: recent matches as a compact list, not a KPI card grid.
+- Follow `docs/05-ui.md` ordering: games needing processing/review attention, unpublished drafts, then recent reflections; use compact rows, not a KPI card grid.
 - Each row contains opponent/date, processing state, review progress in words, and last activity.
-- A narrow “Players needing evidence” section may appear below only when it is actionable. It contains names and the active goal, never a score or count badge implying performance.
-- Empty state: mark, “No matches yet,” one sentence, and “Upload match.”
+- Player next actions belong in the relevant match/roster rows; do not add another dashboard section.
+- Empty state: mark, “Upload your first game,” one sentence, and “Upload match.”
 
 ### Players list
 
@@ -166,9 +168,11 @@ Coach upload status and basic list/detail pages remain usable. Full match review
 
 This is the signature desktop screen. It should resemble a focused editing bench, not a broadcast-analysis cockpit.
 
+There is no global navigation rail at any viewport. At 1024–1279px the editor is 320px wide; below 1024px it follows the video. Below 768px use the limited behavior in `docs/05-ui.md`. Back to match is the only navigation out of the workspace.
+
 ### Layout at 1280 px and wider
 
-- Top bar: 56 px, containing back action, match identity, save state, and “Publish clips.”
+- Top bar: 56 px, containing Back to match, fixed match/player/goal context, save state, keyboard help, and “Publish clips.”
 - Main area: video on the left at roughly 68% width; moment editor on the right at 32%, minimum 340 px, maximum 420 px.
 - Timeline spans the video column below the player and remains visible while the moment editor scrolls.
 - Background around the video is ink; the rest is paper. Keep the transition crisp, without gradient.
@@ -196,10 +200,10 @@ This is the signature desktop screen. It should resemble a focused editing bench
 
 - Heading displays “Moment 2 of 5” and the start/end time.
 - The route is scoped to one player; show that player's name and active goal as fixed context rather than a changeable select.
-- Judgment choice uses two radio-card rows: “You did this” and “Chance to do this.” Internal values remain `applied` and `opportunity`.
+- Judgment choice is a labelled fieldset with three visible native radio rows: “You did this” (`applied`), “Chance to do this” (`opportunity`), and “Not relevant” (`not_relevant`). The third includes “Kept for the coach; excluded from publishing.” All choices have accessible names, visible focus, standard radio-group keyboard behavior, and parity with shortcuts 1/2/3. Not relevant is coach-only.
 - Coach note is a plain textarea with the active goal nearby as context.
 - Use a soft character guidance message, not a punitive counter. One sentence is the writing target.
-- Actions: “Save moment” primary, “Delete draft” secondary-danger, previous/next as icon plus text.
+- Actions: “Save moment” primary, previous/next as icon plus text, and “Withdraw” for published evidence. Keep rejected drafts/history; ordinary editing has no destructive observation/history deletion control.
 - Draft save state is explicit: Saving…, Saved, or Could not save—Retry.
 
 ### Review keyboard map
@@ -222,9 +226,10 @@ Show the shortcut reference from a visible “Keyboard shortcuts” action. Do n
 ### Publish flow
 
 - The primary button includes the count: “Publish 4 clips.”
-- Preflight lists incomplete drafts and blocks publishing only for missing required fields or unavailable clip bounds.
+- Preflight requires 3–6 eligible items from one player/game/active goal, non-empty comments, valid bounds, expected versions/current publication, and no conflicting export, expiry, or deletion state.
 - Confirmation names the player and explains that the clips become visible after export.
-- After confirmation, the coach sees per-clip preparation state. The complete set remains player-invisible until every current clip is ready, then becomes visible in one transaction.
+- After confirmation, show per-clip preparation state. First publication stays invisible until every clip is ready. For replacement, the old sentence/verdict/clip set remains visible through edits, export, failure, or cancellation; one transaction switches the whole set on success.
+- Show “Unpublished changes. The player still sees the previous version.” after editing published content, including a draft change to Not relevant. Republish submits a complete ordered 3–6-item set pinned to versions; confirmation identifies omitted items. Lock reserved content controls while exporting and offer cancellation. Withdraw removes current access and cancels pending replacement; it may leave fewer than three clips.
 - Never imply all clips are published while an export is still pending.
 
 ## Player mobile experience
@@ -255,14 +260,16 @@ Design from 320–430 px first. It must work at 200% text zoom without horizonta
 - Label: “What did you notice? (optional)”
 - One multiline field, “Save reflection,” and a quiet “Skip for now.”
 - Saved confirmation: “Reflection saved.”
-- The player can edit or remove their reflection while the related evidence remains available.
+- The player author can edit or permanently delete their reflection, including through “Your reflections” after evidence withdrawal while account access remains valid. Creation requires current evidence. Clear local text on deletion/sign-out and prevent old retries from recreating it; no text history is retained.
+- Label a reflection saved against an earlier published version “Written for an earlier version of this clip.” Never rewrite it when the coach republishes.
 - The coach can read the reflection but cannot edit it.
 
 ### Progress
 
-- Show past development goals and evidence sets in reverse chronological order.
+- Show the active goal and past goals, with evidence grouped by game in reverse chronological order. Use filled/outlined dots as discrete clip links with a text legend, matching `docs/05-ui.md`; these are not statistical charts.
 - Each item contains the goal text, match/date, clip count as ordinary metadata, and the player's reflection when present.
 - No charts, percentages, streaks, comparisons, score colors, or “improvement” claims.
+- “Your reflections” includes own withdrawn-evidence entries labelled “Clip unavailable,” without withdrawn coach text/media; allow author edit/delete. A publication-version mismatch refreshes the whole evidence set before pairing text with video.
 
 ## Components
 

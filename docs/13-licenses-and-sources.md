@@ -22,8 +22,8 @@ The Shoulder adapter and artifact schema should be implementation-independent so
 
 ### Fonts and icons
 
-- Obtain Inter Tight from an official source, retain its license text, self-host only the required variable/static files, and record the exact version.
-- The supplied Shoulder mark/wordmark is treated as user-provided brand artwork. Obtain the original vector source and confirm ownership/usage rights before public release.
+- Before Task 1, obtain licensed local Inter Tight files covering weights 400/500/600 from an official source, retain license text and provenance, and record the exact version. These files are not included yet.
+- The supplied Shoulder PNG is reference artwork only. The original vector source, usage approval, and all SVG variants in `docs/08-brand.md` are owner-provided pre-Task-1 inputs, currently missing. Raster derivatives can be exported later from approved vectors before use.
 - If a UI icon library is added, choose one consistent set, pin its version, preserve its license notice, and document why native/text controls were insufficient. Do not mix icon libraries.
 
 ### Media and test data

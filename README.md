@@ -45,6 +45,8 @@ Claude Code loads `CLAUDE.md`, which imports `AGENTS.md`. Codex loads `AGENTS.md
 
 This is a planning and build-handoff package. It intentionally contains no application implementation, generated migrations, credentials, datasets, model weights, or vendored SoccerMaster code.
 
+The initial handoff is committed/pushed to the configured GitHub repository. Documentation reconciliation adds decisions D15–D20 and ADRs 0006–0011; see `docs/00-decisions.md` for the authoritative rules. Task 1 remains the first implementation task, but it cannot start until the owner-provided vector/font inputs and repository visibility listed in `STATUS.md` are confirmed. The PNG reference does not satisfy the production-asset gate.
+
 ## Product boundary in one sentence
 
 The software retrieves evidence; the coach decides what it means.

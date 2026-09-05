@@ -12,6 +12,8 @@ FastAPI validates the bearer JWT, starts a transaction, and sets `app.user_id` t
 
 Do not use `user_metadata` for authorization. Team roles come from `team_membership`.
 
+Task 3 validates session identity only. Task 4 creates the four core tables (`user_account`, `team`, `team_membership`, `player`) together with baseline RLS, runtime-role isolation tests, and role-aware `/v1/me`; Task 5 extends that harness. Later tables arrive in their owning tasks with the same protection. The initial coach/team membership is created through a documented, restricted operator bootstrap transaction, never from signup metadata. An authenticated but unlinked account has no product permissions. See `docs/decisions/0006-foundation-auth-and-rls-sequence.md`.
+
 ## Entity relationship
 
 ```text
@@ -28,6 +30,7 @@ video ──< observation >─────────────────�
              └──< judgment >────────────────────────────────────────────┘
                       ├──< review_publication_item >── review_publication
                       ├──< evidence_clip
+                      ├──< judgment_revision
                       └──1 player_reflection
 ```
 
@@ -53,6 +56,7 @@ The Auth-to-profile synchronization function lives in `private`, sets `search_pa
 | `name` | text | non-null; 1–100 characters |
 | `age_group` | text | optional; 1–40 characters |
 | `season_label` | text | non-null; 1–60 characters |
+| `season_end_at` | timestamptz | non-null owner-confirmed end of this workspace's season; retention deadline is +365 days |
 | `created_by` | uuid | non-null FK `user_account` |
 | `created_at` | timestamptz | non-null |
 
@@ -67,6 +71,8 @@ The Auth-to-profile synchronization function lives in `private`, sets `search_pa
 
 Index `user_id`. A player invitation links `player.user_id` and creates the matching player membership in one transaction.
 
+The initial workspace represents one season. Once product data exists, `season_end_at` cannot be extended; shortening requires an explicit operator impact review. Membership changes never grant the user the ability to extend retention.
+
 ### `player`
 
 | Column | Type | Rules |
@@ -80,6 +86,7 @@ Index `user_id`. A player invitation links `player.user_id` and creates the matc
 | `active` | boolean | non-null; default true |
 | `created_at` | timestamptz | non-null |
 | `deleted_at` | timestamptz | nullable |
+| `deletion_pending_at` | timestamptz | nullable; blocks normal access and delayed publication |
 
 Indexes: `team_id`; partial unique active jersey per team; partial unique `(team_id, user_id)` when `user_id` is not null.
 
@@ -102,10 +109,12 @@ The coach can build a roster before collecting any player's email. Linking an ac
 | `content_type`, `size_bytes`, `sha256` | validation and resume matching |
 | `multipart_upload_id` | nullable operational state; never returned after completion |
 | `duration_ms`, `width`, `height`, `fps` | probed metadata |
-| `status` | `uploading`, `uploaded`, `processing`, `ready`, `failed`, `deleted` |
+| `status` | `uploading`, `uploaded`, `processing`, `ready`, `failed`, `deletion_pending`, `deleted` |
 | `uploaded_by`, `created_at`, `ready_at`, `deleted_at` | audit and lifecycle |
+| `upload_completed_at`, `first_terminal_failure_at` | nullable until applicable; server-set once, never reset by retry |
+| `source_expires_at`, `derivatives_expires_at` | persisted deadlines from `docs/10-security-privacy.md`; never extended by retries |
 
-Indexes: `game_id`, `status`. The state machine rejects backward transitions except explicit retry from `failed` to `processing`.
+Indexes: `game_id`, `status`, and expiry deadlines. The state machine rejects backward transitions except explicit retry from `failed` to `processing` before expiry. At an expiry deadline the resource becomes inaccessible; deletion failures are retried and alerted, never reported as completion. Deletion-pending/deleted targets cannot be retried or published.
 
 ### `video_upload_part`
 
@@ -165,34 +174,41 @@ Partial index `(available_at, created_at)` where status is queued. Index every n
 | `created_by` | nullable only for system-generated CV candidates |
 | `created_at` | non-null |
 
-Indexes: `(video_id, player_id, t_start_ms)` and `(video_id, source)`. Observation rows are append-only. A rejected candidate remains for later precision measurement.
+Indexes: `(video_id, player_id, t_start_ms)` and `(video_id, source)`. Observation rows are append-only in ordinary use; governed erasure and the Phase D provenance exception below are allowed. A rejected candidate remains for later precision measurement only within its retention deadline.
 
 ### `judgment`
 
 | Column | Rules |
 |---|---|
 | `id` | uuid PK |
-| `observation_id` | non-null FK observation |
+| `observation_id` | non-null FK observation, `ON DELETE RESTRICT`; stable after creation |
 | `goal_id` | non-null FK development goal |
 | `author_user_id` | non-null FK user account; server-derived only |
-| `verdict` | `applied`, `opportunity`, `not_relevant` |
-| `comment_text` | nullable in draft; 1–400 characters when published |
-| `clip_start_ms`, `clip_end_ms` | required for exporting; end greater than start |
-| `publication_status` | `draft`, `exporting`, `published`, `withdrawn`, `failed` |
+| `version` | bigint, positive; starts at 1; latest content revision, increments by exactly one per accepted edit |
+| `publication_status` | `draft`, `published`, `withdrawn`; export/failure belongs to `review_publication`, not this visibility field |
+| `current_publication_id` | nullable FK review publication; server-managed |
+| `current_revision_id` | nullable FK judgment revision; exact player-visible snapshot |
 | `current_clip_id` | nullable unique FK to the current ready `evidence_clip`; server-managed |
 | `published_at`, `updated_at`, `created_at` | timestamps |
 
-Unique `(observation_id, goal_id)`. Check that `not_relevant` can never have `publication_status='published'`. Index `(goal_id, published_at desc)`.
+Unique `(observation_id, goal_id)`. Index `(goal_id, published_at desc)` and every FK. `goal_id`, observation, and author cannot be retargeted by edit. A deferred constraint/transactional write ensures `(id, version)` resolves to the latest immutable revision. All three current pointers are non-null exactly when `publication_status='published'`; otherwise they are null. Add publication/clip FKs only in Task 17, after the target tables exist.
 
-Publication is a state machine. The API sets all judgments in one requested set to `exporting`; each successful export creates an evidence clip and attaches it to the corresponding publication item. Only after every item in the three-to-six-judgment set is ready does one transaction switch every `current_clip_id`, set the complete set to `published`, and publish the batch. A player policy checks both judgment and publication state, not a client-controlled Boolean. The migration adds the `current_clip_id` foreign key after `evidence_clip` exists.
+### `judgment_revision`
+
+`id` (UUID PK), `judgment_id` (non-null FK), `version` (positive bigint), `author_user_id` (non-null FK, session-derived original author), `verdict`, `comment_text`, `clip_start_ms`, `clip_end_ms`, `created_at`. Unique `(judgment_id, version)`; index all FKs. Verdict is `applied`, `opportunity`, or `not_relevant`; draft comment may be null, otherwise 1–400 characters. Bounds are non-negative integer milliseconds, end greater than start and inside source duration. Publishing requires a non-empty comment and valid bounds.
+
+Creation writes judgment and revision 1 atomically. Every content-changing edit locks the judgment, checks `If-Match`, increments `version`, and inserts a full snapshot in one transaction; no-op/replayed saves create no new revision. The original author must still coach the team. Ordinary roles cannot update/delete revision rows or change identity/version fields directly; a narrow transactional write path enforces these invariants in addition to RLS. System publication-pointer transitions do not constitute content edits. Verified retention/erasure may delete history; no reflection text belongs in it.
+
+Players may SELECT only the revision named by an accessible judgment's `current_revision_id`. Latest draft text/verdict/bounds must not be duplicated on the player-readable `judgment` row. An old published `applied` revision can remain visible while the latest coach draft is `not_relevant`; the published pointer must never name a `not_relevant` revision. Test both direct runtime-role access and DTO projection.
 
 ### `evidence_clip`
 
-`id`, `judgment_id`, `version`, `storage_key`, `duration_ms`, `size_bytes`, `sha256`, `status`, `created_at`, `ready_at`, `deleted_at`.
+`id`, `judgment_id`, `judgment_revision_id`, `version`, `storage_key`, `duration_ms`, `size_bytes`, `sha256`, `status`, `created_at`, `ready_at`, `deleted_at`. Revision FK is non-null and indexed; it must belong to the same judgment. Status is `pending`, `ready`, `failed`, or `deleted`.
 
 - Unique `(judgment_id, version)`.
 - At most one current version, selected only by `judgment.current_clip_id` after the related publication succeeds.
 - Storage key is returned only through an authorized signing service; never directly in player DTOs.
+- Clip version is distinct from judgment version and never reused for different bytes/revisions. A changed revision always gets a new isolated object, including comment-only changes; an unchanged revision may reuse its matching ready clip.
 
 ### `review_publication`
 
@@ -202,26 +218,34 @@ Publication is a state machine. The API sets all judgments in one requested set 
 | `game_id`, `player_id`, `goal_id` | non-null FKs; the service verifies one consistent review context |
 | `requested_by` | non-null FK `user_account`; server-derived |
 | `idempotency_key` | non-null unique |
-| `status` | `exporting`, `published`, `failed`, `withdrawn` |
+| `status` | `exporting`, `published`, `failed`, `cancelled`, `superseded`, `withdrawn` |
+| `replaces_publication_id` | nullable indexed self-FK; must equal the current publication for a replacement |
+| `first_terminal_failure_at`, `cancelled_at`, `private_exports_expires_at` | server-set cleanup clocks; retries never extend the deadline |
 | `requested_count` | smallint; check 3 through 6 |
 | `created_at`, `updated_at`, `published_at` | timestamps |
 
-Index `(player_id, published_at desc)` and `(game_id, player_id)`. A failed item makes the publication `failed` but leaves every draft and successfully exported private object recoverable for retry. Repeating the same idempotency key returns this row rather than creating another batch.
+Index `(player_id, published_at desc)` and `(game_id, player_id)`. Partial unique indexes on `(game_id, player_id)` separately permit at most one `published` and one `exporting` row. A failed item makes the new publication `failed`; the old published set remains unchanged. Retain recoverable private exports only until their cleanup deadline. Replaying the same idempotency key returns this row; payload mismatch returns 409.
+
+Lock the player/game context and affected judgments in a deterministic order. Reserve the requested revisions while exporting: content edits return 409 until failure, cancellation, or completion. Retry must reacquire these locks, verify no conflicting request and that pinned versions are still latest, and preserve the pinned revisions; otherwise return 409 and require a new request. At finalization revalidate membership, active goal, deadlines, withdrawal/deletion state, and the expected predecessor publication. A concurrent withdrawal cancels any pending replacement and invalidates finalization, including retries of previously failed requests.
+
+One transaction marks the predecessor `superseded`, clears current pointers on omitted judgments, sets omitted judgments to `withdrawn`, switches retained/new judgments to their requested revision/clip/publication, and marks the new publication `published`. Until then the old set remains the only player-visible set. The first publication has no old set and stays invisible until ready. Single-judgment withdrawal clears its pointers immediately and leaves remaining items visible; when none remain the publication is `withdrawn`. In that same locked transaction, mark every exporting or retryable failed request for this player/game `cancelled`; old retries cannot restore access. Withdrawal may reduce visible count below three; every new/replacement request still contains 3–6. A replacement after all items are withdrawn has no current predecessor. See ADR 0008 in `docs/decisions/0008-judgment-revisions-and-republication.md`.
 
 ### `review_publication_item`
 
-`publication_id`, `judgment_id`, `ordinal`, `requested_clip_version`, nullable `evidence_clip_id`, `created_at`, `updated_at`.
+`publication_id`, `judgment_id`, `judgment_revision_id`, `ordinal`, `requested_clip_version`, nullable `evidence_clip_id`, `created_at`, `updated_at`. Revision is a non-null indexed FK; it pins the complete requested snapshot.
 
 - Primary key `(publication_id, judgment_id)`.
 - Unique `(publication_id, ordinal)` with ordinal bounded from 1 through 6.
 - `evidence_clip_id` is set only after checksum and boundary validation succeed.
-- The evidence clip must belong to the same judgment and requested version; enforce transactionally and test it.
-- Items are immutable except for attaching or replacing the requested clip during an explicit retry.
+- The evidence clip must belong to the same judgment, pinned revision, and requested clip version; enforce transactionally and test it.
+- Items are immutable except for attaching a verified matching clip during export/retry. A retry cannot change revision, order, or requested version; changing the set requires cancellation and a new request.
 - A judgment may belong to only one nonterminal (`exporting`) publication at a time. Enforce this with a transaction-level advisory lock or equivalent database-backed serialization keyed by judgment ID; do not rely on an in-process mutex.
 
 ### `player_reflection`
 
-`id`, `judgment_id`, `player_id`, `text`, `created_at`, `updated_at`; unique `judgment_id`; 1–1,000 characters. The service verifies that the authenticated player's linked `player.id` matches the judgment's goal owner. Removing a reflection deletes this row and records only the allowed operational event.
+`id`, `judgment_id`, `player_id`, `text`, `judgment_version_at_save`, `created_at`, `updated_at`; unique `judgment_id`; text 1–1,000 characters; saved version is a positive bigint, server-derived from the visible revision. Index every FK. The service verifies that the authenticated player's linked `player.id` matches the judgment's goal owner. Only that player creates/edits/deletes; coaches read only. Identity fields cannot be retargeted. Creation requires current visible evidence; existing rows remain author-readable/editable/deletable after withdrawal while the account retains access. When editing without current evidence, retain the last saved version marker.
+
+Text is replaced in place with no text history. Permanent deletion removes the active row plus caches and queued copies; record only a content-free deletion/replay marker. Every save requires an idempotency key, a request creation timestamp no older than seven days, and the expected existing reflection ID/row ETag (or explicit create intent). An edit to a missing ID fails; it never becomes a create. Serialize save/delete so an old retry cannot resurrect a removed reflection; a deliberate new create uses a new key and requires visible evidence. Superseded saves likewise cannot overwrite newer text. See `docs/decisions/0007-author-controlled-reflections.md` and backup limits in `docs/10-security-privacy.md`.
 
 ## Deferred CV tables
 
@@ -234,6 +258,8 @@ Index `(player_id, published_at desc)` and `(game_id, player_id)`. A failed item
 `id`, `cv_run_id`, `track_ref`, `t_start_ms`, `t_end_ms`, `role`, `team_side`, advisory jersey fields, nullable coach-assigned `player_id`; unique `(cv_run_id, track_ref)`. No appearance embedding columns.
 
 Per-frame trajectories stay in Parquet in R2.
+
+The Phase D deletion exception is specified only for later implementation in `docs/07-cv.md` and ADR 0011. It retains referenced observations with cleared machine provenance; it never makes `judgment.observation_id` nullable. No CV schema is introduced during Tasks 1–22.
 
 ## Operational event table
 
@@ -249,15 +275,18 @@ Per-frame trajectories stay in Parquet in R2.
 | `game` | coached teams | no direct access |
 | `video`, `video_upload_part`, `video_segment`, `processing_job` | coached teams | no access |
 | `development_goal` | coached-team CRUD | own goals read-only |
-| `observation` | coached-team CRUD/append | no access |
-| `judgment` | coached-team author CRUD | own `published` rows read-only |
-| `review_publication`, `review_publication_item` | coached-team read/create/update through service state machine | own published rows read-only |
-| `evidence_clip` | coached teams | own ready clip for a published judgment |
-| `player_reflection` | coached teams read | own insert/read/update/delete |
+| `observation` | coached-team read/append; deletion only through governed cleanup | no access |
+| `judgment` | coached-team read; original author content edits through revision write path | own currently published identity/pointer rows read-only |
+| `judgment_revision` | coached-team read; original author append through transactional write path; no ordinary update/delete | only the exact current published revision of own judgment |
+| `review_publication`, `review_publication_item` | coached-team service state machine | own current published set/items whose judgment pointers still select them |
+| `evidence_clip` | coached teams | only own current ready clip matching current published revision/item |
+| `player_reflection` | coached teams read only; no insert/update/delete | own insert on visible evidence; own read/update/delete including after withdrawal |
 | `cv_run`, `player_track` | coached teams | no access |
 | `product_event` | service-only writes; limited operator reads | no direct access |
 
 Use separate SELECT, INSERT, UPDATE, and DELETE policies when their predicates differ. UPDATE requires both `USING` and `WITH CHECK`. Enable and force RLS on protected application tables, and test through the same database role used in production.
+
+Reflection UPDATE needs an owner SELECT policy and `USING`/`WITH CHECK`; server-derived player/judgment identity cannot change. Any view projecting published revisions must be security-invoker and preserve underlying RLS. Restricted content-free replay/deletion manifests also contain player/event data: their owning task must provide RLS and isolation tests, with no ordinary player or coach access. Narrow cleanup privileges do not grant general history editing.
 
 ## Invariants enforced in service and test
 
@@ -266,14 +295,14 @@ Some cross-table rules cannot be a simple check constraint and must be transacti
 - Judgment goal and observation belong to the same player.
 - Observation player belongs to the video's game team.
 - Clip boundaries remain inside video duration.
-- No more than six judgments per player/game become published.
+- No more than six judgments per player/game are current and visible; historical superseded publications are not additional evidence.
 - A publication contains exactly 3–6 distinct judgments from the same player, game, and active goal.
 - Concurrent requests cannot place the same judgment in two nonterminal publications.
-- A judgment becomes published only when every item in its explicit publication is attached to a ready evidence clip.
-- One transaction switches all current clip pointers and publishes the complete set; partial visibility is impossible.
+- A judgment becomes published only when every item in its explicit publication is attached to a ready evidence clip matching its pinned human revision. Every current publication/revision/clip pointer must resolve to the same judgment and requested item; validate transactionally and test cross-judgment pointer spoofing.
+- One transaction switches all current revision/clip/publication pointers and publishes the complete set; partial visibility or mixed old/new text and clips is impossible.
 - Player URL signing resolves only the current evidence clip object.
 - Linking a player account creates a matching player team membership.
 
 ## Deletion
 
-Normal roster removal sets `player.deleted_at` and blocks access. A verified hard-delete job removes dependent product rows and R2 objects, then deletes or anonymizes operational events. The deletion test begins with raw, playback, thumbnail, clip, and CV artifact objects and proves none remain.
+Normal roster removal sets `active=false` and `deleted_at`, revokes membership/access, and does not claim erasure. Verified erasure marks `deletion_pending_at`, fences all affected video jobs/signing, and uses a restricted durable deletion manifest. The default shared-footage scope includes every stored video for that player's team and all video-dependent observations, judgments, revisions, publication items, clips, and reflections, including other players' affected evidence. Delete dependent rows in FK-safe order; remove empty publications. Preserve unrelated goals/accounts only after operator personal-data review. The manifest survives deletion of job target FKs until object absence and restore replay are verified; it contains IDs/object keys only, no content or signed URLs, and is never logged or user-visible. Task 22 owns its RLS and bounded retention. See the deadlines and operator confirmation requirements in `docs/10-security-privacy.md`.

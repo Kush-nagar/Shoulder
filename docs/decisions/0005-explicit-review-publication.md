@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-08-24
 
+Extended on 2026-09-04 by [ADR 0008](0008-judgment-revisions-and-republication.md): publication pins immutable human revisions as well as clip versions; replacement preserves the preceding visible set until an atomic swap and serializes by player/game as well as judgment. Read the extension with this original decision.
+
 ## Context
 
 Publishing is a three-to-six-clip operation. A collection of independent judgment and worker rows does not durably identify the exact requested set, order, idempotency key, or readiness state after retries and worker restarts. That ambiguity can create duplicate jobs or partial player visibility.

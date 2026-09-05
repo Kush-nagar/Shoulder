@@ -11,22 +11,24 @@ These are Next.js routes because Next.js owns cookies and the PKCE callback.
 | Method | Browser route | Purpose |
 |---|---|---|
 | POST | `/auth/magic-link` | Request sign-in email; rate-limited; generic response |
-| GET | `/auth/callback` | Exchange verified code, set secure session, redirect by role |
+| GET | `/auth/callback` | Exchange verified code, set secure session; role routing is added in Task 4 |
 | POST | `/auth/sign-out` | Revoke local session and clear cookies |
 
-FastAPI exposes:
+Task 3 proves verified session identity through auth-boundary integration tests, without a role-aware product endpoint or placeholder role. It can render a neutral signed-in state with no product access. Task 4 completes the following FastAPI endpoint and role routing after its protected identity/membership schema exists:
 
 | Method | Route | Auth | Response |
 |---|---|---|---|
-| GET | `/v1/me` | coach/player | User, allowed roles, linked player, team IDs |
+| GET | `/v1/me` | verified identity | User, database-derived allowed roles, linked player, team IDs; unlinked account has empty roles/teams and no product access |
 
 Do not trust a cookie's user object without validating claims. Do not put team roles in editable metadata.
+
+Task 4 includes the restricted operator-only initial coach/team bootstrap, matching membership and account linkage, and revoked-membership acceptance tests. Auth signup alone never grants a coach role.
 
 ## Teams and roster
 
 | Method | Route | Auth | Request / behavior |
 |---|---|---|---|
-| POST | `/v1/teams` | coach | Create the initial team |
+| POST | `/v1/teams` | authorized operator bootstrap | Create the single initial team and designated coach membership atomically only when none exists; no public role elevation |
 | GET | `/v1/teams` | both | Only memberships visible through RLS |
 | GET | `/v1/teams/{team_id}/players` | coach | Active roster only by default |
 | POST | `/v1/teams/{team_id}/players` | coach | Name, optional number and position |
@@ -77,21 +79,28 @@ An `ontology_key` is optional and coach-invisible unless useful. It never restri
 | POST | `/v1/observations/{observation_id}/judgments` | coach | Goal, verdict, comment, clip bounds; author from session |
 | PATCH | `/v1/judgments/{judgment_id}` | coach author/team | Updates allowed draft fields with optimistic version |
 | POST | `/v1/reviews/{game_id}/{player_id}/publish` | coach | Three to six ordered judgment IDs -> `review_publication` export batch |
-| POST | `/v1/judgments/{judgment_id}/withdraw` | coach | Removes player visibility and expires future signing |
+| POST | `/v1/judgments/{judgment_id}/withdraw` | team coach | Clears current visibility, cancels pending replacement for player/game, and blocks future signing |
+| GET | `/v1/judgments/{judgment_id}/revisions` | team coach | Immutable revision history; player access denied |
+| GET | `/v1/review-publications/{publication_id}` | team coach | Ordered pinned revisions, aggregate status, retry/cancel state |
+| POST | `/v1/review-publications/{publication_id}/cancel` | team coach | Cancels pending export/retry without changing the previous published set |
 
 Publish rules:
 
-- All judgments belong to the same player, game, and active goal.
+- All judgments belong to the same player, game, and active goal. Closed goals permit withdrawal but cannot publish until explicitly reactivated within the one-active-goal rule.
 - Count is 3–6.
 - `not_relevant` is rejected.
 - Every item has a non-empty coach comment and valid clip boundaries.
-- No requested judgment is already reserved by another nonterminal publication; the service serializes this check in Postgres.
+- Each ordered item carries `judgment_id` and the expected `version`. The server resolves and pins that immutable revision. A stale version returns 409. A replacement also names `replaces_publication_id`, which must equal the current set for this player/game and goal; first publication requires no current set. One current set per player/game enforces the six-clip cap across requests.
+- Serialize both the player/game context and overlapping judgments in Postgres. Only one exporting request per context is allowed. While a judgment is reserved, content edits return 409. A changed set requires cancelling the pending publication and a new request; retry preserves the exact pinned versions and order.
 - Request requires an idempotency key; replay returns the same publication.
+- Retrying a failed export reacquires reservations and verifies that every pinned version is still latest and no intervening withdrawal, expiry, or predecessor change occurred. Otherwise return 409 and require a deliberate new publication; retry never revives an invalidated request.
 - Response is `202` with the `review_publication`, ordered items, and sanitized aggregate state.
-- The complete requested set stays `exporting` and player-invisible until every current clip exists; one database transaction then publishes the set.
+- The requested publication stays `exporting` and its new snapshots remain player-invisible until every pinned clip exists. On replacement, the old publication remains visible with its old text/verdicts/clips through editing, export, failure, and cancellation. One transaction supersedes the old set, switches all current revision/clip pointers, and removes omitted items. Revalidate current membership, active goal, predecessor, expiry, and deletion/withdrawal state before finalization.
 - Email sends once after the complete set is published, not once per clip.
 
-Draft updates carry a version or `If-Match` value. A stale write returns `409` with enough information to recover without discarding local edits.
+Judgment creation writes revision 1. PATCH requires `If-Match` for the latest positive integer `version`, returns the new version/ETag, and appends a full immutable revision on every content change. Missing precondition returns 428; stale version returns 409 with the latest coach-authorized snapshot for conflict recovery. No-op or idempotent replay does not increment. Only the original author with current team authorization may edit. Observation, goal, author, version, and publication pointers are server-managed. Coach DTOs clearly distinguish latest draft from currently published revision.
+
+Any published-content change, even only a sentence, requires explicit full-set republication. Worker exports consume the pinned revision; changed revisions get new isolated clip objects. Withdrawal immediately prevents new reads/signing, even if this leaves fewer than three clips, and cancels pending replacement so a delayed job cannot republish it. Already issued player URLs expire within five minutes; obsolete objects are removed within 24 hours. Replaying a request key with different content returns 409.
 
 ## Player-facing routes
 
@@ -99,11 +108,14 @@ Draft updates carry a version or `If-Match` value. A stale write returns `409` w
 |---|---|---|---|
 | GET | `/v1/me/goals` | player | Own goals only |
 | GET | `/v1/me/goals/{goal_id}/evidence` | player | Own published judgments grouped by game; no rejected rows |
-| POST | `/v1/me/judgments/{judgment_id}/clip-url` | player | Signs only the current ready `evidence_clip` object |
-| PUT | `/v1/me/judgments/{judgment_id}/reflection` | player | Create or replace optional own reflection; one per judgment |
-| DELETE | `/v1/me/judgments/{judgment_id}/reflection` | player | Remove own reflection idempotently |
+| POST | `/v1/me/judgments/{judgment_id}/clip-url` | player | Expected published revision ID; signs only its current ready isolated clip, maximum five-minute URL |
+| GET | `/v1/me/reflections` | player | Own reflections, including those whose evidence was withdrawn; no withdrawn coach text/media |
+| PUT | `/v1/me/judgments/{judgment_id}/reflection` | player author | Explicit create or edit intent, text, expected row ID/ETag, request creation timestamp within seven days, and idempotency key; one per judgment |
+| DELETE | `/v1/me/judgments/{judgment_id}/reflection` | player author | Permanently delete own reflection and invalidate old saves; idempotent, including after evidence withdrawal |
 
-The evidence DTO contains the coach's display name, player-safe verdict copy, comment, game label, clip duration, and judgment ID. It does not contain `video_id`, original storage keys, coach playback URLs, CV confidence, CV features, team totals, or other players.
+The evidence DTO contains the coach's display name, player-safe verdict copy, comment, game label, clip duration, judgment ID, and published revision ID. Text/verdict/bounds come only from `current_revision_id`, never the latest draft. It does not contain `video_id`, original storage keys, coach playback URLs, CV confidence, CV features, team totals, draft history, or other players. If clip signing's expected published revision no longer matches, return 409 and refresh the entire evidence set; never pair old text with a replacement clip.
+
+Reflection creation requires visible evidence; editing/deleting an existing own row remains allowed after withdrawal while account access remains valid. Coach text and URLs stay hidden. Identity fields are server-derived and immutable. Capture the current published version at save time, or retain its last marker if no evidence is current; indicate an older reflection after republication without revealing old coach revisions. Edits retain no text history. DELETE removes live/cached/queued text and records only bounded content-free replay metadata. Serialize save/delete; an old save retry cannot recreate a deleted row or overwrite a newer edit. A deliberate new create uses a new key and visible evidence. The API reports 204 only after active deletion; backup limits and restore replay follow `docs/10-security-privacy.md`.
 
 ## Coach development record
 
@@ -125,6 +137,8 @@ The development route never returns a percentage, average, score, predicted tren
 | DELETE | `/v1/players/{player_id}/data` | authorized operator | Confirmed hard-delete workflow, async |
 
 Destructive routes require recent authentication and an explicit confirmation challenge. Do not expose them to ordinary player UI without an approved request process.
+
+The operator player-data deletion challenge enumerates the conservative shared-footage impact: all stored team videos and all dependent evidence, including other players' affected clips. Start by fencing access/exports; preserve a restricted manifest until objects, FK-ordered rows, and restore suppression reconcile. Unrelated accounts/goals require operator personal-data review before retention. A roster archive is access removal, not erasure. See ADR 0009 in `docs/decisions/0009-retention-and-shared-footage-deletion.md`. Ordinary author reflection deletion uses its dedicated route and does not require this operator challenge.
 
 ## Deferred CV ingest
 

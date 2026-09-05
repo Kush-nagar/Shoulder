@@ -38,6 +38,8 @@ Verify:
 - Missing `app.user_id`, malformed UUID context, and an expired JWT fail closed.
 - Unauthorized resource IDs do not disclose whether the row exists.
 - The Supabase Data API cannot address the `app` schema, and runtime roles have only the intended schema/table/function grants.
+- Task 4 already runs positive and negative runtime-role tests for every table it creates; Task 5 extends that mandatory suite. Task 3 tests identity without granting roles. Include operator-only coach bootstrap, unlinked identities, role-aware `/v1/me`, and next-request membership revocation in Task 4.
+- A player cannot read the latest draft or any historical `judgment_revision`; only the snapshot selected by a current published judgment is accessible. Test a latest `not_relevant` draft with an older published `applied` snapshot and RLS-preserving player projections.
 
 ### 2. Player media boundary
 
@@ -46,6 +48,7 @@ Verify:
 - A copied/expired URL fails after its lifetime.
 - The player page source, logs, and analytics contain no coach playback key or signed URL.
 - HTTP Range requests work on a valid player clip without broadening object access.
+- Player URLs last at most five minutes; coach playback URLs at most fifteen. Withdrawal/swap blocks new signing immediately; previously issued URLs are tested for bounded residual access, not instant revocation. Clip signing with an old expected revision returns 409 and refreshes the whole evidence set.
 
 ### 3. Draft durability
 
@@ -54,6 +57,14 @@ Verify:
 - Exercise offline-to-online transition with a visible unsaved state.
 - Concurrent edits produce an explicit conflict or version failure, not last-write data loss.
 - Closing a dialog or navigating with unsaved text warns the coach.
+
+### Judgment revisions and reflection mutation
+
+- Creation writes revision 1; every accepted content edit increments exactly once and creates a full immutable snapshot in the same transaction. A no-op/replay does not increment. Stale/missing `If-Match` returns 409/428; concurrent edits cannot both win or leave history gaps.
+- The original human author comes from the session; other coaches cannot edit their judgment even on the same team. Ordinary revision update/delete fails; verified erasure is the controlled exception.
+- Player authors can create/edit/permanently delete their own reflection; coaches can read but cannot mutate, and other players cannot read or mutate. Creation needs current evidence; existing reflections remain manageable after withdrawal while account access is valid.
+- Reflective text has no history in revision rows, events, mail, job payloads, or replay records. Delete clears live/cached/queued text. Save/delete races and stale retries cannot resurrect deleted rows or overwrite newer edits; explicit new creation uses a new key.
+- Republication preserves player-authored reflection text and labels its saved-version context accurately. Skip is neutral and never gates playback.
 
 ### 4. Deterministic CV artifact
 
@@ -110,11 +121,12 @@ Verify:
 - Duration stays within an approved tolerance of the source.
 - Requested clip start/end are clamped to the source and re-encoded accurately.
 - A clip contains no meaningful footage outside the approved privacy tolerance.
-- The complete requested set stays hidden until every current clip version is ready, then becomes visible atomically.
+- First publication stays hidden until all pinned clips are ready. During replacement, the previous published text/verdict/clip set remains unchanged; success switches the complete set atomically and clears omitted items. Failed/cancelled replacement never changes old visibility.
 - The explicit publication and ordered items survive a worker restart, an idempotent retry reuses them, and a partial failure exposes none of the set.
-- Two concurrent publish requests with an overlapping judgment cannot create two active publications or two competing current-clip swaps.
-- A replaced judgment produces a new clip version; stale versions are not signed and are eventually deleted.
-- Worker timeout, cancellation, crash, heartbeat expiry, retry, and terminal failure leave the original recoverable.
+- Concurrent overlapping or disjoint requests for the same player/game cannot create two exporting or current published sets. Verify stale predecessor and version rejection, and the six-clip cap across replacement requests.
+- A changed judgment revision produces a new clip version even on a comment-only change; unchanged revisions may reuse matching ready objects. Validate item/revision/clip ownership and version, old URL expiry, and obsolete-object deletion within 24 hours after losing current references.
+- Reserved judgments reject edits during export. Cancellation/retry preserves or releases the pinned set correctly; delayed withdrawal/deletion/expired jobs cannot restore visibility. Withdrawal may leave fewer than three visible clips while new requests still require 3–6.
+- Worker timeout, cancellation, crash, heartbeat expiry, retry, and terminal failure leave the original recoverable only within its bounded retention deadline; retries never reset the clock.
 
 Task 11 must measure a full 90-minute 720p output on normal broadband: first frame, random seek p75, bytes transferred, browser memory, and failure/retry behavior. If the architecture misses its budgets, write an ADR before adding HLS.
 
@@ -127,6 +139,7 @@ Task 11 must measure a full 90-minute 720p output on normal broadband: first fra
 - Visual diffs are reviewed; they are not blindly updated.
 - Test 200% zoom, large text, reduced motion, high contrast where supported, keyboard-only navigation, and screen reader announcements.
 - Run automated accessibility checks, then manually test video controls, timeline, dialogs, and player clip navigation.
+- Before Task 1, verify receipt of approved vector assets and licensed/versioned Inter Tight files in `assets/README.md`. Check that review has no global rail at every viewport, and all three verdict choices (including coach-only Not relevant) are visible, labelled, focusable, and operable without shortcuts. Use the shared dashboard order and discrete evidence-dot semantics in `docs/05-ui.md`.
 
 ## Performance testing
 
@@ -157,6 +170,16 @@ Bundle budgets should be set after the first measured shell, then kept explicit 
 - Non-retryable validation failures surface a plain coach-facing recovery path.
 - Restore a sanitized database backup and verify object/database reconciliation in a drill.
 
+### Retention and erasure acceptance
+
+Use a controlled clock and synthetic data. Verify seven-day incomplete-upload expiry, 24-hour rejected-media cleanup, first-terminal-failure +7-day and upload-completion +14-day processing cutoffs, successful retry before expiry, and the absolute source upload-completion +90-day cap. Verify the earliest applicable season/erasure deadline wins, retries never extend it, and missing cleanup keeps access blocked and raises an unresolved failure.
+
+Test owner-confirmed `season_end_at +365 days` across current media, unpublished clips, drafts, revisions, observations, and reflections. Test failed/cancelled export cleanup, obsolete-object reference checks, and crash scratch cleanup. Reject extending a season cutoff after product data exists.
+
+Seed two players sharing a team video, both players' published clips, all revisions/reflections, raw/playback/thumb objects, and simulated CV artifacts. A verified player erasure must fence and remove all stored team videos and dependent evidence, including the other player's affected clips. Test FK-safe deletion, durable restricted manifests after target rows disappear, in-flight worker writes, second sweeps, partial failures, and no republishing. Only operator-reviewed unrelated accounts/goals remain. No text/media appears in manifests, events, mail, or logs.
+
+Before real data, record owner confirmation of collateral deletion, notice, season cutoff, operator, and actual provider backup expiry of at most 30 days. A restored backup must replay content-free deletion metadata before access, and cannot resurrect deleted reflections or media. Test manifest expiry after active cleanup and backup expiry; do not claim erasure complete while either is unresolved. These are engineering checks, not legal certifications.
+
 ## CV evaluation testing
 
 After the manual gate:
@@ -166,7 +189,7 @@ After the manual gate:
 - Evaluate by match, not random nearby frames.
 - Report recall, candidate burden, keep rate, tracklet purity, reproducibility, and measured coach time saved.
 - Keep raw confidence out of player/product ranking code.
-- Confirm deleting a CV run does not delete a coach-authored judgment.
+- In Phase D, verify the `docs/07-cv.md` deletion exception: referenced observations retain their mandatory judgment relationship with machine provenance cleared; only unreferenced observations are deleted. Test concurrent judgment creation, repeat cleanup, and intact immutable human revisions.
 
 ## CI stages
 

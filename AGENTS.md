@@ -16,7 +16,7 @@ The system may later retrieve candidate moments with computer vision. It never e
 4. **Players never receive full-match access.** Coach playback uses the coach-only playback object. Published player evidence uses a separate exported clip object.
 5. **No ML before the Phase D gate.** Tasks before the gate contain no inference call, ML dependency, embedding, VLM, LLM, or CV model.
 6. **No persistent biometric data.** Never store face embeddings, appearance embeddings, head-orientation profiles, or identity vectors for minors.
-7. **Protect the footage.** Buckets stay private; signed URLs are short-lived and object-specific; raw video expires after 90 days.
+7. **Protect the footage.** Buckets stay private; signed URLs are short-lived and object-specific; raw video expires no later than 90 days after upload completion, with earlier failure/deletion deadlines in `docs/10-security-privacy.md`.
 8. **Ship the smallest correct thing.** A single seekable 720p MP4 is the MVP coach playback format. Do not add HLS, Redis, Celery, GraphQL, Kubernetes, native apps, or microservices without an approved ADR.
 
 If a task conflicts with rules 1–4, stop and report the conflict. Do not implement around it.
@@ -65,6 +65,8 @@ During work:
 - Keep changes within the task. Do not opportunistically redesign adjacent systems.
 - Add no production dependency without recording why the platform cannot do the job safely without it.
 - Any schema change uses Alembic and includes RLS in the same task.
+- Task 4 includes baseline policies and runtime-role isolation tests; Task 5 extends them. Authentication identity in Task 3 does not authorize a team role.
+- Judgment edits increment a version and append an immutable revision. Player text and media come only from the published revision and clip pointers; edits require explicit republishing.
 - Product tables stay outside Supabase Data API exposed schemas; do not weaken this boundary to work around a permission error.
 - Public API types come from the FastAPI OpenAPI document; never hand-write duplicate TypeScript API types.
 - Update `STATUS.md` when the task is finished, blocked, or materially changed.
@@ -101,6 +103,7 @@ Never skip, weaken, or mark these expected-failure:
 - Never show `not_relevant` to players.
 - Avoid “failed,” “weak,” “incorrect,” “performance score,” “insights,” “unlock,” “level up,” “elite,” and “AI-powered.”
 - Reflections are optional and never gate the next clip.
+- Only the player author may create, edit, or permanently delete their own reflection; coaches can read but cannot edit it.
 - No badges, streaks, nudges, or engagement pressure.
 
 ## External CV code

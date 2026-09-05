@@ -23,7 +23,7 @@ The custom wordmark is fixed artwork. Do not re-create it by typing â€œshoulderâ
 
 ## Required production asset pack
 
-Before UI implementation is visually complete, create or obtain the following from the original vector source. Do not auto-trace the raster sheet and call it final.
+Before Task 1 starts, the owner must supply/approve the original vector source and every SVG variant listed below, plus local Inter Tight files covering weights 400/500/600 with license text, exact version, and provenance. Record receipt and usage approval in `assets/README.md` and `STATUS.md`. These inputs are currently absent. Raster derivatives listed below may be exported during frontend implementation from those approved vectors; they are required before their placements ship. Do not auto-trace the raster sheet and call it final.
 
 | Asset | Format | Color/background | Use |
 |---|---|---|---|

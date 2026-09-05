@@ -37,6 +37,8 @@ The BFF handles only session-aware JSON. Large uploads and media downloads go di
 
 Do not authorize from editable `user_metadata`. Team roles live in database rows.
 
+Build this boundary in two steps: Task 3 establishes verified session identity only, backed by Task 2 local Auth; Task 4 introduces protected identity/membership tables, baseline runtime-role RLS tests, role-aware `/v1/me`, and operator-only coach bootstrap. Task 5 extends the existing isolation harness. No Task 3 stub grants product roles.
+
 ## Database exposure boundary
 
 Product tables live in an `app` schema that is not enabled in Supabase Data API exposed schemas. FastAPI connects directly to Postgres with an explicit `app, pg_catalog` search path and a least-privilege runtime role. A separate `private` schema contains narrowly granted policy and Auth-sync helpers. No application helper relies on an unqualified object name.
@@ -63,7 +65,9 @@ Only coaches can request a signed URL to this object. The initial expiry target 
 
 ### Player clips
 
-Publishing creates one `review_publication` plus three to six ordered item rows, then enqueues one clip export per item. The worker writes `clips/{judgment_id}/{version}.mp4` and attaches the ready object to that item. The publication remains player-invisible while any item is pending or failed. After every current item succeeds, one database transaction switches each judgment's current clip and marks the complete set published. Player endpoints sign only these clip objects, never the coach playback object.
+Publishing creates one `review_publication` plus three to six ordered items pinned to immutable `judgment_revision` snapshots. The worker writes `clips/{judgment_id}/{version}.mp4` for a new clip version and attaches it to the matching item; unchanged revisions may reuse matching ready clips. Changed revisions, even text-only changes, get new clip versions. First publication stays invisible until all items are ready. Replacement keeps the previous published text/verdicts/clips visible during editing/export/failure, then atomically supersedes the old set and switches every current publication/revision/clip pointer. Lock both player/game and overlapping judgments, validate the expected predecessor, and prevent withdrawal/deletion races from restoring visibility. See `docs/03-schema.md` and ADR 0008 in `docs/decisions/0008-judgment-revisions-and-republication.md`.
+
+Player endpoints sign only the current ready clip for the expected published revision, with a maximum five-minute lifetime. A revision mismatch requires refreshing the complete evidence set. New signing stops immediately on withdrawal/swap; previously issued URLs have bounded residual access and obsolete objects are deleted within 24 hours. Export from the retained coach playback after source expiry, preserving the original-video millisecond timebase; if no authorized source remains, fail safely without changing the visible set.
 
 Use re-encoding at exact boundaries when stream-copy would expose excessive context or begin on the wrong keyframe. Clip correctness and privacy matter more than saving one second of CPU.
 
@@ -79,7 +83,7 @@ Rules:
 - The worker heartbeats during ffmpeg work.
 - A sweeper requeues expired leases only when attempts remain.
 - Cancellation is cooperative between stages.
-- Terminal failure is visible to the coach and never discards the original upload.
+- Terminal failure is visible to the coach and preserves the original only within the bounded retry/retention window in `docs/10-security-privacy.md`; retries cannot extend expiry.
 
 No Redis or external broker before measured volume exceeds this design.
 
@@ -113,16 +117,18 @@ Never create a per-frame Postgres table.
 ## R2 layout and retention
 
 ```text
-originals/{video_id}/source.{ext}                 delete after 90 days
-playback/{video_id}/coach-720p.mp4               season + 1 year
-thumbs/{video_id}/sprite-{n}.jpg                  season + 1 year
-thumbs/{video_id}/index.json                      season + 1 year
-clips/{judgment_id}/{version}.mp4                 season + 1 year
+originals/{video_id}/source.{ext}                 at most 90 days from upload completion
+playback/{video_id}/coach-720p.mp4               season_end_at + 365 days
+thumbs/{video_id}/sprite-{n}.jpg                  season_end_at + 365 days
+thumbs/{video_id}/index.json                      season_end_at + 365 days
+clips/{judgment_id}/{version}.mp4                 season expiry; obsolete versions within 24 hours
 artifacts/{cv_run_id}/raw.json.gz                 research retention policy
 artifacts/{cv_run_id}/tracks.parquet              research retention policy
 ```
 
 All buckets remain private. CORS lists only the production and local app origins. Signed URLs are specific to one object and HTTP verb. Keys, tokens, and signed URLs never enter logs.
+
+These are maximum successful-data lifetimes, not exceptions to earlier failure or erasure deadlines. `docs/10-security-privacy.md` defines incomplete-upload cleanup, processing failure cutoffs, failed-export cleanup, owner-confirmed season dates, and shared-footage deletion. Player erasure fences all team videos and deletes their dependent evidence, including other players' affected clips. A restricted deletion manifest and worker fencing prevent orphaned or recreated objects; backups require bounded expiry and deletion replay before restore access.
 
 ## Repository layout
 

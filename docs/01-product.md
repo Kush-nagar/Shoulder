@@ -52,11 +52,19 @@ Computer vision later changes only step 4 by nominating timestamps. It changes n
 
 | Record | Meaning | Author | Mutability |
 |---|---|---|---|
-| `observation` | Something may have happened at a time range | Coach or retrieval system | Append-only |
-| `judgment` | What a coach concluded about an observation | Authenticated coach only | Editable by author until/after publish with history |
-| `player_reflection` | What the player said about one judgment | Authenticated player | Append-only in MVP |
+| `observation` | Something may have happened at a time range | Coach or retrieval system | Append-only in ordinary use; governed erasure and Phase D provenance cleanup are exceptions |
+| `judgment` | What a coach concluded about an observation | Authenticated coach only | Versioned author edits with immutable revision history; publication selects a snapshot |
+| `player_reflection` | What the player said about one judgment | Authenticated player | Author may create, edit, and permanently delete; no text history |
 
 Never collapse these types. Their separation is what makes model evaluation possible without allowing a model to become the author.
+
+### Editing and replacing published evidence
+
+A judgment starts at version 1. Every accepted content edit increments its version and appends a complete immutable `judgment_revision`, including the session-derived human author. Saving does not publish: players continue to receive the previously published sentence, verdict, and clip while the coach edits or a replacement exports. This applies even to a comment-only edit or a new draft verdict of `not_relevant`.
+
+The coach must explicitly republish a complete ordered set of 3–6 valid judgments for that player/game and the same active goal. The request pins exact versions. A successful replacement atomically changes all player-visible revisions and clip objects and removes omitted items; a failed replacement leaves the old set unchanged. Only one set is current per player/game. To remove unsafe evidence immediately, the coach withdraws it; withdrawal can leave fewer than three visible clips and does not require waiting for a replacement. A closed goal permits withdrawal but no new publication until it is explicitly made active within the one-active-goal rule. See [ADR 0008](decisions/0008-judgment-revisions-and-republication.md).
+
+Reflections remain authored by the player and are never rewritten on republication. The interface indicates when an existing reflection was written for an earlier published version. A signed-in author can manage an existing reflection even after evidence withdrawal; creating a reflection requires currently visible evidence. Permanent deletion removes active copies and queued text; backups expire under the bounded policy in `docs/10-security-privacy.md`, and restores must reapply deletions before access resumes.
 
 ## Non-negotiable behavior
 
@@ -68,7 +76,7 @@ Never collapse these types. Their separation is what makes model evaluation poss
 6. `opportunity` renders as “Chance to do this.”
 7. `not_relevant` remains coach-only.
 8. Reflection is optional and never blocks playback.
-9. Raw uploads expire after 90 days.
+9. Raw uploads expire no later than 90 days after upload completion; failures and erasure can require earlier deletion.
 10. No biometric or persistent appearance identity is stored.
 
 ## MVP scope
