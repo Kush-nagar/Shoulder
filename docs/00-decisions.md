@@ -1,0 +1,70 @@
+# 00 — Resolved decisions
+
+This file records the decisions that reconcile the uploaded plans. It outranks the other numbered documents when wording differs.
+
+## D1 — One canonical instruction file
+
+`AGENTS.md` is the canonical repository contract because Codex reads it directly. Claude Code does not automatically read `AGENTS.md`; `CLAUDE.md` imports it with `@AGENTS.md` and contains only Claude-specific workflow notes. Do not duplicate the full rule set.
+
+## D2 — Private project, production-quality privacy
+
+Shoulder is a personal project intended for one real team, not a commercial launch. That removes billing, organizations, growth features, and broad multi-tenant scope. It does not weaken privacy: real minors and real team footage still require least-privilege access, consent, deletion, and isolation tests.
+
+## D3 — Progressive MP4 before HLS
+
+The MVP worker creates one 720p H.264/AAC MP4 with fast-start metadata and frequent keyframes. The browser uses byte-range requests to seek. HLS is deferred because a private HLS package contains many objects and a single presigned manifest URL does not authorize its referenced playlists and segments. Add adaptive streaming only if measured playback fails the targets.
+
+## D4 — Player evidence is a separate object
+
+The earlier “clips are not files” approach is rejected. Giving a player a signed URL to a full-match object, then relying on the UI to stop playback at clip boundaries, is not access control. Publishing creates one `evidence_clip` object per judgment. Players receive only that object-specific signed URL.
+
+## D5 — Uploads resume; they do not continue after tab close
+
+Browser requests stop when the tab closes. The UI must not say “You can close this tab” while bytes are still uploading. Multipart state is persisted so the user can reopen the page, reselect the same file if necessary, and upload only missing parts. “Safe to close” appears only after R2 confirms completion.
+
+## D6 — Next.js owns browser sessions
+
+Next.js uses Supabase's server-side auth flow and secure cookies. Browser JSON requests are same-origin. A small BFF layer obtains and validates the session, forwards the access token to FastAPI, and never exposes a secret key to the browser. FastAPI independently validates the JWT before opening a database transaction.
+
+## D7 — Supabase identity is the application identity
+
+`user_account.id` equals the UUID in `auth.users.id`; it is not a separately generated identifier. FastAPI sets the verified UUID in a transaction-local Postgres setting. The API database role must not have `BYPASSRLS`.
+
+## D8 — Manual product before computer vision
+
+The manual review loop must work across three real games before any ML or CV integration begins. CV is an offline file-producing batch, never part of an HTTP request and never required for the product to function.
+
+## D9 — No parent dashboard
+
+There is no parent product role or parent-facing critique feed. This does not remove required operational handling of consent, access, export, and deletion requests. No participant under 13 is onboarded without a separate legal and consent review.
+
+## D10 — One team first
+
+The schema retains `team_id` because authorization needs it, but the product is designed and tested for one team. No organization, subscription, billing, invitation marketplace, or multi-club administration ships in the MVP.
+
+## D11 — The logo is a fixed asset
+
+The supplied wordmark uses a custom squared logotype while the interface uses Inter Tight. The wordmark must be exported as vector artwork; do not try to reproduce it by applying the UI font to the word “shoulder.”
+
+## D12 — External SoccerMaster code stays external
+
+The public SoccerMaster repository had no license file when rechecked on 2026-08-24. It may be studied and run only in a separate private research workspace. Do not vendor it, its weights, or its datasets into the Shoulder repository. Recheck terms before Phase D and before any public demonstration.
+
+## D13 — Application data stays outside the exposed Data API schema
+
+Shoulder does not use Supabase's browser Data API for product data. Application tables live in an `app` schema that is not listed in the project's exposed schemas. RLS still applies as defense in depth. Authentication/profile synchronization and policy helpers live in a `private` schema with explicit grants, safe search paths, and no default `PUBLIC` execution.
+
+## D14 — Publication is an explicit database entity
+
+Publishing three to six judgments is represented by `review_publication` and `review_publication_item` rows. The requested set, order, idempotency key, clip versions, failures, and final visibility therefore survive worker restarts. The set becomes player-visible only in one transaction after every item points to a ready isolated clip.
+
+## Open decisions that must be tested, not guessed
+
+| Decision | Test | Owner task |
+|---|---|---|
+| Is 720p progressive playback fast enough? | Measure startup and random seek on a full 90-minute fixture | Task 11 |
+| Is 32 MiB the right upload part size? | Test 1–3 GB uploads on normal home Wi-Fi and one interrupted network | Task 8 |
+| Is a coach able to review one player in three minutes? | Time the manual workflow across two games | MVP gate |
+| Does SoccerMaster help on this footage? | Measure recall, tracklet purity, keep rate, and review time | Tasks 25–30 |
+
+If a test fails, write an ADR before changing the related decision.
