@@ -1,19 +1,38 @@
 # Brand asset workspace
 
-`shoulder-icon-system.png` is the uploaded visual reference sheet. It is included so the implementation team can compare the geometry, lockups, and color examples.
-
-It is not a production logo source. Before Task 1 starts, obtain the original vector source/usage approval and every SVG variant listed in `../docs/08-brand.md`, plus licensed local Inter Tight files covering weights 400, 500, and 600, license text, exact version, and provenance. Keep the custom wordmark as paths, not live text. Raster favicon/app-icon derivatives may be exported later from approved vectors and visually verified at actual display size before use.
-
-Do not auto-trace this PNG and treat the result as final artwork.
-
-## Input receipt status
+The PNG is reference artwork only. Task 1 uses the two owner-approved vector
+sources in `brand/`, as authorized in ADR 0012. Other production variants in
+`docs/08-brand.md` remain required before their placements ship.
 
 | Input | Status |
 |---|---|
-| Raster reference sheet | Present: `shoulder-icon-system.png` |
-| Original vector source and usage approval | Missing — owner-provided pre-Task-1 input |
-| Approved SVG mark, wordmark, lockup, favicon variants | Missing — owner-provided pre-Task-1 input; exact filenames in `../docs/08-brand.md` |
-| Inter Tight files, license, version, provenance | Missing — owner-provided pre-Task-1 input |
-| Raster production derivatives | Not supplied; export later from approved vectors before their placements ship |
+| Raster reference | Present: `shoulder-icon-system.png`; not production artwork |
+| Task 1 mark | Present and validated: `brand/shoulder-mark.svg`, viewBox 0 0 24 24 |
+| Task 1 wordmark/lockup | Present and validated: `brand/shoulder-wordmark.svg`, viewBox 0 0 70 24 |
+| Additional color/placement variants and raster derivatives | Deferred until their placements; retain approval and visual verification requirements |
 
-Do not mark Task 1 ready to start until the required inputs are received and verified. See `../docs/decisions/0010-review-workspace-and-asset-prerequisites.md`.
+The SVGs contain currentColor vector paths, no embedded raster, script, external
+resource, or metadata. `apps/web/components/brand.tsx` reproduces their paths and
+transforms as inline React SVGs; ordinary img tags are not used for theme colors.
+The supplied `brand/svg-source.md` describes the export history; the actual
+checked-in SVGs already have no C2PA metadata. Do not trace or redraw the PNG.
+
+## Installed Task 1 font
+
+- Package: `@fontsource-variable/inter-tight`.
+- Exact resolved version: **5.3.0**, installed during Task 1.
+- Pin: `apps/web/package.json` and root `pnpm-lock.yaml`; no version range.
+- Provenance: npm registry package, with tarball integrity in the lockfile.
+- Source WOFF2: `apps/web/node_modules/@fontsource-variable/inter-tight/files/inter-tight-latin-wght-normal.woff2`.
+- Loader: `apps/web/app/layout.tsx`, using `next/font/local`, normal style, weights 400–600.
+- Delivery: same-origin Next.js static WOFF2 output; no runtime Google Fonts request.
+- Included SIL Open Font License: preserved verbatim from the package's `LICENSE`
+  at `apps/web/public/licenses/inter-tight-OFL.txt`, shipped at
+  `/licenses/inter-tight-OFL.txt`.
+- Verification: frozen lockfile install, package-version/license equality tests,
+  production build, and Chromium/Firefox/WebKit network/font checks.
+
+Inter Tight, weights 400/500/600, tabular numeral requirements, and the approved
+visual specification remain unchanged. No external font service is needed.
+Any upgrade must update the exact pins and this record, preserve the included
+license, and rerun font/network checks.

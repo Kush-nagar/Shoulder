@@ -1,0 +1,28 @@
+{
+  "name": "shoulder",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.11.1 <25"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @shoulder/web dev",
+    "build": "pnpm --filter @shoulder/web build",
+    "start:web": "pnpm --filter @shoulder/web start",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "typecheck": "pnpm --filter @shoulder/web typecheck",
+    "test": "node --test tests/repository.test.mjs",
+    "smoke": "playwright test",
+    "contracts": "openapi-typescript packages/contracts/openapi.json -o packages/contracts/api.d.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@biomejs/biome": "2.5.12",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.3",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -22,8 +22,8 @@ The Shoulder adapter and artifact schema should be implementation-independent so
 
 ### Fonts and icons
 
-- Before Task 1, obtain licensed local Inter Tight files covering weights 400/500/600 from an official source, retain license text and provenance, and record the exact version. These files are not included yet.
-- The supplied Shoulder PNG is reference artwork only. The original vector source, usage approval, and all SVG variants in `docs/08-brand.md` are owner-provided pre-Task-1 inputs, currently missing. Raster derivatives can be exported later from approved vectors before use.
+- Inter Tight may be added during Task 1 through `@fontsource-variable/inter-tight`. Self-host its WOFF2 assets covering weights 400/500/600 through `next/font/local`, preserve its included SIL Open Font License with the assets and in distributions, and make no runtime request to Google Fonts. Pin an exact package version in the dependency manifest and project lockfile. After installation, document the exact resolved version, package provenance, asset paths, and retained license location in `assets/README.md`; record the resolved version and completion in `STATUS.md`. Font receipt is not a pre-start prerequisite; the approved family and visual specification are unchanged. This asset package supplies the approved font binaries that the platform font loader does not provide. Task 1 resolved and installed version 5.3.0; the exact asset and preserved license locations are recorded in `assets/README.md`.
+- The supplied Shoulder PNG is reference artwork only. The owner-approved Task 1 mark and wordmark are present in `assets/brand/`; under ADR 0012 they satisfy the health shell gate. Additional variants in `docs/08-brand.md` require approval before their placements ship. Raster derivatives can be exported later from approved vectors before use.
 - If a UI icon library is added, choose one consistent set, pin its version, preserve its license notice, and document why native/text controls were insufficient. Do not mix icon libraries.
 
 ### Media and test data

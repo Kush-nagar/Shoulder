@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+minimumReleaseAgeStrict: true
+minimumReleaseAgeExclude:
+  - '@playwright/test@1.63.0'
+  - playwright-core@1.63.0
+  - playwright@1.63.0
+onlyBuiltDependencies:
+  - sharp
+  - '@tailwindcss/oxide'
