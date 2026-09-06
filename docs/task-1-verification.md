@@ -1,5 +1,24 @@
 # Task 1 verification record
 
+## PR review verification — 2026-09-06
+
+- Fixed reusable SVG title ID collisions with `aria-label`; vector geometry is unchanged.
+- Fixed Fly's config-relative Dockerfile path to `api.Dockerfile`. Upstream
+  `resolveDockerfilePath` joins the path to the config file directory:
+  https://github.com/superfly/flyctl/blob/master/internal/command/deploy/deploy_build.go.
+  A Python TOML/path assertion verified it resolves to the existing Dockerfile;
+  no deployment or cloud build was run.
+- `scripts/check.ps1` passed format/lint/types/unit/contracts/build and all three
+  browser smoke tests. `git diff --check` passed; no product behavior was added.
+- Other findings did not require changes: read-only runtime source is intentional
+  and Python tolerates unavailable bytecode caching; exact bootstrap Node matches
+  ADR 0012 while the engine range permits the hosting platform's patch version;
+  the health OpenAPI contract contains no product data and remains intentionally
+  available for schema tooling. No requirement forbids this schema route.
+- Vercel's builder uses `config.outputDirectory || '.next'`; explicitly setting
+  `.next` matches its default and is not the alleged routes-manifest defect:
+  https://github.com/vercel/vercel/blob/main/packages/next/src/index.ts.
+
 Date: 2026-09-05. Checkout: `D:\Shoulder`, branch `task-1-foundation`.
 Scope: Task 1 completion under ADR 0012. The owner later authorized the Task 1
 commit, branch push, and pull request. No cloud mutation, deployment,

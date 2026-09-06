@@ -9,10 +9,15 @@ Update this file at every task boundary. Keep it factual and short.
 - Checkout: `D:\Shoulder`, branch `task-1-foundation`; one writer.
 - Application: minimal Next.js health shell and FastAPI health only.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
-- Last verified: 2026-09-05.
+- Last verified: 2026-09-06.
 - Next task: Task 2 — Local infrastructure; not started or authorized by this task.
 
 ## Completed work
+
+- PR #1 review repairs: reusable SVG accessible names no longer depend on fixed
+  IDs; Fly's Dockerfile path resolves relative to `infra/fly.toml`. Full local
+  quality checks and the config-path assertion passed. Hosted checks are required
+  before the owner-authorized merge; deployment remains pending approval.
 
 - Documentation reconciliation and font prerequisite update are complete.
 - Task 1 has web/API/worker/contracts/infra boundaries, exact dependency pins and lockfiles, environment examples, secret-file exclusions, generated health contracts, and pull-request CI.

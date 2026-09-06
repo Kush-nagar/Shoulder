@@ -10,9 +10,9 @@ export function ShoulderMark(props: SVGProps<SVGSVGElement>) {
       height="24"
       fill="currentColor"
       role="img"
-      aria-labelledby="shoulder-mark-title"
+      aria-label="Shoulder"
     >
-      <title id="shoulder-mark-title">Shoulder</title>
+      <title>Shoulder</title>
       <path d="M9.75 3.5H5.75A1.25 1.25 0 0 0 4.5 4.75V13.25A1.25 1.25 0 0 0 5.75 14.5H9.75V12H7V6H9.75Z M14.25 9.5H18.25A1.25 1.25 0 0 1 19.5 10.75V19.25A1.25 1.25 0 0 1 18.25 20.5H14.25V18H17V12H14.25Z" />
     </svg>
   );
@@ -27,9 +27,9 @@ export function ShoulderWordmark(props: SVGProps<SVGSVGElement>) {
       width="70"
       height="24"
       role="img"
-      aria-labelledby="shoulder-lockup-title"
+      aria-label="Shoulder"
     >
-      <title id="shoulder-lockup-title">Shoulder</title>
+      <title>Shoulder</title>
       <path
         d="M9.75 3.5H5.75A1.25 1.25 0 0 0 4.5 4.75V13.25A1.25 1.25 0 0 0 5.75 14.5H9.75V12H7V6H9.75Z M14.25 9.5H18.25A1.25 1.25 0 0 1 19.5 10.75V19.25A1.25 1.25 0 0 1 18.25 20.5H14.25V18H17V12H14.25Z"
         fill="currentColor"

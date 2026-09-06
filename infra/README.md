@@ -23,6 +23,8 @@ only locked production dependencies and runs as a non-root numeric user.
 The allowlist `.dockerignore` excludes local secrets, tools, assets, and web code.
 `infra/fly.toml` configures HTTPS and `/health`; it intentionally omits the app
 name and region until the owner selects the destination and approves resource use.
+Its Dockerfile path is relative to the configuration directory (`infra/`);
+the Docker build context remains the repository root.
 
 Only after that approval and CLI/account setup, from the repository root:
 
