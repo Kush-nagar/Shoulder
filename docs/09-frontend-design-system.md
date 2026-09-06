@@ -48,9 +48,9 @@ Do not add green success banners to the player experience. Completion is communi
 
 ### Typography
 
-Load Inter Tight locally with `next/font`. Use variable optical behavior if the approved files provide it; otherwise use weights 400, 500, and 600. Apply font-feature settings for `tnum` on timecodes and numeric metadata.
+Load Inter Tight locally with `next/font/local` from the self-hosted WOFF2 assets in `@fontsource-variable/inter-tight`. Use variable optical behavior if the approved files provide it; otherwise use weights 400, 500, and 600. Apply font-feature settings for `tnum` on timecodes and numeric metadata.
 
-Licensed Inter Tight files, version/provenance, and approved SVG logo inputs are required before Task 1, as tracked in `assets/README.md`. They are currently missing; the reference PNG is not a production asset. Do not substitute a font-rendered or traced wordmark.
+The owner-approved Task 1 mark and wordmark are present, as tracked in `assets/README.md`; further placements require their approved variants under ADR 0012. Inter Tight may be added during Task 1 through the package above: pin an exact version in the project lockfile, preserve its included SIL Open Font License, and make no runtime Google Fonts requests. After installation, document the exact resolved version and provenance in `assets/README.md` and `STATUS.md`. Task 1 uses the supplied inline SVGs and installed Fontsource version 5.3.0; the reference PNG is not a production asset. Do not substitute a font-rendered or traced wordmark.
 
 | Role | Desktop | Mobile | Weight | Line height |
 |---|---:|---:|---:|---:|

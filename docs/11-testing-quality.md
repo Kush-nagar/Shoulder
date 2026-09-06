@@ -139,7 +139,7 @@ Task 11 must measure a full 90-minute 720p output on normal broadband: first fra
 - Visual diffs are reviewed; they are not blindly updated.
 - Test 200% zoom, large text, reduced motion, high contrast where supported, keyboard-only navigation, and screen reader announcements.
 - Run automated accessibility checks, then manually test video controls, timeline, dialogs, and player clip navigation.
-- Before Task 1, verify receipt of approved vector assets and licensed/versioned Inter Tight files in `assets/README.md`. Check that review has no global rail at every viewport, and all three verdict choices (including coach-only Not relevant) are visible, labelled, focusable, and operable without shortcuts. Use the shared dashboard order and discrete evidence-dot semantics in `docs/05-ui.md`.
+- For Task 1, verify the owner-approved mark and wordmark recorded in `assets/README.md`, as scoped by ADR 0012; verify additional variants before later placements ship. During Task 1, verify that `@fontsource-variable/inter-tight` is pinned to an exact version in the project lockfile, its WOFF2 assets are self-hosted at weights 400/500/600, its included SIL Open Font License is preserved in distributions, and browser network checks show no runtime Google Fonts requests. Verify the exact resolved version and provenance are documented after installation in `assets/README.md` and `STATUS.md`. Check that review has no global rail at every viewport, and all three verdict choices (including coach-only Not relevant) are visible, labelled, focusable, and operable without shortcuts. Use the shared dashboard order and discrete evidence-dot semantics in `docs/05-ui.md`.
 
 ## Performance testing
 

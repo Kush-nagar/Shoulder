@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+:root {
+  --sh-paper: #faf9f7;
+  --sh-ink: #171512;
+  --sh-muted: #6b6560;
+  --sh-line: #e5e2de;
+}
+
+@theme inline {
+  --color-paper: var(--sh-paper);
+  --color-ink: var(--sh-ink);
+  --color-muted: var(--sh-muted);
+  --color-line: var(--sh-line);
+  --font-sans: var(--font-inter-tight), Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--sh-paper);
+  color: var(--sh-ink);
+  font-family: var(--font-inter-tight), Arial, sans-serif;
+}

@@ -10,15 +10,15 @@ Every task introducing a protected table includes its Alembic migration, baselin
 
 ### Task 1 — Repository, CI, and first deployment
 
-**Prerequisites:** no numbered tasks; completed documentation reconciliation; confirmed repository visibility; approved vector logo inputs and licensed local Inter Tight files received as specified in `assets/README.md`; working pinned local toolchain planned/verified before running build commands.
+**Prerequisites:** no numbered tasks; completed documentation reconciliation; the owner-approved Task 1 mark and wordmark in `assets/README.md`; working pinned Windows-native tooling. The owner authorized local implementation with repository visibility unchanged and unverified; see `docs/decisions/0012-task-1-local-acceptance.md`.
 
-**Read:** `AGENTS.md`, `docs/02-architecture.md`, `docs/08-brand.md`, `docs/11-testing-quality.md`, `assets/README.md`, `STATUS.md`
+**Read:** `AGENTS.md`, `docs/02-architecture.md`, `docs/08-brand.md`, `docs/09-frontend-design-system.md`, `docs/11-testing-quality.md`, `docs/13-licenses-and-sources.md`, `docs/decisions/0010-review-workspace-and-asset-prerequisites.md`, `docs/decisions/0012-task-1-local-acceptance.md`, `assets/README.md`, `STATUS.md`
 
-Use the existing GitHub repository and committed initial handoff; do not reinitialize Git. Create the monorepo boundaries, package tooling, environment examples, lint/type/test jobs, and minimal web/API health routes. Deploy the web shell to Vercel and API health endpoint to Fly.io. Required deployment access is an owner-provided input for completion, not evidence already supplied by this package. Asset placeholders or a traced wordmark do not satisfy the pre-start gate.
+Use the existing GitHub repository and committed initial handoff; do not reinitialize Git. Create the monorepo boundaries, package tooling, environment examples, lint/type/test jobs, and minimal web/API health routes. Prepare Vercel web and Fly.io API deployment configuration. Under the owner-approved Task 1 scope, deployment, cloud resources, repository settings, commits, pushes, and hosted PR execution remain pending explicit follow-up approval; local completion does not claim production deployment. Asset placeholders or a traced wordmark do not satisfy the vector pre-start gate. Inter Tight may be added during Task 1 through `@fontsource-variable/inter-tight`. Self-host its WOFF2 assets covering weights 400/500/600 through `next/font/local`, preserve its included SIL Open Font License with the assets and in distributions, and make no runtime request to Google Fonts. Pin an exact package version in the dependency manifest and project lockfile. After installation, document the exact resolved version, package provenance, asset paths, and retained license location in `assets/README.md`; record the resolved version and completion in `STATUS.md`. Font receipt is not a pre-start prerequisite; the approved family and visual specification are unchanged.
 
-**Test:** a trivial pull request runs every CI job.
+**Test:** the pull-request workflow is configured to run the same passing local quality checks; an actual hosted PR run awaits push approval; verify the exact package version against the project lockfile and asset record, retained SIL Open Font License, weights 400/500/600, and same-origin WOFF2 loading with no runtime Google Fonts requests.
 
-**Done:** both production health routes load on a phone; no secrets or sample player data exist.
+**Done:** both local health routes return the documented healthy response, the shell passes responsive browser smoke checks, and deployment configuration is prepared with public phone verification pending explicit approval; no secrets or sample player data exist; Inter Tight WOFF2 assets are self-hosted, the included SIL Open Font License is preserved, runtime Google Fonts requests are absent, and the exact lockfile-resolved package version is documented after installation.
 
 ### Task 2 — Local infrastructure
 

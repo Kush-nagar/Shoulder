@@ -41,11 +41,91 @@ Claude Code loads `CLAUDE.md`, which imports `AGENTS.md`. Codex loads `AGENTS.md
 | `docs/decisions/` | Focused architecture decision records |
 | `assets/` | Supplied brand reference and production-asset requirements |
 
-## Status of this package
+## Task 1 local foundation
 
-This is a planning and build-handoff package. It intentionally contains no application implementation, generated migrations, credentials, datasets, model weights, or vendored SoccerMaster code.
+The repository contains only the health shell and API, generated health contracts,
+a reserved worker boundary, CI, and deployment preparation. No authentication,
+database, storage, jobs, video processing, or player data is implemented.
+Deployment is pending explicit approval; see `infra/README.md` and `STATUS.md`.
 
-The initial handoff is committed/pushed to the configured GitHub repository. Documentation reconciliation adds decisions D15–D20 and ADRs 0006–0011; see `docs/00-decisions.md` for the authoritative rules. Task 1 remains the first implementation task, but it cannot start until the owner-provided vector/font inputs and repository visibility listed in `STATUS.md` are confirmed. The PNG reference does not satisfy the production-asset gate.
+## Windows-native setup
+
+Use PowerShell in `D:\Shoulder` with Git and **Node.js 24.11.1**. Node is an
+ordinary Windows installation, not a Codex runtime dependency. If needed, obtain
+that version from [Node's official release](https://nodejs.org/download/release/v24.11.1/).
+No global pnpm, Python, uv, Docker, or WSL installation is required for Task 1.
+
+```powershell
+Set-Location D:\Shoulder
+.\scripts\bootstrap.ps1
+```
+
+The bootstrap downloads checksum-verified uv 0.12.10 into ignored `.tools/`,
+installs CPython 3.11.16 locally, installs locked Python dependencies into
+`.venv/`, and uses explicit `pnpm@11.25.0` through `npm.cmd exec` to install
+the frozen workspace lockfile and browser test binaries. `npm.cmd` avoids
+PowerShell npm-launcher policy issues. No secrets or .env file are needed.
+
+Run the web in one PowerShell terminal:
+
+```powershell
+Set-Location D:\Shoulder
+npm.cmd exec --yes --package=pnpm@11.25.0 -- pnpm dev:web
+```
+
+Run the API in a second terminal:
+
+```powershell
+Set-Location D:\Shoulder
+.\.tools\uv.exe run --locked python -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000
+```
+
+Open [the local shell](http://127.0.0.1:3000). Both health routes must return HTTP
+200 with `{"status":"ok"}`:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3000/health
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+Stop each server with Ctrl+C before running the full check (which owns ports 3000
+and 8000 and starts production-mode servers itself):
+
+```powershell
+.\scripts\check.ps1
+```
+
+This checks Biome format/lint, TypeScript, repository/secret-file/font checks,
+Ruff format/lint, mypy, Python tests, generated-contract drift, the Next.js
+production build, and browser health/font/SVG/accessibility smoke tests.
+Screenshots and failure traces go into ignored `test-results/`.
+
+Dependency checks (also in CI):
+
+```powershell
+npm.cmd exec --yes --package=pnpm@11.25.0 -- pnpm audit --audit-level=low
+.\.tools\uv.exe run --locked pip-audit
+```
+
+Inter Tight **5.3.0** is self-hosted from Fontsource; its included SIL Open Font
+License ships with the web app. See `assets/README.md` for exact source and
+license paths. Both SVGs render inline with their original vector geometry.
+
+## Repository boundaries
+
+| Path | Task 1 responsibility |
+|---|---|
+| `apps/web/` | Next.js App Router health shell and /health |
+| `services/api/` | FastAPI /health and OpenAPI |
+| `services/worker/` | Documented boundary only; no running worker |
+| `packages/contracts/` | Generated OpenAPI and TypeScript contract |
+| `infra/` | Vercel/Fly deployment instructions and API configuration |
+| `scripts/` | Windows bootstrap, shared local/CI checks, contract export |
+| `tests/` | Repository checks, API tests, browser smoke |
+| `.github/workflows/ci.yml` | Pull-request quality checks; no deployment |
+
+Exact direct dependency versions and every verification command/result are in
+`docs/task-1-verification.md`. Task 2 is next and is not started.
 
 ## Product boundary in one sentence
 

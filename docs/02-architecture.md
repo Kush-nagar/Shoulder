@@ -140,6 +140,7 @@ shoulder/
 ├── apps/web/
 ├── services/api/
 ├── services/worker/
+├── packages/contracts/
 ├── db/migrations/
 ├── db/policies/
 ├── cv/prepare/
@@ -153,7 +154,7 @@ shoulder/
 └── docs/
 ```
 
-SoccerMaster itself, model weights, raw footage, datasets, and generated CV frames stay outside the repository and are gitignored.
+This is the eventual layout. Task 1 creates web/API, the worker boundary, generated contracts, infra, scripts, and tests only; db/ and cv/ are deferred to their assigned tasks. SoccerMaster itself, model weights, raw footage, datasets, and generated CV frames stay outside the repository and are gitignored.
 
 ## Local development
 

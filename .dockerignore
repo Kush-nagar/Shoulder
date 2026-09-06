@@ -1,0 +1,9 @@
+**
+!pyproject.toml
+!uv.lock
+!.python-version
+!services/
+!services/api/
+!services/api/*.py
+!infra/
+!infra/api.Dockerfile

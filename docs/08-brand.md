@@ -23,7 +23,7 @@ The custom wordmark is fixed artwork. Do not re-create it by typing â€œshoulderâ
 
 ## Required production asset pack
 
-Before Task 1 starts, the owner must supply/approve the original vector source and every SVG variant listed below, plus local Inter Tight files covering weights 400/500/600 with license text, exact version, and provenance. Record receipt and usage approval in `assets/README.md` and `STATUS.md`. These inputs are currently absent. Raster derivatives listed below may be exported during frontend implementation from those approved vectors; they are required before their placements ship. Do not auto-trace the raster sheet and call it final.
+The owner-approved Task 1 sources are `assets/brand/shoulder-mark.svg` and `assets/brand/shoulder-wordmark.svg`; use inline SVG React components when currentColor is needed. These satisfy the health shell gate under ADR 0012. Additional variants listed below require approval before their placements ship. Record receipt and usage approval in `assets/README.md` and `STATUS.md`. Inter Tight may be added during Task 1 through `@fontsource-variable/inter-tight`. Self-host its WOFF2 assets covering weights 400/500/600 through `next/font/local`, preserve its included SIL Open Font License with the assets and in distributions, and make no runtime request to Google Fonts. Pin an exact package version in the dependency manifest and project lockfile. After installation, document the exact resolved version, package provenance, asset paths, and retained license location in `assets/README.md`; record the resolved version and completion in `STATUS.md`. Font receipt is not a pre-start prerequisite; the approved family and visual specification are unchanged. Raster derivatives listed below may be exported during frontend implementation from those approved vectors; they are required before their placements ship. Do not auto-trace the raster sheet and call it final.
 
 | Asset | Format | Color/background | Use |
 |---|---|---|---|
@@ -66,7 +66,7 @@ Do not add a team-color theme in the MVP. Team kits and opponent colors appear o
 
 ## Typography character
 
-Inter Tight is the interface and editorial family. It has compact proportions without feeling mechanical. Use supplied or self-hosted variable-font files through `next/font`; do not make a third-party font request from the browser.
+Inter Tight is the interface and editorial family. It has compact proportions without feeling mechanical. Use self-hosted WOFF2 variable-font files from `@fontsource-variable/inter-tight` through `next/font/local`; do not make a third-party font request from the browser.
 
 - Wordmark: custom vector artwork only.
 - Product UI: Inter Tight.
