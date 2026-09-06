@@ -125,7 +125,90 @@ license paths. Both SVGs render inline with their original vector geometry.
 | `.github/workflows/ci.yml` | Pull-request quality checks; no deployment |
 
 Exact direct dependency versions and every verification command/result are in
-`docs/task-1-verification.md`. Task 2 is next and is not started.
+`docs/task-1-verification.md`.
+
+## Task 2 local infrastructure
+
+Task 2 infrastructure and regression verification passed on 2026-09-06.
+Task 3 is next; it has not been started. See `docs/task-2-verification.md` for
+the full command record, host repairs, and compatibility limits.
+
+Keep the repository and PowerShell on Windows. Containers use Docker Desktop's
+WSL 2 backend; a Linux development checkout is unnecessary. The verified tool
+versions are Docker Desktop **4.89.0**, Docker **29.7.2**, Compose **5.5.0**,
+WSL **2.7.13.0**, and project-local Supabase CLI **2.116.0**.
+
+On a machine without WSL, run `wsl --install --no-distribution` in administrator
+PowerShell and restart if requested. Install the pinned Docker Desktop from
+the official installer via winget:
+
+```powershell
+winget install --id Docker.DockerDesktop --exact --version 4.89.0 --source winget
+```
+
+Start Docker Desktop. In **Settings > Resources > Network**, select
+**Localhost by default** for **Port binding behavior**, then apply the change.
+The setup refuses to start with the broad default. This changes the default
+for containers on this Docker Desktop installation; explicitly published
+addresses still take precedence. No Docker or Supabase account is required.
+
+From a clean checkout on this configured host:
+
+```powershell
+Set-Location D:\Shoulder
+.\scripts\bootstrap-infra.ps1
+.\scripts\infra.ps1 start
+.\scripts\infra.ps1 health
+.\scripts\infra.ps1 migrate
+.\scripts\infra.ps1 stop
+```
+
+Bootstrap verifies the CLI archive against its pinned SHA256 and generates
+random MinIO credentials once in ignored `.env.local`. `.env.example` contains
+no usable password. Do not copy cloud secrets into local setup. The CLI's
+state stays under ignored `.tools/supabase-home`; generated project state is
+ignored by `supabase/.gitignore`. Startup output suppresses local credentials.
+
+Supabase owns the only Postgres and local Auth containers, plus Kong and captured
+mail. Realtime, Studio, Data API, Supabase Storage, analytics, and edge runtime
+are excluded. MinIO is the private S3-compatible storage boundary in Compose.
+Its `shoulder-local` bucket denies anonymous reads. Images are pinned by digest
+in `infra/supabase-images.json` and `infra/compose.yaml`.
+
+The CLI rejects Postgres 16. Local Postgres **17.6.1.165** is documented in
+[ADR 0013](docs/decisions/0013-local-supabase-postgres-version.md); production
+version compatibility must be resolved before Task 4. There are no application
+migrations in Task 2: `migrate` runs the CLI's explicit local migration command
+with no product SQL. Product schema changes will use Alembic in their assigned tasks.
+
+| Local service | Address |
+|---|---|
+| Auth gateway | `http://127.0.0.1:54321/auth/v1/health` |
+| Postgres | `127.0.0.1:54322` |
+| Captured mail UI | `http://127.0.0.1:54324` |
+| MinIO S3 | `http://127.0.0.1:9000` |
+| MinIO console | `http://127.0.0.1:9001` |
+
+Stop preserves local volumes. Reset deletes **only Shoulder local database and
+MinIO volumes** and recreates empty services; it never contacts a linked cloud
+project. The recovery suite also discards those local volumes:
+
+```powershell
+.\scripts\infra.ps1 reset -DiscardLocalData
+.\scripts\check-infra.ps1 -DiscardLocalData
+.\scripts\check.ps1
+```
+
+The infrastructure suite checks repeatable start/migrate, health, denied anonymous
+object access, synthetic-object persistence over restart, interrupted storage
+detection and recovery, and empty storage after reset. Use synthetic fixtures
+only. To leave no services running, use `.\scripts\infra.ps1 stop`.
+
+If Docker reports it cannot rename `engine.sock` or `sailor-ingest.sock`, preserve
+images and volumes; do not factory-reset Docker. This host encountered Docker's
+stale AF_UNIX socket issue. Stop Docker fully before investigating its runtime
+socket directories. Recovery details and verification evidence are in
+`docs/task-2-verification.md`.
 
 ## Product boundary in one sentence
 

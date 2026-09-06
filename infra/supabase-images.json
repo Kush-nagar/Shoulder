@@ -1,0 +1,6 @@
+{
+  "public.ecr.aws/supabase/postgres:17.6.1.165": "sha256:28f0e16a019e648089fc1a6d333549a55548f6019c15ae4bd7cd58b989027518",
+  "public.ecr.aws/supabase/gotrue:v2.196.0": "sha256:c0c25187a6b835e65a6f6e6c6b39d090e832d40e6de5186f2c038e0411944232",
+  "public.ecr.aws/supabase/kong:2.8.1": "sha256:1b53405d8680a09d6f44494b7990bf7da2ea43f84a258c59717d4539abf09f6d",
+  "public.ecr.aws/supabase/mailpit:v1.30.2": "sha256:37a38e48e9338cd7e89dfeb487f37b02ebfcd9cb23111bed2d345e79d37d6dd6"
+}
