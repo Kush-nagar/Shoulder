@@ -8,6 +8,7 @@ test("secret-bearing files are ignored and tracked/new source contains no creden
     ".env",
     ".env.local",
     "apps/web/.env.local",
+    "supabase/.env.signing-keys.json",
     "services/api/.env",
     "infra/private.key",
     "infra/cert.pem",

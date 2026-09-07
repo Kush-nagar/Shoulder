@@ -25,5 +25,6 @@ Invoke-Check $pnpm ($prefix + @('contracts'))
 $after = Get-FileHash packages/contracts/openapi.json,packages/contracts/api.d.ts
 if (Compare-Object $before.Hash $after.Hash) { throw 'Generated API contracts drifted; regenerate and review them.' }
 Invoke-Check $pnpm ($prefix + @('build'))
+Invoke-Check 'node' @('--test', 'tests/auth-bundle.test.mjs')
 Invoke-Check $pnpm ($prefix + @('smoke'))
 Invoke-Check 'git' @('diff', '--check')

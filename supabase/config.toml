@@ -39,8 +39,13 @@ enabled = false
 [auth]
 enabled = true
 site_url = "http://127.0.0.1:3000"
-additional_redirect_urls = []
+additional_redirect_urls = ["http://127.0.0.1:3000/auth/callback"]
+signing_keys_path = "./.env.signing-keys.json"
 enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_confirmations = true
+max_frequency = "1m"
 
 [edge_runtime]
 enabled = false

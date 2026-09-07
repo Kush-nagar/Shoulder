@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "AuthIdentity": {
+        "properties": {
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "AuthIdentity",
+        "type": "object"
+      },
       "Health": {
         "properties": {
           "status": {
@@ -12,6 +26,12 @@
         },
         "title": "Health",
         "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -37,6 +57,29 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/v1/auth/identity": {
+      "get": {
+        "operationId": "identity_v1_auth_identity_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthIdentity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Identity"
       }
     }
   }

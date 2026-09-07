@@ -16,6 +16,11 @@ These are Next.js routes because Next.js owns cookies and the PKCE callback.
 
 Task 3 proves verified session identity through auth-boundary integration tests, without a role-aware product endpoint or placeholder role. It can render a neutral signed-in state with no product access. Task 4 completes the following FastAPI endpoint and role routing after its protected identity/membership schema exists:
 
+Task 3's narrow `GET /v1/auth/identity` returns only `{"user_id": "<verified UUID>"}`;
+the browser counterpart is `GET /api/auth/identity`. Both verify the token and
+live Auth session, return non-cacheable responses, and grant no team permissions.
+See ADR 0014. This identity proof does not implement or substitute for `/v1/me`.
+
 | Method | Route | Auth | Response |
 |---|---|---|---|
 | GET | `/v1/me` | verified identity | User, database-derived allowed roles, linked player, team IDs; unlinked account has empty roles/teams and no product access |

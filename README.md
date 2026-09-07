@@ -43,9 +43,10 @@ Claude Code loads `CLAUDE.md`, which imports `AGENTS.md`. Codex loads `AGENTS.md
 
 ## Task 1 local foundation
 
-The repository contains only the health shell and API, generated health contracts,
-a reserved worker boundary, CI, and deployment preparation. No authentication,
-database, storage, jobs, video processing, or player data is implemented.
+The repository contains the health shell, local infrastructure, and verified
+authentication/session boundary. Generated API contracts, a reserved worker
+boundary, CI, and deployment preparation are included. Product schema, team
+authorization, uploads, jobs, and video processing remain later tasks.
 Deployment is pending explicit approval; see `infra/README.md` and `STATUS.md`.
 
 ## Windows-native setup
@@ -99,6 +100,50 @@ This checks Biome format/lint, TypeScript, repository/secret-file/font checks,
 Ruff format/lint, mypy, Python tests, generated-contract drift, the Next.js
 production build, and browser health/font/SVG/accessibility smoke tests.
 Screenshots and failure traces go into ignored `test-results/`.
+
+## Local authentication (Task 3)
+
+With the Task 2 Docker prerequisites available, run:
+
+```powershell
+.\scripts\bootstrap-infra.ps1
+.\scripts\infra.ps1 start
+.\scripts\bootstrap-auth.ps1
+```
+
+Bootstrap creates an ignored local ES256 signing key and a server-only web
+environment containing the local publishable key. Existing web environments
+are preserved. Keep the Auth URL and API issuer aligned; use only the local
+stack, captured mail, and synthetic accounts until real-data approval.
+
+Start the web using `pnpm dev:web` as above. For the authenticated API:
+
+```powershell
+$env:SUPABASE_AUTH_ISSUER = 'http://127.0.0.1:54321/auth/v1'
+.\.tools\uv.exe run --locked --env-file apps/web/.env.local python -m uvicorn services.api.main:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+Open `/auth/sign-in`; find the email at the local mail address below and open
+the link in the same browser that requested it. `/auth/session` is deliberately
+neutral and grants no team role. Browser JSON uses `/api/auth/identity`, which
+forwards a verified token to `/v1/auth/identity`. `/v1/me` begins in Task 4.
+
+Stop manual web/API processes before the automated check:
+
+```powershell
+.\scripts\check-auth.ps1
+```
+
+This builds the real app, tests Chromium/Firefox/WebKit against local Supabase
+and FastAPI, deletes each test's synthetic Auth account/mail, verifies health,
+and stops containers even on failure. No mocked Auth server is used. Traces,
+video, and screenshots are disabled for token-bearing auth tests. The expired
+access-token fixture is signed with the ignored local key and retains a real
+Supabase refresh grant; refresh and cookie propagation use the real stack.
+
+For manual work, stop infrastructure with `.\scripts\infra.ps1 stop`.
+Deployment still requires owner-confirmed HTTPS domains, callback allowlists,
+and provider configuration. See `docs/task-3-verification.md` and ADR 0014.
 
 Dependency checks (also in CI):
 
