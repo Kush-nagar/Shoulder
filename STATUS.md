@@ -34,7 +34,7 @@ Update this file at every task boundary. Keep it factual and short.
   passed, including expired-token refresh, copied-cookie/token rejection after
   logout, replay, and rate-limited resend survival. No tests skipped or weakened.
 - Final `scripts/check.ps1`: Biome, TypeScript, five Node policy/repository tests,
-  Ruff, strict mypy, eight Python tests, generated contracts, production build,
+  Ruff, strict mypy, nine Python tests, generated contracts, production build,
   browser-secret bundle scan, and three health-shell browser tests passed.
 - Dependency audits and `git diff --check` passed. Final cleanup left zero Auth
   users and no `app` schema; all containers stopped and `docker ps` was empty.
@@ -44,6 +44,10 @@ Update this file at every task boundary. Keep it factual and short.
   `docs/task-3-verification.md`.
 - Deployment, production-domain/callback configuration, and production auth
   verification remain deferred. Task 3 PR handoff is authorized; no merge or Task 4 work.
+- PR #3 merge-gate review repaired missing no-store headers on Auth HTTP/network
+  outages and missing configuration. Regression tests cover all three paths.
+  The BFF field-growth suggestion is deferred: the current FastAPI response model
+  already enforces the identity-only contract. Merge is authorized after checks pass.
 
 ## Task 2 completed work and verification
 

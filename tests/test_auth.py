@@ -5,6 +5,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from unittest.mock import patch
+from urllib.error import URLError
 from uuid import uuid4
 
 import jwt
@@ -212,5 +214,23 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(response.status_code, 503)
                 self.assertEqual(
+                    response.headers.get("cache-control"), "private, no-store"
+                )
+                self.assertEqual(
                     response.json(), {"detail": "Authentication unavailable"}
                 )
+
+    async def test_network_and_configuration_errors_are_not_cached(self) -> None:
+        for error in (URLError("fixture"), TimeoutError(), OSError()):
+            with patch("services.api.auth.urlopen", side_effect=error):
+                response = await self.client.get(
+                    "/identity", headers={"Authorization": f"Bearer {self.token()}"}
+                )
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.headers.get("cache-control"), "private, no-store")
+        self.app.dependency_overrides.clear()
+        get_verifier.cache_clear()
+        with patch.dict("os.environ", {}, clear=True):
+            response = await self.client.get("/identity")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers.get("cache-control"), "private, no-store")

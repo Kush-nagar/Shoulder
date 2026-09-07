@@ -72,9 +72,17 @@ class TokenVerifier:
             error.close()
             if error.code in (401, 403):
                 raise ValueError("Invalid session") from None
-            raise HTTPException(503, "Authentication unavailable") from None
+            raise HTTPException(
+                503,
+                "Authentication unavailable",
+                headers={"Cache-Control": "private, no-store"},
+            ) from None
         except (URLError, TimeoutError, OSError):
-            raise HTTPException(503, "Authentication unavailable") from None
+            raise HTTPException(
+                503,
+                "Authentication unavailable",
+                headers={"Cache-Control": "private, no-store"},
+            ) from None
 
 
 @lru_cache
@@ -82,7 +90,11 @@ def get_verifier() -> TokenVerifier:
     issuer = os.environ.get("SUPABASE_AUTH_ISSUER")
     key = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
     if not issuer or not key:
-        raise HTTPException(status_code=503, detail="Authentication unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication unavailable",
+            headers={"Cache-Control": "private, no-store"},
+        )
     return TokenVerifier(issuer, key)
 
 

@@ -250,6 +250,16 @@ Windows security policy were changed.
 
 ## Complete final file inventory
 
+PR #3 follow-up: Copilot identified missing `Cache-Control: private, no-store`
+on Auth HTTP/network outage responses. Added the header there and on the matching
+missing-configuration path. Regression tests reproduced the omissions before
+repair; the Python suite now contains nine tests. The BFF field-growth suggestion
+is speculative: its fixed trusted upstream has an explicit AuthIdentity response
+model, and real integration asserts that only user_id reaches the browser.
+WebKit initially exited before test execution; its isolated retry passed without
+changing Windows security policy or browser configuration. The full quality
+script is rerun before the repair is committed.
+
 19 existing files changed:
 
 ```text
