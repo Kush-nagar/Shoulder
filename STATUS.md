@@ -11,8 +11,8 @@ Update this file at every task boundary. Keep it factual and short.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
 - Last verified: 2026-09-06.
 - Current task: Task 2 — Local infrastructure, **complete**; all infrastructure and regression checks passed.
-- Task 1 commit `053311a` was fast-forward merged into local `main` at the owner's request. Remote `main` remains at `83c346c`; the Task 2 PR therefore also carries the existing Task 1 prerequisite commit. No merge or push to `main` is authorized in this handoff.
-- The owner authorized final Task 2 verification, commit, branch push, and a PR into `main`; do not merge the PR. Hosted check results are reported with the PR handoff.
+- Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
+- The owner authorized merging PR #2 only after its checks/reviews pass, then synchronizing `main` and preparing an empty Task 3 branch. Task 3 implementation remains unauthorized in this handoff.
 - Next numbered task: Task 3 — Verified authentication and session identity; not started.
 
 ## Task 2 completed work and verification
@@ -71,6 +71,11 @@ Update this file at every task boundary. Keep it factual and short.
 
 ## Completed work
 
+- PR #1 review repairs: reusable SVG accessible names no longer depend on fixed
+  IDs; Fly's Dockerfile path resolves relative to `infra/fly.toml`. Full local
+  quality checks and the config-path assertion passed. Hosted quality and Bugbot
+  passed before merge; deployment remains pending approval.
+
 - Documentation reconciliation and font prerequisite update are complete.
 - Task 1 has web/API/worker/contracts/infra boundaries, exact dependency pins and lockfiles, environment examples, secret-file exclusions, generated health contracts, and pull-request CI.
 - The owner-approved mark and wordmark in `assets/brand/` validate and render as inline currentColor SVG components. No geometry or approved typography was changed.
@@ -105,7 +110,7 @@ failures and reruns, are recorded in `docs/task-1-verification.md`.
 | Input / work | Needed by | State |
 |---|---|---|
 | Explicit deployment approval, Vercel/Fly targets, region, accounts/access | Public deployment | Pending; config prepared in `infra/`; nothing deployed |
-| Hosted pull-request CI | Final Task 1 evidence | Commit/push/PR authorized; await the created PR checks |
+| Hosted pull-request CI | Final Task 1 evidence | Passed on PR #1, including its review repairs; merged |
 | Repository visibility | Before external publication/real-data use | Unverified and unchanged; owner authorized local Task 1 scope |
 | Additional approved SVG variants / raster derivatives | Before their placements ship | Two Task 1 sources supplied; other placements deferred |
 | Production domains | Before Task 3 auth callback/cookie setup | Owner choice outstanding |
@@ -114,7 +119,7 @@ failures and reruns, are recorded in `docs/task-1-verification.md`.
 
 ## Known limitations
 
-- Hosted CI will run after the authorized branch push and pull request. CI is configured on pull_request and runs the shared local quality script.
+- Hosted Task 1 CI passed. CI is configured on pull_request and runs the shared local quality script; each later PR must pass its own checks.
 - Vercel/Fly configuration is prepared; Docker image execution, public endpoints, and real-phone deployment checks are unverified until approval/access.
 - Browser engines on Windows are not evidence of tests on physical iOS/Android devices.
 - The shell has no controls or product states; later-task auth, isolation, drafts, media, and CV load-bearing tests are not applicable yet and are not claimed complete.

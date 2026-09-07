@@ -1,6 +1,6 @@
 # Supply the approved existing app with --app; no app/account is selected here.
 [build]
-  dockerfile = "infra/api.Dockerfile"
+  dockerfile = "api.Dockerfile"
 
 [http_service]
   internal_port = 8000

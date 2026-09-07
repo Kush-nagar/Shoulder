@@ -3,7 +3,9 @@
 Task 2, `D:\Shoulder`, branch `task-2-local-infrastructure`; one writer.
 Initial implementation was completed without a commit or push. The owner later
 authorized final verification, a Task 2 commit, branch push, and a PR into `main`.
-No PR merge, deployment, or cloud resource creation is authorized.
+The owner subsequently authorized merging Tasks 1 and 2 after all checks and
+reviews pass, synchronizing `main`, and preparing an empty Task 3 branch.
+Deployment, cloud resources, and Task 3 implementation remain unauthorized.
 Status: **passed**, 2026-09-06. Canonical and fresh-clone infrastructure recovery,
 the complete regression suite, dependency audits, and final scope checks passed.
 The initial Windows Ruff block resolved under the unchanged security policy.
@@ -202,6 +204,33 @@ files. No product schema or API changes.
 - The owner authorized commit message `Complete Task 2 local infrastructure`
   and PR title `Task 2: Local infrastructure and Supabase`. The final handoff
   reports the resulting SHA, PR URL, and observed hosted check status.
+
+## PR #2 review and prerequisite integration — 2026-09-06
+
+- Task 1 PR #1 merged as `198dbc25395f6be4e8da60167a7889c3bd62f5da` after
+  quality and Bugbot passed. Its repair `2c62d05` fixed reusable SVG title IDs
+  and the Fly config-relative Dockerfile path on the Task 1 branch.
+- Merged `origin/main` into the published Task 2 branch without rebasing or
+  force-pushing. Resolved only a `STATUS.md` conflict, preserving both task records.
+  The resulting diff against `origin/main` contains only the original 13 Task 2
+  files; Task 1 repairs and the four unchanged `.mjs` files are absent from that diff.
+- Copilot's duplicate SVG finding is addressed by the Task 1 repair. Its Docker
+  base-image digest suggestion concerns the deferred Task 1 deployment scaffold,
+  now outside this PR; no dependency upgrade is required for Task 2.
+- The claimed UTF-16 `Set-Content` defect did not reproduce. Native Windows
+  PowerShell 5.1 wrote synthetic `KEY=ascii` as bytes
+  `4B-45-59-3D-61-73-63-69-69-0D-0A`, without a BOM or UTF-16 null bytes.
+  Generated usernames and hexadecimal passwords are entirely ASCII, so the
+  existing encoding is compatible with Compose in both 5.1 and PowerShell 7.
+- No change to the secret scan: there is no observed binary false positive,
+  and skipping extensions would weaken the existing check. Its UTF-8 decoding
+  retains recognizable ASCII credential patterns and the suite passes.
+- No Task 2 runtime repair was needed. Infrastructure scripts and pinned
+  configuration remain identical to the passing final recovery run above.
+  The combined branch's `scripts/check.ps1` exited zero before its integration
+  commit, including all three browser tests; log: `.tools/task-2-review-check.log`.
+  `git diff --check`, ignore checks, and the original-13-file scope review passed.
+  Hosted checks and a final merged-main rerun gate the final handoff.
 
 ## Local data and cleanup
 
