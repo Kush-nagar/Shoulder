@@ -12,11 +12,11 @@ Update this file at every task boundary. Keep it factual and short.
 - Last verified: 2026-09-08; Task 4 local checks passed (`check.ps1`, `check-db.ps1`, `check-auth.ps1`).
 - Task 2 — Local infrastructure: **complete** under its recorded local scope.
 - Task 3 — Verified authentication and session identity: **complete for the owner-authorized local scope**; merged as PR #3. Production-domain acceptance is deferred under ADR 0014.
-- Current task: Task 4 — Core schema, baseline RLS, and role-aware identity; **locally verified; full completion blocked**, not merged. The linked development project part of its Done criterion is **blocked**: no Shoulder Supabase project is linked, and creating one is an owner action. Evidence: `docs/task-4-verification.md`.
+- Current task: Task 4 — Core schema, baseline RLS, and role-aware identity; **verified locally and in Shoulder Dev**, not merged. The linked development project runs `0002_task4_privileges` on PostgreSQL 17; its Done criterion is satisfied. Evidence: `docs/task-4-verification.md`.
 - Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
 - Tasks 1 and 2 are merged; Task 3 started from `76486c5822aa426402945f64be41b9b9c353ab32`. No prior Git history changed.
 - The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.
-- Next numbered task: Task 5 — Extend the RLS isolation harness, **not started**. Task 4 ships the baseline policies, helpers, grants, and runtime-role suite that Task 5 extends; do not treat Task 4's remote Done criterion as satisfied until a development project exists.
+- Next numbered task: Task 5 — Extend the RLS isolation harness, **not started**. Task 4 ships the baseline policies, helpers, grants, and runtime-role suite that Task 5 extends; the linked-development acceptance is now verified.
 
 ## Task 3 local implementation
 
@@ -167,5 +167,7 @@ Recommended next local command: `.\scripts\infra.ps1 start`.
 ## Independent Task 4 review
 
 - Fixed revoked-player access, restricted bootstrap to a separate operator role, and removed role/grant artifacts on base downgrade; ADR 0016 records the operator boundary.
-- Full Task 4 acceptance remains blocked by the absent linked development project. Task 5 has not started and is not eligible until Task 4 is complete.
+- The previous linked-development blocker is resolved by the Shoulder Dev deployment. Task 5 is next eligible but has not started.
 - Independent verification: 38 real Supabase DB tests and 38 exact-image CI-fixture tests passed; up/down/up and role cleanup passed; 6 real auth browser tests and the full check passed.
+- Final delta review: confirmed Shoulder Dev revision and remote role separation read-only; strengthened the local-version guard regression and corrected superseded deployment-blocked statements.
+- Final delta checks: four repository tests, disabled-guard mutation check, full `check.ps1`, and `git diff --check` passed.

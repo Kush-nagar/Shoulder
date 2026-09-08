@@ -2,9 +2,8 @@
 
 Repository `D:\Shoulder`, branch `task-4-core-schema`, base `30fa84b` (merged
 `main`); one writer. Date: 2026-09-08.
-Status: **locally verified; full Task 4 completion blocked**. The Done criterion's *linked development project*
-half is **blocked**: no Shoulder Supabase project is linked to this repository,
-and creating one is an owner action that was explicitly out of scope.
+Status: **verified locally and in Shoulder Dev; not merged**. The linked
+development project acceptance is satisfied by the deployment recorded below.
 
 ## Scope and contract
 
@@ -196,7 +195,7 @@ that path runs against the real database.
 
 ## Development Supabase project
 
-**Provisioned and linked; deployment blocked on one owner action.**
+**Provisioned, linked, deployed, and verified.**
 
 | Fact | Value |
 |---|---|
@@ -219,8 +218,9 @@ The migration runs as `postgres`, the only role holding `REFERENCES` and
 `TRIGGER` on `auth.users`. Those privileges cannot be delegated: on the hosted
 project `postgres` holds none of them *with grant option*, so no deploy role can
 substitute, and Supabase refuses `ALTER ROLE postgres WITH PASSWORD` from SQL.
-The owner therefore resets the database password in the dashboard and stores the
-connection URL in git-ignored `.env.remote`. Deployment is blocked without it.
+The owner supplied the database connection URL through git-ignored
+`.env.remote`. This resolved the credential prerequisite; deployment then
+proceeded as recorded below. No connection value is included here.
 
 ### Deployment, 2026-09-08
 
@@ -325,10 +325,9 @@ The plain PostgreSQL 17.6 fixture covers only Auth table/role dependencies;
 it does not prove Supabase Auth behavior or remote Data API configuration.
 Real local Supabase and browser authentication remain separate required checks.
 
-External acceptance remains **blocked**, not waived: `Test-Path
-supabase/.temp/project-ref` returned false. No project was created or linked.
-The repository Done criterion requires both local and linked-development schema,
-so Task 4 cannot be considered complete and Task 5 is not yet eligible.
+At the earlier `a70ecc5` audit, external acceptance was blocked because no
+project was linked. The Shoulder Dev deployment above supersedes that blocker
+and satisfies the linked-development requirement. Task 5 remains unstarted.
 
 Independent verification results (after repairs):
 
@@ -344,5 +343,43 @@ Independent verification results (after repairs):
 The first independent database run reproduced two failures (revoked-player row
 visibility and runtime bootstrap execution); both pass after repair. A full-check
 formatting failure in the new test code was corrected before the passing rerun.
-No project linking, Task 5 implementation, merge, unrelated refactor, dependency
-addition, real credential, or generated machine-specific artifact is included.
+That earlier audit included no project linking or Task 5 implementation. The
+subsequent Shoulder Dev deployment is recorded above; neither change merges
+the branch or introduces unrelated product work.
+
+## Final delta review — 2026-09-08
+
+Reviewed only `a70ecc5..c1b10a7` plus the focused repairs below.
+Read-only checks targeted the locally linked project and confirmed its name is
+Shoulder Dev, region `us-east-1`, hosted version `17.6.1.166` (engine 17), and
+Alembic revision `0002_task4_privileges`. The runtime and operator credentials
+both authenticated as their intended roles; no credential value was printed.
+Live catalog queries confirmed all four tables retain forced RLS and migration
+ownership, runtime SELECT-only grants, zero runtime/operator role memberships,
+no runtime bootstrap execution, operator-only bootstrap execution, safe helper
+ownership/search paths, the Auth trigger, and zero remaining fixture rows.
+No other project was queried or changed in this review. Historical test counts
+above are deployment-run evidence, not a claim that this review reran them.
+
+The local guard itself needed no change: only a mismatched `postgres-version`
+file is removed; image digest pinning and lifecycle commands remain intact.
+The text-only regression accepted a commented-out removal command. Replaced it
+with execution of the actual guard in disposable directories: mismatched state
+is removed, matching/absent state is preserved, and project-ref, pooler and
+unrelated temp files survive. Commenting out removal now makes the test fail;
+the original source was restored after this mutation check. Secret-file checks
+also explicitly cover `.env.remote` and linked-project temp files.
+
+Corrected superseded deployment-blocked statements here and in `STATUS.md`.
+No migration, role, product code, credential, remote configuration, or Task 5
+change was made. The local startup guard was not modified by this review.
+
+
+Delta-review verification: `node --test tests/repository.test.mjs` passed all
+four tests; disabling the removal command caused the new regression to fail.
+`scripts/check.ps1` passed formatting, lint, types, seven Node tests, Python
+checks (12 passed, 35 database tests intentionally skipped), contract drift,
+production build, browser-secret scan and all three browser smoke tests.
+`git diff --check` passed. The initial formatting failure was corrected before
+the successful full rerun. Unchanged expensive database/auth suites were not
+rerun, and no hosted fixtures or migrations were executed in this review.
