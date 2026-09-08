@@ -260,6 +260,17 @@ WebKit initially exited before test execution; its isolated retry passed without
 changing Windows security policy or browser configuration. The full quality
 script is rerun before the repair is committed.
 
+A second PR #3 follow-up found that any failed top-level `GET /auth/callback` —
+missing, invalid, duplicated, or already-consumed parameters — cleared the
+caller's session cookies, so an external link could sign a signed-in user out.
+The callback now discards that failed flow's cookie writes instead of clearing,
+so an unverified exchange still never reaches the browser while an existing
+session survives. Reproduced first with the real local stack: the new
+`tests/auth.spec.mjs` assertions failed (identity 401) before the repair and all
+six browser tests pass after it. The other cookie-clearing call sites are
+deliberate and unchanged: sign-out acts on explicit user intent, and the proxy
+and identity route clear only a session that failed verification.
+
 19 existing files changed:
 
 ```text

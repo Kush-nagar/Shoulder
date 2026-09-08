@@ -212,6 +212,21 @@ test("real PKCE, identity forwarding, refresh, replay, and sign-out", async ({
   expect(await api.json()).toEqual(identityBody);
   expect((await request.get("http://127.0.0.1:8000/v1/me")).status()).toBe(404);
 
+  // Failed top-level callbacks must not let an external link log out a user.
+  for (const failedCallback of [
+    "/auth/callback",
+    "/auth/callback?code=invalid",
+    callback,
+  ]) {
+    await page.goto(failedCallback);
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
+      "could not sign you in",
+    );
+    const preserved = await context.request.get("/api/auth/identity");
+    expect(preserved.status()).toBe(200);
+    expect(await preserved.json()).toEqual(identityBody);
+  }
+
   const expired = expireAccessToken(session.access_token);
   expect(
     (

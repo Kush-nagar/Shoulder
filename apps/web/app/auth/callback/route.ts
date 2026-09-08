@@ -30,7 +30,9 @@ export async function GET(request: NextRequest) {
       NextResponse.redirect(`${config.origin}/auth/session`, 303),
     );
   } catch {
-    auth.clear();
+    // A failed top-level callback must not let an external link sign out an
+    // existing session, and an unverified exchange must not reach the browser.
+    auth.discardWrites();
     return auth.finish(
       NextResponse.redirect(`${config.origin}/auth/sign-in?error=1`, 303),
     );
