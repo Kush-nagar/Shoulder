@@ -62,6 +62,11 @@ test("local config, runtime version check, and stack contract agree on the Postg
     readFileSync("docs/03-schema.md", "utf8"),
     new RegExp(`^Postgres ${major} \\(`, "m"),
   );
+  // A linked hosted project otherwise pulls its own unpinned patch image.
+  assert.match(
+    readFileSync("scripts/infra.ps1", "utf8"),
+    /supabase\/\.temp\/postgres-version[\s\S]*Remove-Item \$versionFile/,
+  );
 });
 
 test("font manifest pin and distributed license match the installed package", () => {

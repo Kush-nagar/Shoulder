@@ -215,22 +215,63 @@ Pre-migration state of the linked project, checked before any schema change:
 no `app` or `private` schema, no migration history, and zero Auth users. There
 is nothing to conflict with and nothing that would justify a reset.
 
-**Blocker: the project's database password.** The Task 4 migration must run as
-`postgres`, because that is the only role holding `REFERENCES` and `TRIGGER` on
-`auth.users`, which the identity foreign key and the synchronization trigger
-require. On the hosted project `postgres` holds none of those privileges *with
-grant option* (`REFERENCES`, `TRIGGER`, and schema `USAGE` on `auth` all return
-false), so no delegated deploy role can run the migration either. The password
-generated at project creation is not returned by the API, and `ALTER ROLE
-postgres WITH PASSWORD` is refused: `permission denied to alter role — only
-superusers can alter privileged roles`. Resetting it is an owner action in the
-dashboard.
+The migration runs as `postgres`, the only role holding `REFERENCES` and
+`TRIGGER` on `auth.users`. Those privileges cannot be delegated: on the hosted
+project `postgres` holds none of them *with grant option*, so no deploy role can
+substitute, and Supabase refuses `ALTER ROLE postgres WITH PASSWORD` from SQL.
+The owner therefore resets the database password in the dashboard and stores the
+connection URL in git-ignored `.env.remote`. Deployment is blocked without it.
 
-Once that password exists in git-ignored local configuration, the remaining
-steps are `alembic upgrade head` against the project, operator-provisioned
-`shoulder_api` and `shoulder_operator` passwords, and a rerun of the isolation
-suite against the development URLs. Network reachability is already confirmed:
-the direct host resolves and accepts TCP 5432 from this machine.
+### Deployment, 2026-09-08
+
+`alembic upgrade head` applied `0001_core_identity` and `0002_task4_privileges`
+through the repository's normal workflow. Nothing was created by hand and no
+dashboard SQL was used. Remote `app.alembic_version` reads
+**`0002_task4_privileges`**, equal to the local head.
+
+Remote schema: `app.user_account`, `app.team`, `app.team_membership`,
+`app.player`, the five `private` helpers, and the
+`sync_user_account_from_auth` trigger on `auth.users`.
+
+Runtime and operator logins were provisioned with independently generated
+credentials applied through the migration connection. They live only in
+git-ignored `.env.remote`; no secret is in the repository, in documentation, in
+a tracked `.env`, or in any browser-visible configuration.
+
+Remote privilege state, read from the development database:
+
+| Property | Result |
+|---|---|
+| Table ownership and RLS | All four tables owned by `shoulder_migration`, RLS enabled and forced |
+| `shoulder_api` | `LOGIN`, `NOBYPASSRLS`, owns nothing in `app`/`private`, `SELECT` only |
+| Role assumption | `shoulder_api` holds zero role memberships, so it cannot `SET ROLE` into the migration, operator, or any privileged role |
+| `shoulder_operator` | Separate `LOGIN` role, `NOBYPASSRLS`, restricted to the bootstrap path |
+| Helpers | `SECURITY DEFINER` where required, all owned by `shoulder_migration`, every one pinned to `search_path=""` |
+| Browser-facing roles | `anon`, `authenticated`, and `PUBLIC` hold no grant and no schema `USAGE` on `app` or `private` |
+| Data API | Live REST probes with the project's publishable key return **HTTP 406** for `app.user_account`, `app.player`, and `private.current_user_id`; neither schema is exposed |
+
+Remote test run: 37 of the Task 4 tests against Shoulder Dev through the real
+`shoulder_api` and `shoulder_operator` logins — profile synchronization,
+duplicate active jersey rejection and reuse after a player leaves, duplicate
+linked player rejection, revoked membership and revoked player linkage,
+identity context isolation, runtime write denial, operator separation, and
+`/v1/me` for coach, player, unlinked, and unauthenticated callers. All passed.
+The migration downgrade test was deliberately excluded from the hosted project
+and is proved locally instead. Disposable fixtures clean themselves up; the
+project afterwards holds zero Auth users, accounts, teams, memberships, and
+players.
+
+### Defect found and repaired during deployment
+
+Linking a hosted project makes the Supabase CLI adopt that project's Postgres
+patch version locally: `supabase/.temp/postgres-version` became `17.6.1.166`,
+so the next `scripts/infra.ps1 start` pulled an unpinned image instead of the
+digest-pinned `17.6.1.165` and the local stack failed to come up. `start` now
+discards a `postgres-version` override that disagrees with the pinned image, so
+a linked project can never change the local image, and
+`tests/repository.test.mjs` fails if that guard is removed. Reproduced by
+planting the mismatched version file; the local stack then started on the pinned
+image and the full suite passed.
 
 ## Remaining risks
 
