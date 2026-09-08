@@ -13,10 +13,13 @@ Its generated configuration uses 17; `supabase services` resolves
 
 Use this supported Postgres 17 image for the local infrastructure only. Do not
 run a second database or replace the Supabase image with vanilla Postgres 16.
-The production Postgres 16 target and product schema contract remain unchanged.
-Resolve production/local major-version compatibility before Task 4 migrations;
-passing local infrastructure checks is not evidence of Postgres 16 compatibility.
 Task 2 adds no product tables, roles, RLS policies, or application migrations.
+
+As decided here, the production Postgres 16 target and the product schema
+contract remained unchanged, and production/local major-version compatibility
+had to be resolved before Task 4 migrations. ADR 0015 resolved it: Supabase has
+no Postgres 16 major, so both environments now contract Postgres 17 and local
+infrastructure checks are evidence for the production major version.
 
 Evidence: official [CLI release](https://github.com/supabase/cli/releases/tag/v2.116.0),
 executed `init`, `services`, and invalid-version probe. The current
