@@ -377,5 +377,17 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS private.current_user_id()")
     op.execute(f"REVOKE ALL ON SCHEMA app, private FROM {API_ROLE}")
     op.execute(f"ALTER ROLE {API_ROLE} RESET search_path")
-    # Schemas and cluster-level roles survive: the Alembic version table lives
-    # in `app`, and the roles may hold operator-provisioned credentials.
+    # Only Alembic's empty version-table schema survives a full rollback.
+    # Remove the ownership/grant/role artifacts as well as the product objects.
+    op.execute("DROP SCHEMA private")
+    op.execute(f"""
+        DO $$ BEGIN
+            EXECUTE format('ALTER SCHEMA app OWNER TO %I', CURRENT_USER);
+            EXECUTE format(
+                'REVOKE CREATE ON DATABASE %I FROM {MIGRATION_ROLE}',
+                pg_catalog.current_database()
+            );
+        END $$;
+    """)
+    op.execute(f"DROP ROLE {API_ROLE}")
+    op.execute(f"DROP ROLE {MIGRATION_ROLE}")

@@ -41,8 +41,8 @@ def run_migrations_online() -> None:
     engine = create_engine(migration_url(), future=True)
     with engine.connect() as connection:
         # The version table lives in the non-exposed `app` schema, so that
-        # schema must exist before Alembic touches it. Downgrades leave the
-        # empty schemas in place for the same reason.
+        # schema must exist before Alembic touches it. Downgrades leave only
+        # this schema and the empty version table for Alembic bookkeeping.
         connection.execute(text("CREATE SCHEMA IF NOT EXISTS app"))
         connection.execute(text("CREATE SCHEMA IF NOT EXISTS private"))
         connection.commit()

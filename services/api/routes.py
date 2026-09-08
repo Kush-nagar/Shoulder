@@ -32,7 +32,9 @@ def authorized_operator(
     expected = os.environ.get("OPERATOR_BOOTSTRAP_TOKEN")
     if not expected or len(expected) < 32:
         raise HTTPException(503, "Service unavailable", headers=NO_STORE)
-    if not x_operator_token or not hmac.compare_digest(x_operator_token, expected):
+    if not x_operator_token or not hmac.compare_digest(
+        x_operator_token.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(401, "Authentication required", headers=NO_STORE)
 
 

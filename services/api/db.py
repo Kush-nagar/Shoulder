@@ -40,5 +40,16 @@ def user_transaction(user_id: str) -> Iterator[Connection]:
 @contextmanager
 def operator_transaction() -> Iterator[Connection]:
     """Open one transaction with no user identity, for operator-only calls."""
-    with get_engine().connect() as connection, connection.begin():
-        yield connection
+    url = os.environ.get("OPERATOR_DATABASE_URL")
+    if not url:
+        raise HTTPException(503, "Service unavailable", headers=NO_STORE)
+    engine = create_engine(url)
+    try:
+        with engine.connect() as connection, connection.begin():
+            if connection.execute(text("SELECT current_user")).scalar_one() != (
+                "shoulder_operator"
+            ):
+                raise HTTPException(503, "Service unavailable", headers=NO_STORE)
+            yield connection
+    finally:
+        engine.dispose()

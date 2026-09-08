@@ -2,7 +2,7 @@
 
 Repository `D:\Shoulder`, branch `task-4-core-schema`, base `30fa84b` (merged
 `main`); one writer. Date: 2026-09-08.
-Status: **complete locally**. The Done criterion's *linked development project*
+Status: **locally verified; full Task 4 completion blocked**. The Done criterion's *linked development project*
 half is **blocked**: no Shoulder Supabase project is linked to this repository,
 and creating one is an owner action that was explicitly out of scope.
 
@@ -72,8 +72,9 @@ objects: `current_user_id()` (returns NULL for a missing or malformed
 Baseline SELECT policies for `shoulder_api`: own account; teams where the caller
 is a member; own memberships plus memberships of coached teams; players of
 coached teams plus the caller's own linked row when it is neither soft-deleted
-nor pending deletion. The runtime role is granted `SELECT` only, plus `EXECUTE`
-on the four callable helpers. Roster and product writes arrive with their own
+nor pending deletion and still has team membership. The runtime role is granted `SELECT` only, plus `EXECUTE`
+on the three identity/membership helpers. ADR 0016 moves bootstrap execution
+to the separate `shoulder_operator` role. Roster and product writes arrive with their own
 policies in their owning tasks, so a self-signup identity cannot create a team
 or a membership.
 
@@ -126,7 +127,8 @@ No existing pin changed. `uv.lock` adds those three plus `greenlet`, `mako`,
 `markupsafe`, and `tzdata`.
 
 New server-only inputs: `DATABASE_URL` (runtime role), `MIGRATION_DATABASE_URL`
-(Alembic only), and `OPERATOR_BOOTSTRAP_TOKEN`. Examples contain loopback
+(Alembic only), `OPERATOR_DATABASE_URL` (bootstrap role only), and
+`OPERATOR_BOOTSTRAP_TOKEN`. Examples contain loopback
 addresses and blank placeholders only; no `NEXT_PUBLIC_` variable was added.
 
 ## Automated verification
@@ -212,3 +214,68 @@ rerun of the isolation suite with its URLs.
   The trigger and backfill make that state unreachable in normal operation.
 - Coach and player destinations do not exist yet, so role routing is content on
   `/auth/session`. Tasks 6 and 7 own the real destinations.
+
+## Independent Task 4 audit — 2026-09-08
+
+Reviewed the actual diff from `main` at `e84edb2`, not the earlier result claims.
+Task 4 explicitly owns baseline RLS, positive/negative isolation tests, revoked
+membership, `/v1/me`, and `POST /v1/teams` operator bootstrap. No premature Task 5
+implementation was found or removed. Its future full matrix and reusable
+snapshot/mutation harness remain unstarted.
+
+Confirmed defects and repairs:
+
+- A revoked player still read their linked roster row because the policy omitted
+  membership. Reproduced on real Supabase; migration 0002 requires membership,
+  with database and `/v1/me` regression assertions.
+- `shoulder_api` could execute the SECURITY DEFINER bootstrap directly, bypassing
+  HTTP operator authorization. Reproduced its executable privilege. Migration
+  0002 grants execution only to `shoulder_operator`; the endpoint requires a
+  separately configured operator connection and rejects other connection roles.
+  Tests cover runtime role separation and the narrow operator grants. ADR 0016
+  documents provisioning and removal of this temporary credential.
+- Base downgrade retained database roles, ownership and the migration CREATE
+  grant. It now removes these, the private schema, helpers and Auth trigger.
+  Only `app.alembic_version` bookkeeping remains; role absence is asserted and
+  re-upgrade recreates roles without passwords. The destructive migration test
+  now actually runs last, after all runtime/operator tests.
+- Non-ASCII operator-token input caused `compare_digest` to raise TypeError.
+  Compare encoded bytes so invalid input gets 401; a focused regression covers it.
+- CI's fixed service password is replaced with a per-run disposable value;
+  runtime/operator passwords are generated in-process. These are test-only
+  credentials, with no production secret committed.
+
+The SQL schema otherwise matches the four identity-table definitions: Auth UUID
+FK without default, indexed FKs, bounded columns, cascade/restrict/set-null delete
+behavior and both player partial unique indexes. Auth synchronization copies no
+role metadata. All four tables retain enabled/forced RLS, owned by the non-bypass
+migration role; helper ownership and empty search paths stay intact. Browser
+roles cannot reach either schema. The BFF forwards only verified tokens, uses
+no-store responses, and introduces no Supabase product-data client. The Task 3
+404-to-401 assertion correctly follows the newly protected endpoint.
+
+The plain PostgreSQL 17.6 fixture covers only Auth table/role dependencies;
+it does not prove Supabase Auth behavior or remote Data API configuration.
+Real local Supabase and browser authentication remain separate required checks.
+
+External acceptance remains **blocked**, not waived: `Test-Path
+supabase/.temp/project-ref` returned false. No project was created or linked.
+The repository Done criterion requires both local and linked-development schema,
+so Task 4 cannot be considered complete and Task 5 is not yet eligible.
+
+Independent verification results (after repairs):
+
+| Command / target | Result |
+|---|---|
+| `scripts/check-db.ps1`, real local Supabase PostgreSQL 17.6 | 38 passed |
+| Alembic `upgrade head`, `downgrade base`, `upgrade head` on real Supabase | Passed; downgrade asserts zero product tables/helpers/Auth triggers and zero Shoulder roles |
+| Exact CI image `postgres:17.6` at the workflow digest, fresh disposable database plus Auth fixture | 38 passed, including clean upgrade/downgrade/re-upgrade; container removed |
+| `scripts/check-auth.ps1` | 6 passed across Chromium, Firefox and WebKit |
+| `scripts/check.ps1` | Passed: formatting/lint/types, 6 Node tests, Python 47 collected (12 passed, 35 DB tests intentionally skipped here and run separately above), generated-contract drift, build, browser-secret scan and 3 browser smoke tests |
+| `git diff --check` | Passed |
+
+The first independent database run reproduced two failures (revoked-player row
+visibility and runtime bootstrap execution); both pass after repair. A full-check
+formatting failure in the new test code was corrected before the passing rerun.
+No project linking, Task 5 implementation, merge, unrelated refactor, dependency
+addition, real credential, or generated machine-specific artifact is included.

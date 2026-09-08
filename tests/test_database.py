@@ -13,15 +13,18 @@ from uuid import UUID, uuid4
 
 from alembic import command
 from alembic.config import Config
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from services.api.auth import authenticated_identity, get_verifier
 from services.api.main import app
+from services.api.routes import authorized_operator
 
 ADMIN_URL = os.environ.get("MIGRATION_DATABASE_URL")
 RUNTIME_URL = os.environ.get("DATABASE_URL")
+OPERATOR_URL = os.environ.get("OPERATOR_DATABASE_URL")
 # Set only where a database is provisioned, so CI cannot skip this suite
 # silently while the shared quality script runs without one.
 REQUIRED = os.environ.get("REQUIRE_DATABASE_TESTS", "").lower() in ("1", "true")
@@ -34,11 +37,20 @@ def sqlstate(error: DBAPIError) -> str | None:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_non_ascii_operator_token_fails_as_unauthorized(self) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"OPERATOR_BOOTSTRAP_TOKEN": "a" * 32}):
+            with self.assertRaises(HTTPException) as caught:
+                authorized_operator("\u00e9" * 32)
+            self.assertEqual(caught.exception.status_code, 401)
+
     def test_database_tests_are_configured_where_required(self) -> None:
         """The isolation suite must never be skipped where it is required."""
         if REQUIRED:
             self.assertTrue(ADMIN_URL, "MIGRATION_DATABASE_URL is required")
             self.assertTrue(RUNTIME_URL, "DATABASE_URL is required")
+            self.assertTrue(OPERATOR_URL, "OPERATOR_DATABASE_URL is required")
 
     def test_product_schema_is_not_exposed_to_the_data_api(self) -> None:
         with open("supabase/config.toml", encoding="utf-8") as handle:
@@ -54,16 +66,19 @@ class ConfigurationTests(unittest.TestCase):
 class DatabaseTestCase(unittest.TestCase):
     admin: Engine
     runtime: Engine
+    operator: Engine
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.admin = create_engine(str(ADMIN_URL))
         cls.runtime = create_engine(str(RUNTIME_URL))
+        cls.operator = create_engine(str(OPERATOR_URL))
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls.admin.dispose()
         cls.runtime.dispose()
+        cls.operator.dispose()
 
     def setUp(self) -> None:
         self.created_users: list[UUID] = []
@@ -260,6 +275,33 @@ class SchemaContractTests(DatabaseTestCase):
             ).scalar_one()
             self.assertIn("search_path=", "".join(search_path or []))
 
+    def test_operator_and_runtime_privilege_separation(
+        self,
+    ) -> None:
+        with self.runtime.connect() as connection:
+            for role in ("shoulder_migration", "shoulder_operator"):
+                self.assertFalse(
+                    connection.execute(
+                        text("SELECT pg_has_role(current_user, :role, 'MEMBER')"),
+                        {"role": role},
+                    ).scalar_one()
+                )
+        with self.operator.connect() as connection:
+            self.assertFalse(
+                connection.execute(
+                    text("SELECT has_schema_privilege(current_user, 'app', 'USAGE')")
+                ).scalar_one()
+            )
+            self.assertFalse(
+                connection.execute(
+                    text(
+                        "SELECT rolsuper OR rolbypassrls "
+                        "OR rolcreaterole OR rolcreatedb "
+                        "FROM pg_roles WHERE rolname = current_user"
+                    )
+                ).scalar_one()
+            )
+
     def test_browser_facing_roles_have_no_privileges(self) -> None:
         with self.admin.connect() as connection:
             for role in ("anon", "authenticated"):
@@ -400,7 +442,7 @@ class RosterConstraintTests(DatabaseTestCase):
 class BootstrapTests(DatabaseTestCase):
     def test_operator_bootstrap_creates_one_team_with_its_coach(self) -> None:
         coach = self.create_auth_user("bootstrap.coach@example.test")
-        with self.runtime.connect() as connection, connection.begin():
+        with self.operator.connect() as connection, connection.begin():
             team_id = connection.execute(
                 text("""
                     SELECT private.bootstrap_initial_team(
@@ -422,7 +464,7 @@ class BootstrapTests(DatabaseTestCase):
 
         with (
             self.assertRaises(DBAPIError) as caught,
-            self.runtime.connect() as connection,
+            self.operator.connect() as connection,
             connection.begin(),
         ):
             connection.execute(
@@ -439,7 +481,7 @@ class BootstrapTests(DatabaseTestCase):
     def test_bootstrap_rejects_an_unknown_account(self) -> None:
         with (
             self.assertRaises(DBAPIError) as caught,
-            self.runtime.connect() as connection,
+            self.operator.connect() as connection,
             connection.begin(),
         ):
             connection.execute(
@@ -657,9 +699,35 @@ class RuntimeIsolationTests(DatabaseTestCase):
         self.assertEqual(self.visible(self.coach_a, "SELECT id FROM app.team"), [])
         self.assertEqual(self.visible(self.coach_a, "SELECT id FROM app.player"), [])
 
+    def test_revoked_player_membership_removes_row_and_api_link(self) -> None:
+        with self.admin.begin() as connection:
+            connection.execute(
+                text("DELETE FROM app.team_membership WHERE user_id = :user"),
+                {"user": self.player_a},
+            )
+        self.assertEqual(self.visible(self.player_a, "SELECT id FROM app.player"), [])
+        app.dependency_overrides[authenticated_identity] = lambda: str(self.player_a)
+        self.addCleanup(app.dependency_overrides.clear)
+        body = TestClient(app).get("/v1/me").json()
+        self.assertEqual(body["roles"], [])
+        self.assertEqual(body["team_ids"], [])
+        self.assertIsNone(body["player"])
+
+    def test_runtime_cannot_execute_operator_bootstrap(self) -> None:
+        with self.runtime.begin() as connection:
+            self.assertFalse(
+                connection.execute(
+                    text("""
+                    SELECT has_function_privilege(current_user,
+                        'private.bootstrap_initial_team(uuid,text,text,timestamptz,text)',
+                        'EXECUTE')
+                """)
+                ).scalar_one()
+            )
+
 
 @unittest.skipUnless(ADMIN_URL and RUNTIME_URL, "database URLs are not configured")
-class MigrationTests(unittest.TestCase):
+class ZMigrationTests(unittest.TestCase):
     """Runs last by name: it rebuilds the schema this suite depends on."""
 
     def test_zz_downgrade_and_clean_reupgrade(self) -> None:
@@ -671,6 +739,15 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual(self.table_count(connection), 0)
                 self.assertEqual(self.function_count(connection), 0)
                 self.assertEqual(self.trigger_count(connection), 0)
+                self.assertFalse(
+                    connection.execute(
+                        text(
+                            "SELECT EXISTS (SELECT 1 FROM pg_roles "
+                            "WHERE rolname IN ('shoulder_operator', "
+                            "'shoulder_api', 'shoulder_migration'))"
+                        )
+                    ).scalar_one()
+                )
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
@@ -698,7 +775,7 @@ class MigrationTests(unittest.TestCase):
             connection.execute(
                 text(
                     "SELECT count(*) FROM pg_proc"
-                    " WHERE pronamespace = 'private'::regnamespace"
+                    " WHERE pronamespace = to_regnamespace('private')"
                 )
             ).scalar_one()
         )
