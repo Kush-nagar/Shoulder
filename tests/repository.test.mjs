@@ -42,6 +42,28 @@ test("secret-bearing files are ignored and tracked/new source contains no creden
   }
 });
 
+test("local config, runtime version check, and stack contract agree on the Postgres major version", () => {
+  // ADR 0015: one major version locally and in production, so local checks are
+  // evidence for production migrations.
+  const major = "17";
+  assert.match(
+    readFileSync("supabase/config.toml", "utf8"),
+    new RegExp(`^major_version = ${major}$`, "m"),
+  );
+  assert.match(
+    readFileSync("scripts/infra.ps1", "utf8"),
+    new RegExp(`\\$version -notmatch '\\^${major}\\\\\\.\\d+'`),
+  );
+  assert.match(
+    readFileSync("AGENTS.md", "utf8"),
+    new RegExp(`^\\| Database \\| Postgres ${major} on Supabase;`, "m"),
+  );
+  assert.match(
+    readFileSync("docs/03-schema.md", "utf8"),
+    new RegExp(`^Postgres ${major} \\(`, "m"),
+  );
+});
+
 test("font manifest pin and distributed license match the installed package", () => {
   const manifest = JSON.parse(readFileSync("apps/web/package.json", "utf8"));
   const installed = JSON.parse(

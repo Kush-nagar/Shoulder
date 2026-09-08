@@ -1,6 +1,7 @@
 # 03 — Database contract
 
-Postgres 16. Product tables live in a non-exposed `app` schema; narrowly scoped helpers live in `private`. Every change is an Alembic migration. Every foreign key is indexed. All timestamps are `timestamptz`. All media offsets are non-negative integer milliseconds relative to the original uploaded file and use the `*_ms` suffix.
+Postgres 17 ([ADR 0015](decisions/0015-postgres-major-version-contract.md)).
+Product tables live in a non-exposed `app` schema; narrowly scoped helpers live in `private`. Every change is an Alembic migration. Every foreign key is indexed. All timestamps are `timestamptz`. All media offsets are non-negative integer milliseconds relative to the original uploaded file and use the `*_ms` suffix.
 
 This document is a schema contract, not a migration script.
 

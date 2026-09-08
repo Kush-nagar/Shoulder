@@ -26,7 +26,7 @@ Use the existing GitHub repository and committed initial handoff; do not reiniti
 
 **Read:** `docs/02-architecture.md`
 
-Provide Supabase CLI-managed local Auth/Postgres plus MinIO in Docker Compose, repeatable setup commands, `.env.example`, and pinned tool/image versions. Use the project-supported Postgres 16 image and do not run a second application Postgres. Verify the current Supabase CLI command surface rather than guessing it; record an ADR if the local image cannot match the Postgres target.
+Provide Supabase CLI-managed local Auth/Postgres plus MinIO in Docker Compose, repeatable setup commands, `.env.example`, and pinned tool/image versions. Use the project-supported Postgres image for the contracted major version and do not run a second application Postgres. Verify the current Supabase CLI command surface rather than guessing it; record an ADR if the local image cannot match the Postgres target.
 
 **Test:** clean checkout to healthy services using the documented command.
 
