@@ -196,15 +196,41 @@ that path runs against the real database.
 
 ## Development Supabase project
 
-**Blocked, not skipped.** `supabase/.temp` contains no `project-ref`, so no
-Supabase project is linked to this repository. The account's two visible
-projects (`Cross.ai`, `Cross`) belong to unrelated work and are not a Shoulder
-development environment. Creating or linking a project, and provisioning the
-runtime role password there, are owner actions and were explicitly out of scope
-for this task. Until that happens, Task 4's Done criterion is satisfied locally
-only. Applying it later is `supabase link`, `alembic upgrade head` against that
-project, an `ALTER ROLE shoulder_api PASSWORD` performed by the operator, and a
-rerun of the isolation suite with its URLs.
+**Provisioned and linked; deployment blocked on one owner action.**
+
+| Fact | Value |
+|---|---|
+| Project | `Shoulder Dev`, created 2026-09-08 (no prior Shoulder project existed) |
+| Organization | The account's only organization |
+| Region | `us-east-1`, chosen by the owner |
+| Cost | $0 per month; no plan change, purchase, or billing action |
+| Status | `ACTIVE_HEALTHY` |
+| Postgres | **17.6.1.166**, engine 17, `ga` release channel — matches ADR 0015 |
+| Link | `supabase link --project-ref …` succeeded; the ref lives in git-ignored `supabase/.temp` |
+
+`Cross` and `Cross.ai` were not used, altered, or read beyond listing them to
+establish that no Shoulder project existed.
+
+Pre-migration state of the linked project, checked before any schema change:
+no `app` or `private` schema, no migration history, and zero Auth users. There
+is nothing to conflict with and nothing that would justify a reset.
+
+**Blocker: the project's database password.** The Task 4 migration must run as
+`postgres`, because that is the only role holding `REFERENCES` and `TRIGGER` on
+`auth.users`, which the identity foreign key and the synchronization trigger
+require. On the hosted project `postgres` holds none of those privileges *with
+grant option* (`REFERENCES`, `TRIGGER`, and schema `USAGE` on `auth` all return
+false), so no delegated deploy role can run the migration either. The password
+generated at project creation is not returned by the API, and `ALTER ROLE
+postgres WITH PASSWORD` is refused: `permission denied to alter role — only
+superusers can alter privileged roles`. Resetting it is an owner action in the
+dashboard.
+
+Once that password exists in git-ignored local configuration, the remaining
+steps are `alembic upgrade head` against the project, operator-provisioned
+`shoulder_api` and `shoulder_operator` passwords, and a rerun of the isolation
+suite against the development URLs. Network reachability is already confirmed:
+the direct host resolves and accepts TCP 5432 from this machine.
 
 ## Remaining risks
 
@@ -215,7 +241,7 @@ rerun of the isolation suite with its URLs.
 - Coach and player destinations do not exist yet, so role routing is content on
   `/auth/session`. Tasks 6 and 7 own the real destinations.
 
-## Independent Task 4 audit � 2026-09-08
+## Independent Task 4 audit � 2026-09-08
 
 Reviewed the actual diff from `main` at `e84edb2`, not the earlier result claims.
 Task 4 explicitly owns baseline RLS, positive/negative isolation tests, revoked
