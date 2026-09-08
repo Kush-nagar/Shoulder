@@ -38,6 +38,25 @@ def database_urls_configured(*urls: str | None) -> bool:
     return all(bool(url) for url in urls)
 
 
+def require_local_database(*urls: str | None) -> None:
+    """Reject hosted targets and libpq overrides before destructive tests."""
+    if any(os.environ.get(key) for key in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE")):
+        raise ValueError("Destructive tests reject libpq connection overrides")
+    destinations = set()
+    for value in urls:
+        url = make_url(value or "postgresql://")
+        if (
+            url.host not in ("127.0.0.1", "::1")
+            or url.database != "postgres"
+            or url.port not in (5432, 54322)
+            or url.query
+        ):
+            raise ValueError("Destructive database tests require literal local URLs")
+        destinations.add((url.host, url.port, url.database))
+    if len(destinations) != 1:
+        raise ValueError("Database test URLs must target the same local database")
+
+
 # The suites below open an operator engine too, so a partial configuration
 # must skip rather than fail while constructing it.
 CONFIGURED = database_urls_configured(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
@@ -100,6 +119,15 @@ class DatabaseTestCase(unittest.TestCase):
         cls.admin = create_engine(str(ADMIN_URL))
         cls.runtime = create_engine(str(RUNTIME_URL))
         cls.operator = create_engine(str(OPERATOR_URL))
+        with cls.runtime.connect() as connection:
+            identity = connection.execute(
+                text("SELECT session_user, current_user")
+            ).one()
+            if tuple(identity) != ("shoulder_api", "shoulder_api"):
+                cls.admin.dispose()
+                cls.runtime.dispose()
+                cls.operator.dispose()
+                raise AssertionError("Isolation tests require the shoulder_api login")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -115,9 +143,12 @@ class DatabaseTestCase(unittest.TestCase):
     def cleanup(self) -> None:
         # Product rows first: team.created_by is ON DELETE RESTRICT by contract.
         with self.admin.connect() as connection, connection.begin():
-            connection.execute(text("DELETE FROM app.player"))
-            connection.execute(text("DELETE FROM app.team_membership"))
-            connection.execute(text("DELETE FROM app.team"))
+            # Delete only workspaces owned by accounts created by this test.
+            # Team foreign keys cascade to its roster and memberships.
+            connection.execute(
+                text("DELETE FROM app.team WHERE created_by = ANY(:users)"),
+                {"users": self.created_users},
+            )
             for user_id in self.created_users:
                 connection.execute(
                     text("DELETE FROM auth.users WHERE id = :id"), {"id": user_id}
@@ -782,6 +813,7 @@ class ZMigrationTests(unittest.TestCase):
     """Runs last by name: it rebuilds the schema this suite depends on."""
 
     def test_zz_downgrade_and_clean_reupgrade(self) -> None:
+        require_local_database(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
         config = Config("alembic.ini")
         engine = create_engine(str(ADMIN_URL))
         try:

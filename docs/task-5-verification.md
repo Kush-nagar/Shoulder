@@ -2,7 +2,10 @@
 
 Repository `D:\Shoulder`, branch `task-5-rls-isolation`, base `86773f0` (merged
 `main`); one writer. Date: 2026-09-08.
-Status: **verified locally and in Shoulder Dev; not merged**.
+Status: **independent review fixes applied; local verification blocked; not merged**.
+
+The independent review addendum below supersedes earlier verification claims.
+Earlier results are implementation history, not independent proof of these fixes.
 
 ## Scope and contract
 
@@ -167,7 +170,7 @@ Remote results:
 | Check | Result |
 |---|---|
 | Isolation suite against Shoulder Dev through the real runtime login | **25 passed** (snapshots, access matrix, roster display, revocation, context isolation); mutation checks deliberately excluded |
-| Policy set | Exactly the eight expected policies; zero permissive runtime policies |
+| Policy set | Eight expected policies; PERMISSIVE mode with identity/membership predicates |
 | Helpers | Six `private` helpers, all `search_path=""`, owned by `shoulder_migration` |
 | Browser-facing roles | `anon`, `authenticated`, `PUBLIC` hold zero grants on `app`/`private` |
 | Data API | REST probes with the project's publishable key return **HTTP 406** for `app.user_account` and for `private.team_roster` |
@@ -179,3 +182,99 @@ Remote results:
   endpoints that will call it. Its authorization is covered by tests today.
 - Mutation checks prove the harness detects three specific weakenings, not every
   possible one; the snapshot tests cover the rest of the policy surface.
+
+## Independent review — 2026-09-08
+
+Reviewed HEAD `a0e8fb7` against merged `main` and the Task 5 contract. Task 4
+prerequisites are complete. The limited roster display helper belongs to Task 5;
+no Task 6 endpoint, workflow, schema, or production dependency was introduced.
+No migration file was changed and no hosted migration was performed.
+
+### Defects and repairs
+
+- **High: unsafe policy mutation.** The opt-in flag previously permitted
+  committed policy changes against remote databases. Separate restoration
+  transactions could fail or reconstruct a stale definition. Destructive tests
+  now require matching literal loopback URLs, fixed local test ports/database,
+  no query overrides, and no libpq service/host-address overrides. Mutations
+  always roll back, then compare exact policy catalog rows including OIDs.
+  Mutation probes use `SET LOCAL ROLE shoulder_api` in the same transaction;
+  normal isolation tests use the real runtime login, now explicitly checked.
+  The full downgrade test shares the local-only guard.
+- **High: unscoped fixture cleanup.** Cleanup deleted every player, membership
+  and team. It now removes only teams owned by this test's generated accounts,
+  followed by those Auth users. A regression verifies that a second independent
+  fixture world survives cleanup.
+- **Acceptance gaps.** Team B now has the required second player. CI enables
+  mutation checks against its local Postgres service. New coverage exercises
+  both directions of mixed coach/player revocation on fresh connections, actual
+  single-slot pool checkout reuse after commit/rollback, concurrent transactions
+  overlapping at a bounded barrier, linked names, NULL/malformed context, and
+  deleted/deletion-pending roster filtering.
+- **Snapshot quality.** Checks now cover policy command, role, multiplicity,
+  mode and write boundary without locking policy names or helper-name substrings.
+  Behavioral positive/negative tests establish predicate semantics. Definer
+  mode is asserted alongside ownership and search path. The earlier claim of
+  zero permissive policies was incorrect: PostgreSQL PERMISSIVE mode does not
+  mean an unrestricted predicate.
+
+Changed files: `tests/test_database.py`, `tests/isolation_fixtures.py`,
+`tests/test_database_isolation.py`, `.github/workflows/ci.yml`, this record, and
+`STATUS.md`. Verification covers isolation/mutation, database/auth/full check
+scripts, Ruff, mypy, and diff/secret checks.
+
+### Independent hosted and RLS evidence
+
+Read-only metadata confirms **Shoulder Dev**, `gzbwlancwxhtausyokxt`, PostgreSQL
+**17.6.1.166**, revision **0003_roster_display**. No Cross, Cross.ai or production
+project was accessed. Actual catalog definitions, USING/WITH CHECK, commands,
+roles, and policy mode were inspected.
+
+Each protected table has one runtime SELECT policy and one owner ALL policy.
+Runtime reads are self-only for accounts, membership-scoped for teams,
+self-or-coach for memberships, and coach-or-own-linked-member for players.
+Runtime has no write policy or direct write grant. Owner ALL policies deliberately
+permit maintenance; definer safety depends on narrow helper bodies and role
+separation, not NOBYPASSRLS alone.
+
+The roster helper uses the caller's live coach membership for the supplied team.
+Static qualified SQL and an empty search path prevent injection/object-resolution
+attacks. It exposes only player ID and two display names, and filters deleted
+and deletion-pending players. Invalid context and NULL team fail closed. The
+membership table has no inactive flag: revocation is row removal; `player.active`
+alone is not membership revocation. No cached JWT role is consulted.
+
+Protected tables have RLS enabled/forced and the non-login, NOBYPASSRLS migration
+owner. Runtime has no role memberships, protected-object ownership or bootstrap
+execution. Only the operator can call bootstrap. Private helper ACLs exclude
+PUBLIC/anon/authenticated; migration-owner execution is intentional.
+
+Data API probes returned **406 / PGRST106**, explicitly listing only
+`public, graphql_public` as exposed for both requested schemas. Database role
+settings did not provide an exposed-schema list, so no stronger configuration
+metadata claim is made. No hosted policy mutation or downgrade was performed.
+
+### Independent verification and blockers
+
+- Initial repaired hosted isolation run: **30 passed, 3 mutation checks skipped**;
+  Auth/account/team/membership/player counts all returned to zero afterward.
+- Final hosted run: **38 passed, 3 mutation checks skipped** (35 isolation/guard
+  cases plus six configuration and role/grant checks). Final local unit discovery:
+  **16 passed, 67 database cases skipped** without database URLs; skips are not
+  counted as database verification.
+- Ruff format/lint passed. `mypy --no-sqlite-cache` passed for 12 source files.
+- Frontend formatting, lint, TypeScript and 7 Node tests passed, including the
+  tracked/new-file credential scan. `.env.remote` and `supabase/.temp` remain
+  untracked; no credentials were printed or committed.
+- `check-db.ps1` and `check-auth.ps1` were attempted but Docker cannot start:
+  its backend cannot access the stale `sailor-ingest.sock`. Narrow cleanup also
+  fails. No Docker data reset was attempted.
+- `check.ps1` was attempted normally and outside the sandbox. Outside the
+  sandbox it passes frontend checks and Ruff, then Windows Application Control
+  blocks `_sqlite3`, used by mypy's default cache. The alternate cache passes
+  type checking but does not make the exact script a pass.
+- Local Task 4 to Task 5 upgrade/downgrade/re-upgrade and post-cycle isolation,
+  including rewritten mutations, **remain unverified in this review**. Source
+  inspection confirms 0003 creates/drops only the roster helper; this does not
+  replace execution of the required local migration cycle.
+- Task 6 remains unstarted and is not eligible until Task 5 verification passes.

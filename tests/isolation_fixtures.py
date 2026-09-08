@@ -5,7 +5,7 @@ Task 5 owns the harness that later schema tasks extend. A suite builds one
 `shoulder_api` login, never as the owner or a superuser.
 
 The world is deliberately small and explicit: two teams, two coaches, two
-players on team A and one on team B, an authenticated account linked to
+players on each team, an authenticated account linked to
 nothing, and one account whose membership is revoked mid-test.
 """
 
@@ -49,6 +49,7 @@ class IsolationHarness(DatabaseTestCase):
         player_a1 = self.create_auth_user("player.a1@example.test", "Player A1")
         player_a2 = self.create_auth_user("player.a2@example.test", "Player A2")
         player_b1 = self.create_auth_user("player.b1@example.test", "Player B1")
+        player_b2 = self.create_auth_user("player.b2@example.test", "Player B2")
         unlinked = self.create_auth_user("unlinked@example.test", "Unlinked")
 
         team_a = self.admin_insert_team(coach_a, "Team A")
@@ -62,6 +63,9 @@ class IsolationHarness(DatabaseTestCase):
         row_b1 = self.admin_insert_player(
             team_b, user_id=player_b1, display_name="Player B1", jersey_number=1
         )
+        row_b2 = self.admin_insert_player(
+            team_b, user_id=player_b2, display_name="Player B2", jersey_number=2
+        )
         # A roster row a coach created before collecting any address.
         unlinked_row = self.admin_insert_player(
             team_a, display_name="Unlinked roster", jersey_number=3
@@ -70,6 +74,7 @@ class IsolationHarness(DatabaseTestCase):
             (team_a, player_a1),
             (team_a, player_a2),
             (team_b, player_b1),
+            (team_b, player_b2),
         ):
             self.add_membership(team, account, "player")
         return World(
@@ -79,7 +84,12 @@ class IsolationHarness(DatabaseTestCase):
                 players=(player_a1, player_a2),
                 rows=(row_a1, row_a2),
             ),
-            b=Team(id=team_b, coach=coach_b, players=(player_b1,), rows=(row_b1,)),
+            b=Team(
+                id=team_b,
+                coach=coach_b,
+                players=(player_b1, player_b2),
+                rows=(row_b1, row_b2),
+            ),
             unlinked=unlinked,
             unlinked_row=unlinked_row,
         )

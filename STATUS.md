@@ -9,11 +9,11 @@ Update this file at every task boundary. Keep it factual and short.
 - Checkout: `D:\Shoulder`, branch `task-5-rls-isolation`; one writer.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
-- Last verified: 2026-09-08; Task 5 local and Shoulder Dev checks passed (`check.ps1`, `check-db.ps1`, `check-auth.ps1`).
+- Last reviewed: 2026-09-08; Task 5 review fixes applied and hosted isolation passed. Local database/auth verification is blocked by Docker startup; full check is blocked by Windows Application Control on mypy SQLite. See `docs/task-5-verification.md`.
 - Task 2 — Local infrastructure: **complete** under its recorded local scope.
 - Task 3 — Verified authentication and session identity: **complete for the owner-authorized local scope**; merged as PR #3. Production-domain acceptance is deferred under ADR 0014.
 - Task 4 — Core schema, baseline RLS, and role-aware identity: **complete**, merged as PR #5. Evidence: `docs/task-4-verification.md`.
-- Current task: Task 5 — Extend the RLS isolation harness; **verified locally and in Shoulder Dev**, not merged. The development project runs `0003_roster_display` on PostgreSQL 17. Evidence: `docs/task-5-verification.md`.
+- Current task: Task 5 — Extend the RLS isolation harness; **independent review fixes applied; local verification blocked**, not merged. The development project runs `0003_roster_display` on PostgreSQL 17. Evidence: `docs/task-5-verification.md`.
 - Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
 - Tasks 1 and 2 are merged; Task 3 started from `76486c5822aa426402945f64be41b9b9c353ab32`. No prior Git history changed.
 - The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.

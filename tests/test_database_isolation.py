@@ -9,15 +9,27 @@ writes assert `42501`, because the runtime holds no write privilege at all.
 import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 from isolation_fixtures import IsolationHarness
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
-from test_database import CONFIGURED, TABLES, DatabaseTestCase, sqlstate
+from test_database import (
+    ADMIN_URL,
+    CONFIGURED,
+    OPERATOR_URL,
+    REQUIRED,
+    RUNTIME_URL,
+    TABLES,
+    DatabaseTestCase,
+    require_local_database,
+    sqlstate,
+)
 
-# Policy mutation rewrites live policies, so it runs only where the script says
-# the database is disposable. It never runs against a hosted project.
+# Opt-in is necessary but insufficient: setUpClass rejects nonlocal URLs before
+# opening a connection. Mutations are uncommitted and always rolled back.
 MUTABLE = os.environ.get("ALLOW_POLICY_MUTATION", "").lower() in ("1", "true")
 
 EXPECTED_POLICIES = {
@@ -44,6 +56,33 @@ EXPECTED_RUNTIME_FUNCTIONS = {
 }
 
 
+class MutationGuardTests(unittest.TestCase):
+    def test_mandatory_configuration_cannot_skip(self) -> None:
+        if REQUIRED:
+            self.assertTrue(CONFIGURED, "All three database URLs are mandatory")
+
+    def test_only_matching_literal_local_urls_are_accepted(self) -> None:
+        local = "postgresql+psycopg://postgres@127.0.0.1:54322/postgres"
+        require_local_database(local, local, local)
+        for unsafe in (
+            None,
+            "postgresql://postgres@db.gzbwlancwxhtausyokxt.supabase.co:5432/postgres",
+            "postgresql://postgres@localhost:54322/postgres",
+            local + "?host=db.gzbwlancwxhtausyokxt.supabase.co",
+            local + "?service=remote",
+            local.replace("54322", "5432"),
+            local.replace("/postgres", "/production"),
+        ):
+            with self.subTest(case=unsafe), self.assertRaises(ValueError):
+                require_local_database(local, unsafe, local)
+
+    def test_libpq_environment_cannot_redirect_local_mutations(self) -> None:
+        local = "postgresql://postgres@127.0.0.1:54322/postgres"
+        for key in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
+            with patch.dict(os.environ, {key: "remote"}), self.assertRaises(ValueError):
+                require_local_database(local, local, local)
+
+
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class PolicySurfaceTests(DatabaseTestCase):
     """Snapshots that fail when a policy or grant is removed or broadened."""
@@ -52,32 +91,24 @@ class PolicySurfaceTests(DatabaseTestCase):
         with self.admin.connect() as connection:
             rows = connection.execute(
                 text("""
-                    SELECT tablename, policyname, cmd, roles::text, qual, with_check
+                    SELECT tablename, policyname, cmd, roles::text, qual, with_check,
+                           permissive
                     FROM pg_policies WHERE schemaname = 'app'
                 """)
             ).all()
-        actual = {(r.tablename, r.policyname, r.cmd, r.roles) for r in rows}
-        self.assertEqual(actual, EXPECTED_POLICIES)
+        # Names and expression formatting are not authorization semantics.
+        actual = [(r.tablename, r.cmd, r.roles) for r in rows]
+        self.assertCountEqual(actual, [(t, c, r) for t, _, c, r in EXPECTED_POLICIES])
         for row in rows:
             with self.subTest(policy=row.policyname):
-                if row.policyname.endswith("_owner_maintenance"):
+                self.assertEqual(row.permissive, "PERMISSIVE")
+                if row.roles == "{shoulder_migration}":
+                    self.assertEqual(row.qual, "true")
+                    self.assertEqual(row.with_check, "true")
                     continue
-                # A runtime policy that stopped consulting the caller's identity,
-                # directly or through a membership helper, would authorize on row
-                # contents alone.
-                qual = row.qual or ""
-                self.assertTrue(
-                    any(
-                        name in qual
-                        for name in (
-                            "current_user_id",
-                            "is_team_member",
-                            "is_team_coach",
-                        )
-                    ),
-                    qual,
-                )
-                self.assertNotEqual(qual.strip(), "true")
+                # The positive/negative matrix verifies predicate semantics;
+                # spelling a particular helper name is not a security proof.
+                self.assertTrue(row.qual)
                 # None of the runtime policies may authorize a write.
                 self.assertIsNone(row.with_check)
 
@@ -163,6 +194,7 @@ class PolicySurfaceTests(DatabaseTestCase):
             with self.subTest(function=row.proname):
                 self.assertEqual(row.owner, "shoulder_migration")
                 self.assertIn('search_path=""', row.config)
+                self.assertEqual(row.prosecdef, row.proname != "current_user_id")
         # A definer helper is only safe because its owner cannot bypass RLS.
         self.assertEqual((owner.rolsuper, owner.rolbypassrls), (False, False))
 
@@ -180,6 +212,29 @@ class PolicySurfaceTests(DatabaseTestCase):
 
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class AccessMatrixTests(IsolationHarness):
+    def test_cleanup_preserves_another_fixture_world(self) -> None:
+        other = IsolationHarness()
+        other.admin, other.runtime, other.operator = (
+            self.admin,
+            self.runtime,
+            self.operator,
+        )
+        self.addCleanup(other.doCleanups)
+        other.setUp()
+        self.cleanup()
+        self.assertEqual(
+            other.read_as(other.world.a.coach, "SELECT id FROM app.team"),
+            [other.world.a.id],
+        )
+        self.assertCountEqual(
+            other.read_as(other.world.a.coach, "SELECT id FROM app.player"),
+            [*other.world.a.rows, other.world.unlinked_row],
+        )
+        self.assertEqual(
+            other.read_as(other.world.a.coach, "SELECT id FROM app.user_account"),
+            [other.world.a.coach],
+        )
+
     def test_coach_reads_exactly_their_own_team(self) -> None:
         world = self.world
         self.assertEqual(
@@ -382,6 +437,44 @@ class RosterDisplayTests(IsolationHarness):
             ["Player A1", "Player A2", "Unlinked roster"],
         )
 
+    def test_roster_linked_names_and_deletion_filters(self) -> None:
+        world = self.world
+        with self.runtime.connect() as connection, connection.begin():
+            self.as_user(connection, world.a.coach)
+            rows = connection.execute(
+                text("SELECT * FROM private.team_roster(:team)"), {"team": world.a.id}
+            ).all()
+        self.assertCountEqual(
+            rows,
+            [
+                (world.a.rows[0], "Player A1", "Player A1"),
+                (world.a.rows[1], "Player A2", "Player A2"),
+                (world.unlinked_row, "Unlinked roster", None),
+            ],
+        )
+        for column in ("deleted_at", "deletion_pending_at"):
+            with self.subTest(column=column):
+                with self.admin.begin() as connection:
+                    connection.execute(
+                        text(f"UPDATE app.player SET {column} = now() WHERE id = :id"),
+                        {"id": world.a.rows[0]},
+                    )
+                self.assertNotIn(
+                    "Player A1",
+                    self.read_as(world.a.coach, self.ROSTER, team=world.a.id),
+                )
+                self.assertEqual(
+                    self.read_as(world.a.players[0], "SELECT id FROM app.player"), []
+                )
+                with self.admin.begin() as connection:
+                    connection.execute(
+                        text(f"UPDATE app.player SET {column} = NULL WHERE id = :id"),
+                        {"id": world.a.rows[0]},
+                    )
+        self.assertEqual(self.read_as(world.a.coach, self.ROSTER, team=None), [])
+        for context in ("not-a-uuid", "' OR true --", ""):
+            self.assertEqual(self.read_as(context, self.ROSTER, team=world.a.id), [])
+
     def test_roster_display_never_returns_an_address(self) -> None:
         with self.runtime.connect() as connection, connection.begin():
             self.as_user(connection, self.world.a.coach)
@@ -406,6 +499,34 @@ class RosterDisplayTests(IsolationHarness):
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class RevocationTests(IsolationHarness):
     ROSTER_SQL = "SELECT player_name FROM private.team_roster(:team)"
+
+    def test_revoking_either_dual_role_preserves_the_other(self) -> None:
+        world = self.world
+        self.add_membership(world.b.id, world.a.coach, "player")
+        dual = self.admin_insert_player(world.b.id, user_id=world.a.coach)
+        for revoked, surviving, expected in (
+            (world.a.id, world.b.id, [dual]),
+            (world.b.id, world.a.id, [*world.a.rows, world.unlinked_row]),
+        ):
+            self.revoke_membership(revoked, world.a.coach)
+            # Dispose forces a fresh physical connection for each revocation.
+            self.runtime.dispose()
+            self.assertEqual(
+                self.read_as(world.a.coach, "SELECT id FROM app.team"), [surviving]
+            )
+            self.assertCountEqual(
+                self.read_as(world.a.coach, "SELECT id FROM app.player"), expected
+            )
+            self.assertEqual(
+                self.read_as(world.a.coach, self.ROSTER_SQL, team=world.b.id), []
+            )
+            self.assertEqual(
+                bool(self.read_as(world.a.coach, self.ROSTER_SQL, team=world.a.id)),
+                surviving == world.a.id,
+            )
+            self.add_membership(
+                revoked, world.a.coach, "coach" if revoked == world.a.id else "player"
+            )
 
     def test_revoked_coach_loses_the_team_on_the_next_transaction(self) -> None:
         world = self.world
@@ -457,6 +578,36 @@ class RevocationTests(IsolationHarness):
 
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class ContextIsolationTests(IsolationHarness):
+    def test_pool_checkout_reuses_backend_without_identity(self) -> None:
+        engine = create_engine(str(RUNTIME_URL), pool_size=1, max_overflow=0)
+        self.addCleanup(engine.dispose)
+        for rollback in (False, True):
+            with engine.connect() as connection:
+                self.as_user(connection, self.world.a.coach)
+                backend = connection.execute(
+                    text("SELECT pg_backend_pid()")
+                ).scalar_one()
+                self.assertEqual(
+                    connection.execute(text("SELECT id FROM app.team")).scalar_one(),
+                    self.world.a.id,
+                )
+                if not rollback:
+                    connection.commit()
+            with engine.connect() as connection, connection.begin():
+                self.assertEqual(
+                    connection.execute(text("SELECT pg_backend_pid()")).scalar_one(),
+                    backend,
+                )
+                self.assertEqual(
+                    list(connection.execute(text("SELECT id FROM app.team")).scalars()),
+                    [],
+                )
+                self.as_user(connection, self.world.b.coach)
+                self.assertEqual(
+                    connection.execute(text("SELECT id FROM app.team")).scalar_one(),
+                    self.world.b.id,
+                )
+
     def test_identity_does_not_outlive_its_transaction(self) -> None:
         world = self.world
         with self.runtime.connect() as connection:
@@ -527,9 +678,15 @@ class ContextIsolationTests(IsolationHarness):
 
     def test_concurrent_identities_do_not_interfere(self) -> None:
         world = self.world
+        barrier = Barrier(3, timeout=15)
 
         def teams_for(user_id: UUID) -> list[object]:
-            return self.read_as(user_id, "SELECT id FROM app.team")
+            with self.runtime.connect() as connection, connection.begin():
+                self.as_user(connection, user_id)
+                barrier.wait()
+                return list(
+                    connection.execute(text("SELECT id FROM app.team")).scalars()
+                )
 
         with ThreadPoolExecutor(max_workers=3) as pool:
             results = list(
@@ -544,63 +701,66 @@ class ContextIsolationTests(IsolationHarness):
 class PolicyMutationTests(IsolationHarness):
     """Prove the harness fails when a policy is weakened or removed."""
 
-    def apply(self, statement: str) -> None:
-        with self.admin.connect() as connection, connection.begin():
-            connection.execute(text(statement))
+    @classmethod
+    def setUpClass(cls) -> None:
+        require_local_database(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
+        super().setUpClass()
+
+    def assert_mutation_detected(
+        self, statement: str, sql: str, expected: list[object]
+    ) -> None:
+        # DDL and probes share one transaction. SET LOCAL ROLE makes the probe
+        # subject to runtime RLS; normal matrix tests use the real runtime login.
+        # Never commit weakened policies: rollback also handles assertion errors,
+        # disconnects and process termination, without hand-reconstructed DDL.
+        with self.admin.connect() as connection:
+            before = connection.execute(
+                text(
+                    "SELECT oid, polname, polcmd, polpermissive, polroles, "
+                    "polqual::text, polwithcheck::text FROM pg_policy ORDER BY oid"
+                )
+            ).all()
+            connection.rollback()
+            transaction = connection.begin()
+            try:
+                connection.execute(text(statement))
+                connection.execute(text("SET LOCAL ROLE shoulder_api"))
+                self.assertEqual(
+                    connection.execute(text("SELECT current_user")).scalar_one(),
+                    "shoulder_api",
+                )
+                self.as_user(connection, self.world.a.coach)
+                actual = list(connection.execute(text(sql)).scalars())
+                with self.assertRaises(AssertionError):
+                    self.assertCountEqual(actual, expected)
+            finally:
+                transaction.rollback()
+            after = connection.execute(
+                text(
+                    "SELECT oid, polname, polcmd, polpermissive, polroles, "
+                    "polqual::text, polwithcheck::text FROM pg_policy ORDER BY oid"
+                )
+            ).all()
+            self.assertEqual(after, before)
 
     def test_broadened_team_policy_is_detected(self) -> None:
-        world = self.world
-        original = (
-            "ALTER POLICY team_member_select ON app.team"
-            " USING (private.is_team_member(id))"
-        )
-        self.addCleanup(self.apply, original)
-        self.apply("ALTER POLICY team_member_select ON app.team USING (true)")
-        # Cross-team isolation must now fail.
-        self.assertNotEqual(
-            self.read_as(
-                world.a.coach, "SELECT id FROM app.team WHERE id = :id", id=world.b.id
-            ),
-            [],
+        self.assert_mutation_detected(
+            "ALTER POLICY team_member_select ON app.team USING (true)",
+            "SELECT id FROM app.team",
+            [self.world.a.id],
         )
 
     def test_removed_player_policy_is_detected(self) -> None:
-        world = self.world
-        original = """
-            CREATE POLICY player_visible_select ON app.player
-                FOR SELECT TO shoulder_api
-                USING (
-                    private.is_team_coach(team_id)
-                    OR (
-                        user_id = private.current_user_id()
-                        AND private.is_team_member(team_id)
-                        AND deleted_at IS NULL
-                        AND deletion_pending_at IS NULL
-                    )
-                )
-        """
-        self.addCleanup(self.apply, original)
-        self.apply("DROP POLICY player_visible_select ON app.player")
-        # Losing the policy denies the coach's own roster: the suite notices.
-        self.assertEqual(self.read_as(world.a.coach, "SELECT id FROM app.player"), [])
+        self.assert_mutation_detected(
+            "DROP POLICY player_visible_select ON app.player",
+            "SELECT id FROM app.player",
+            [*self.world.a.rows, self.world.unlinked_row],
+        )
 
     def test_membership_check_removal_is_detected(self) -> None:
-        world = self.world
-        original = (
+        self.assert_mutation_detected(
             "ALTER POLICY team_membership_visible_select ON app.team_membership"
-            " USING (user_id = private.current_user_id()"
-            " OR private.is_team_coach(team_id))"
-        )
-        self.addCleanup(self.apply, original)
-        self.apply(
-            "ALTER POLICY team_membership_visible_select ON app.team_membership"
-            " USING (true)"
-        )
-        self.assertNotEqual(
-            self.read_as(
-                world.a.players[0],
-                "SELECT user_id FROM app.team_membership WHERE team_id = :id",
-                id=world.b.id,
-            ),
-            [],
+            " USING (true)",
+            "SELECT user_id FROM app.team_membership",
+            [self.world.a.coach, *self.world.a.players],
         )
