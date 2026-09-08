@@ -20,3 +20,10 @@ if (!(Test-Path .env.local)) {
     @("MINIO_ROOT_USER=shoulder-local", "MINIO_ROOT_PASSWORD=$password") | Set-Content .env.local
 }
 Write-Host 'Local CLI ready; generated credentials stay in ignored .env.local.'
+if (!(Test-Path supabase/.env.signing-keys.json)) {
+    # JWKS verification requires asymmetric Auth tokens. Never print this private key.
+    # Generate outside the project config, which already references the not-yet-created file.
+    $signingKey = & .tools/supabase/supabase.exe gen signing-key --algorithm ES256 --workdir .tools
+    if ($LASTEXITCODE) { throw 'Local Auth key generation failed' }
+    "[$signingKey]" | Set-Content -Encoding utf8 supabase/.env.signing-keys.json
+}
