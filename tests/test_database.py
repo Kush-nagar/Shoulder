@@ -16,6 +16,7 @@ from alembic.config import Config
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from services.api.auth import authenticated_identity, get_verifier
@@ -30,6 +31,16 @@ OPERATOR_URL = os.environ.get("OPERATOR_DATABASE_URL")
 REQUIRED = os.environ.get("REQUIRE_DATABASE_TESTS", "").lower() in ("1", "true")
 
 TABLES = ("user_account", "team", "team_membership", "player")
+
+
+def database_urls_configured(*urls: str | None) -> bool:
+    """Every URL the harness opens must be present, or it cannot skip cleanly."""
+    return all(bool(url) for url in urls)
+
+
+# The suites below open an operator engine too, so a partial configuration
+# must skip rather than fail while constructing it.
+CONFIGURED = database_urls_configured(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
 
 
 def sqlstate(error: DBAPIError) -> str | None:
@@ -52,6 +63,22 @@ class ConfigurationTests(unittest.TestCase):
             self.assertTrue(RUNTIME_URL, "DATABASE_URL is required")
             self.assertTrue(OPERATOR_URL, "OPERATOR_DATABASE_URL is required")
 
+    def test_skip_guard_covers_every_url_the_harness_opens(self) -> None:
+        """A partial configuration skips; it must not fail on engine creation."""
+        for admin in ("url", None):
+            for runtime in ("url", None):
+                for operator in ("url", None):
+                    with self.subTest(admin=admin, runtime=runtime, operator=operator):
+                        self.assertEqual(
+                            database_urls_configured(admin, runtime, operator),
+                            bool(admin and runtime and operator),
+                        )
+        for suite in (DatabaseTestCase, ZMigrationTests):
+            with self.subTest(suite=suite.__name__):
+                self.assertEqual(
+                    getattr(suite, "__unittest_skip__", False), not CONFIGURED
+                )
+
     def test_product_schema_is_not_exposed_to_the_data_api(self) -> None:
         with open("supabase/config.toml", encoding="utf-8") as handle:
             config = handle.read()
@@ -62,7 +89,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("app", exposed)
 
 
-@unittest.skipUnless(ADMIN_URL and RUNTIME_URL, "database URLs are not configured")
+@unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class DatabaseTestCase(unittest.TestCase):
     admin: Engine
     runtime: Engine
@@ -726,7 +753,31 @@ class RuntimeIsolationTests(DatabaseTestCase):
             )
 
 
-@unittest.skipUnless(ADMIN_URL and RUNTIME_URL, "database URLs are not configured")
+def restore_login_passwords(engine: Engine) -> None:
+    """Re-apply the configured logins after a downgrade dropped their roles.
+
+    The passwords come from the URLs this process was given and are quoted by
+    Postgres itself, so no credential is interpolated or logged here.
+    """
+    with engine.connect() as connection, connection.begin():
+        for role, url in (
+            ("shoulder_api", RUNTIME_URL),
+            ("shoulder_operator", OPERATOR_URL),
+        ):
+            password = make_url(str(url)).password
+            if not password:
+                continue
+            statement = connection.execute(
+                text(
+                    "SELECT format('ALTER ROLE %I PASSWORD %L',"
+                    " cast(:role AS text), cast(:password AS text))"
+                ),
+                {"role": role, "password": password},
+            ).scalar_one()
+            connection.exec_driver_sql(statement)
+
+
+@unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class ZMigrationTests(unittest.TestCase):
     """Runs last by name: it rebuilds the schema this suite depends on."""
 
@@ -751,10 +802,12 @@ class ZMigrationTests(unittest.TestCase):
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
-                self.assertEqual(self.function_count(connection), 5)
+                self.assertEqual(self.function_count(connection), 6)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")
+            # The downgrade dropped the login roles; later suites still need them.
+            restore_login_passwords(engine)
             engine.dispose()
 
     @staticmethod

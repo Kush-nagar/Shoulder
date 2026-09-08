@@ -31,5 +31,7 @@ select = ["E", "F", "I", "UP"]
 python_version = "3.11"
 strict = true
 explicit_package_bases = true
+# Test suites share fixtures by module name, matching unittest discovery.
+mypy_path = "tests"
 files = ["services/api", "scripts", "tests"]
 exclude = ["node_modules", ".venv", ".tools"]
