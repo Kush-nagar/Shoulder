@@ -13,7 +13,14 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [{ "name": "next" }]
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@shoulder/contracts": ["../../packages/contracts/api.d.ts"]
+    }
   },
   "include": [
     "next-env.d.ts",

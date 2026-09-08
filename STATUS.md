@@ -6,15 +6,17 @@ Update this file at every task boundary. Keep it factual and short.
 
 - Current phase: Phase A — Foundation.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: `D:\Shoulder`, branch `task-3-application-foundation`; one writer; owner authorized final review, commit, push, and PR creation.
-- Application: health shell plus Task 3 verified authentication/session boundary; no product schema or roles.
+- Checkout: `D:\Shoulder`, branch `task-4-core-schema`; one writer.
+- Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
-- Last verified: 2026-09-07; final Task 3 local checks passed.
+- Last verified: 2026-09-08; Task 4 local checks passed (`check.ps1`, `check-db.ps1`, `check-auth.ps1`).
 - Task 2 — Local infrastructure: **complete** under its recorded local scope.
-- Current task: Task 3 — Verified authentication and session identity; **complete for the owner-authorized local scope**. Production-domain acceptance is deferred under the owner's request and ADR 0014.
+- Task 3 — Verified authentication and session identity: **complete for the owner-authorized local scope**; merged as PR #3. Production-domain acceptance is deferred under ADR 0014.
+- Current task: Task 4 — Core schema, baseline RLS, and role-aware identity; **complete locally**, not merged. The linked development project part of its Done criterion is **blocked**: no Shoulder Supabase project is linked, and creating one is an owner action. Evidence: `docs/task-4-verification.md`.
 - Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
 - Tasks 1 and 2 are merged; Task 3 started from `76486c5822aa426402945f64be41b9b9c353ab32`. No prior Git history changed.
-- Next numbered task: Task 4, **not started**. The Postgres 17 versus 16 prerequisite is **resolved**: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`. Outstanding production acceptance still applies before treating Task 4 prerequisites as satisfied.
+- The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.
+- Next numbered task: Task 5 — Extend the RLS isolation harness, **not started**. Task 4 ships the baseline policies, helpers, grants, and runtime-role suite that Task 5 extends; do not treat Task 4's remote Done criterion as satisfied until a development project exists.
 
 ## Task 3 local implementation
 
