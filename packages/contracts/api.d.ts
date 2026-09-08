@@ -38,6 +38,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bootstrap Team
+         * @description Create the single initial team and its coach membership atomically.
+         */
+        post: operations["bootstrap_team_v1_teams_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -50,6 +87,11 @@ export interface components {
              */
             user_id: string;
         };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** Health */
         Health: {
             /**
@@ -58,6 +100,79 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /** LinkedPlayer */
+        LinkedPlayer: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /**
+         * Me
+         * @description Database-derived identity. An unlinked account has empty roles/teams.
+         */
+        Me: {
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            player?: components["schemas"]["LinkedPlayer"] | null;
+            /** Roles */
+            roles: ("coach" | "player")[];
+            /** Team Ids */
+            team_ids: string[];
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** TeamBootstrap */
+        TeamBootstrap: {
+            /** Age Group */
+            age_group?: string | null;
+            /**
+             * Coach User Id
+             * Format: uuid
+             */
+            coach_user_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Season End At
+             * Format: date-time
+             */
+            season_end_at: string;
+            /** Season Label */
+            season_label: string;
+        };
+        /** TeamCreated */
+        TeamCreated: {
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
     };
     responses: never;
@@ -104,6 +219,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthIdentity"];
+                };
+            };
+        };
+    };
+    me_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    bootstrap_team_v1_teams_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-operator-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamBootstrap"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -15,4 +15,6 @@ export async function proxy(request: NextRequest) {
   }
 }
 
-export const config = { matcher: ["/auth/session", "/api/auth/identity"] };
+export const config = {
+  matcher: ["/auth/session", "/api/auth/identity", "/api/me"],
+};

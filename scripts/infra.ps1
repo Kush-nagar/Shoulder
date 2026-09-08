@@ -63,6 +63,15 @@ switch ($Action) {
             # The CLI owns container definitions and asks for these exact tags.
             Invoke-Infra docker @('tag', $pinned, $image.Name)
         }
+        # Linking a hosted project makes the CLI adopt that project's Postgres
+        # patch version locally, which would bypass the digest pins above.
+        $pinnedPostgres = @($images.PSObject.Properties.Name |
+                Where-Object { $_ -like '*/postgres:*' }) -replace '.*:', ''
+        $versionFile = 'supabase/.temp/postgres-version'
+        if ((Test-Path $versionFile) -and
+            (Get-Content $versionFile -Raw).Trim() -ne $pinnedPostgres) {
+            Remove-Item $versionFile -Force
+        }
         $network = & docker network ls --filter 'name=^shoulder-supabase-local$' --format '{{.Name}}'
         if ($LASTEXITCODE) { throw 'Cannot inspect local Docker networks' }
         if (!$network) {

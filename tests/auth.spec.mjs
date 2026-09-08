@@ -210,7 +210,23 @@ test("real PKCE, identity forwarding, refresh, replay, and sign-out", async ({
   });
   expect(api.status()).toBe(200);
   expect(await api.json()).toEqual(identityBody);
-  expect((await request.get("http://127.0.0.1:8000/v1/me")).status()).toBe(404);
+  // Task 4 completes /v1/me: it exists and refuses an unverified caller.
+  expect((await request.get("http://127.0.0.1:8000/v1/me")).status()).toBe(401);
+  const me = await context.request.get("/api/me");
+  expect(me.status()).toBe(200);
+  // A signed-in but unlinked account gets no roles, teams, or player.
+  expect(await me.json()).toEqual({
+    user_id: identityBody.user_id,
+    email: email.toLowerCase(),
+    display_name: email.split("@")[0].toLowerCase(),
+    roles: [],
+    team_ids: [],
+    player: null,
+  });
+  await page.goto("/auth/session");
+  await expect(page.getByRole("main")).toContainText(
+    "Team access is not available yet.",
+  );
 
   // Failed top-level callbacks must not let an external link log out a user.
   for (const failedCallback of [

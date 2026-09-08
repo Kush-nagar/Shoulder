@@ -1,12 +1,24 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 test("secret-bearing files are ignored and tracked/new source contains no credential patterns", () => {
   const examples = [
     ".env",
     ".env.local",
+    ".env.remote",
+    "supabase/.temp/project-ref",
+    "supabase/.temp/postgres-version",
     "apps/web/.env.local",
     "supabase/.env.signing-keys.json",
     "services/api/.env",
@@ -62,6 +74,59 @@ test("local config, runtime version check, and stack contract agree on the Postg
     readFileSync("docs/03-schema.md", "utf8"),
     new RegExp(`^Postgres ${major} \\(`, "m"),
   );
+});
+
+test("local start removes only a conflicting linked Postgres version override", () => {
+  const source = readFileSync("scripts/infra.ps1", "utf8");
+  // Execute the actual start guard without Docker or the Supabase CLI.
+  const start = source.indexOf("        $pinnedPostgres =");
+  const end = source.indexOf("        $network =", start);
+  assert.ok(
+    start >= 0 && end > start,
+    "Local Postgres version guard is missing",
+  );
+  const guard = source.slice(start, end);
+  const images = readFileSync("infra/supabase-images.json", "utf8");
+  const pinned = Object.keys(JSON.parse(images))
+    .find((name) => name.includes("/postgres:"))
+    .split(":")
+    .at(-1);
+  const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+  const root = mkdtempSync(join(tmpdir(), "shoulder-version-guard-"));
+  try {
+    for (const [name, version] of [
+      ["mismatch", `${pinned}-hosted`],
+      ["matching", `${pinned}\n`],
+      ["missing", null],
+    ]) {
+      const workspace = join(root, name);
+      const state = join(workspace, "supabase", ".temp");
+      mkdirSync(state, { recursive: true });
+      const versionFile = join(state, "postgres-version");
+      if (version !== null) writeFileSync(versionFile, version);
+      for (const file of ["project-ref", "pooler-url", "other-state"]) {
+        writeFileSync(join(state, file), `preserve-${file}`);
+      }
+      execFileSync(process.platform === "win32" ? "powershell.exe" : "pwsh", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$ErrorActionPreference = 'Stop'; Set-Location -LiteralPath ${quote(workspace)}; $images = ${quote(images)} | ConvertFrom-Json; ${guard}`,
+      ]);
+      assert.equal(existsSync(versionFile), name === "matching", name);
+      if (name === "matching") {
+        assert.equal(readFileSync(versionFile, "utf8"), version);
+      }
+      for (const file of ["project-ref", "pooler-url", "other-state"]) {
+        assert.equal(
+          readFileSync(join(state, file), "utf8"),
+          `preserve-${file}`,
+        );
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("font manifest pin and distributed license match the installed package", () => {
