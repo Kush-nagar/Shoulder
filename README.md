@@ -220,9 +220,10 @@ are excluded. MinIO is the private S3-compatible storage boundary in Compose.
 Its `shoulder-local` bucket denies anonymous reads. Images are pinned by digest
 in `infra/supabase-images.json` and `infra/compose.yaml`.
 
-The CLI rejects Postgres 16. Local Postgres **17.6.1.165** is documented in
-[ADR 0013](docs/decisions/0013-local-supabase-postgres-version.md); production
-version compatibility must be resolved before Task 4. There are no application
+The CLI rejects Postgres 16, which Supabase does not offer. Local and production
+share Postgres 17 under
+[ADR 0015](docs/decisions/0015-postgres-major-version-contract.md); the local
+image is **17.6.1.165**. There are no application
 migrations in Task 2: `migrate` runs the CLI's explicit local migration command
 with no product SQL. Product schema changes will use Alembic in their assigned tasks.
 

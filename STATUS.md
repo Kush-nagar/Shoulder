@@ -14,7 +14,7 @@ Update this file at every task boundary. Keep it factual and short.
 - Current task: Task 3 — Verified authentication and session identity; **complete for the owner-authorized local scope**. Production-domain acceptance is deferred under the owner's request and ADR 0014.
 - Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
 - Tasks 1 and 2 are merged; Task 3 started from `76486c5822aa426402945f64be41b9b9c353ab32`. No prior Git history changed.
-- Next numbered task: Task 4, **not started**. Resolve local Postgres 17 versus production 16 compatibility and outstanding production acceptance before treating its prerequisites as satisfied.
+- Next numbered task: Task 4, **not started**. The Postgres 17 versus 16 prerequisite is **resolved**: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`. Outstanding production acceptance still applies before treating Task 4 prerequisites as satisfied.
 
 ## Task 3 local implementation
 
@@ -68,8 +68,9 @@ Update this file at every task boundary. Keep it factual and short.
 - Initial CPU flags suggested disabled virtualization; `HypervisorPresent=True`
   contradicted that interpretation. Docker logs established the actual blocker
   was missing WSL. It is resolved; `docker info` returns **29.7.2**.
-- ADR 0013 records the CLI's explicit rejection of Postgres 16 and local-only
-  Postgres **17.6.1.165** exception. Resolve production compatibility before Task 4.
+- ADR 0013 records the CLI's explicit rejection of Postgres 16 and the local
+  Postgres **17.6.1.165** image. ADR 0015 supersedes its production 16 target:
+  Supabase has no 16 major, so local and production both contract Postgres 17.
 - Bootstrap/checksum, generated TOML parsing via `supabase services`, Compose
   validation, PowerShell parsing, and destructive-check opt-in rejection passed.
 - Task 1 check found missing `.mjs` LF policy after branch checkout; added it to

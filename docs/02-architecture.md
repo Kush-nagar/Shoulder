@@ -160,10 +160,10 @@ This is the eventual layout. Task 1 creates web/API, the worker boundary, genera
 
 - Node.js current supported LTS; pnpm
 - Python 3.11 for web services; `uv`; ruff
-- Supabase CLI-managed local Auth/Postgres, using the project-supported Postgres 16 image; do not run a second application Postgres
+- Supabase CLI-managed local Auth/Postgres, using the project-supported Postgres 17 image; do not run a second application Postgres
 - MinIO through Docker Compose for the R2-compatible storage boundary
 - ffmpeg/ffprobe pinned in the worker image
-- Supabase CLI and local image versions verified from current docs when Task 2 begins; an incompatibility with the Postgres 16 target requires an ADR
+- Supabase CLI and local image versions verified from current docs; local and production share the Postgres 17 major version under [ADR 0015](decisions/0015-postgres-major-version-contract.md), and any change to that major version requires a new ADR
 
 The GPU environment remains separate: Python 3.10.16, CUDA 12.1, PyTorch 2.4.1, and the versions required by the current SoccerMaster instructions.
 

@@ -1,6 +1,8 @@
 # ADR 0013 — Local Supabase Postgres compatibility
 
-- Status: local-only exception under the Task 2 incompatibility clause
+- Status: local-only exception under the Task 2 incompatibility clause; its
+  production Postgres 16 target is superseded by
+  [ADR 0015](0015-postgres-major-version-contract.md)
 - Date: 2026-09-05
 
 Task 2 requires CLI-managed Auth/Postgres and explicitly permits an ADR when
