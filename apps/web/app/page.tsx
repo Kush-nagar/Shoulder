@@ -1,21 +1,25 @@
-import { ShoulderMark, ShoulderWordmark } from "../components/brand";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { fetchMe } from "../lib/api";
+import { createAuthClient, verifiedToken } from "../lib/auth/server";
 
-export default function Home() {
-  return (
-    <main className="mx-auto flex min-h-dvh max-w-[680px] flex-col justify-center px-5 py-12 md:px-8">
-      <header className="mb-12">
-        <ShoulderWordmark className="h-auto w-44" />
-      </header>
-      <h1 className="text-[26px] leading-[1.15] font-semibold md:text-[30px]">
-        A quiet space for development.
-      </h1>
-      <p className="mt-4 text-base leading-relaxed text-muted">
-        Shoulder brings a coach’s observations closer to the player.
-      </p>
-      <footer className="mt-12 flex items-center gap-3 border-t border-line pt-6">
-        <ShoulderMark className="size-6" />
-        <p className="text-sm text-muted">Shoulder is running.</p>
-      </footer>
-    </main>
-  );
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const store = await cookies();
+  // Proxy owns refresh writes before this read-only server component.
+  const client = createAuthClient({ getAll: () => store.getAll() });
+  let token: string | null = null;
+  try {
+    token = await verifiedToken(client);
+  } catch {
+    token = null;
+  }
+  if (!token) redirect("/auth/sign-in");
+  // Roles come from team membership in the database, never from the route,
+  // a cookie, a query parameter, or client state. No role and an unavailable
+  // API both land on the neutral signed-in page, which grants nothing.
+  const me = await fetchMe(token);
+  if (me?.roles.includes("coach")) redirect("/coach/roster");
+  redirect("/auth/session");
 }

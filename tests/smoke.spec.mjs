@@ -31,10 +31,12 @@ test("local health, approved vectors, self-hosted font, and accessible shell", a
   ];
   for (const [width, height] of sizes) {
     await page.setViewportSize({ width, height });
-    await page.goto("/");
+    // `/` redirects on a verified session, so the public shell is the sign-in
+    // page. It carries both approved marks, which is what this test proves.
+    await page.goto("/auth/sign-in");
     await page.evaluate(() => document.fonts.ready);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "A quiet space for development.",
+      "Sign in to Shoulder",
     );
     expect(
       await page.evaluate(

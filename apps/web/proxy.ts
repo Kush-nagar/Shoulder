@@ -15,6 +15,14 @@ export async function proxy(request: NextRequest) {
   }
 }
 
+// Every route that reads a verified session must be listed, or a refreshed
+// token is never written back and the session expires silently mid-use.
 export const config = {
-  matcher: ["/auth/session", "/api/auth/identity", "/api/me"],
+  matcher: [
+    "/",
+    "/coach/:path*",
+    "/auth/session",
+    "/api/auth/identity",
+    "/api/me",
+  ],
 };

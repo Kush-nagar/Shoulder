@@ -30,7 +30,7 @@ OPERATOR_URL = os.environ.get("OPERATOR_DATABASE_URL")
 # silently while the shared quality script runs without one.
 REQUIRED = os.environ.get("REQUIRE_DATABASE_TESTS", "").lower() in ("1", "true")
 
-TABLES = ("user_account", "team", "team_membership", "player")
+TABLES = ("user_account", "team", "team_membership", "player", "development_goal")
 
 
 def database_urls_configured(*urls: str | None) -> bool:
@@ -671,7 +671,16 @@ class RuntimeIsolationTests(DatabaseTestCase):
             )
         self.assertEqual(self.visible(self.player_a, "SELECT id FROM app.player"), [])
 
-    def test_every_table_denies_runtime_writes(self) -> None:
+    def test_runtime_writes_outside_the_granted_surface_are_denied(self) -> None:
+        """`0004` gave a coach a bounded write surface on the roster and goals.
+
+        Everything outside it still raises. `user_account`, `team`, and
+        `team_membership` remain fully read-only for the runtime role; on
+        `app.player` and `app.development_goal` the grants stop at named
+        columns, deletion is ungranted, and a cross-team insert violates the
+        policy. Row-level filtering of a permitted verb is not an error, so it
+        is proved by row counts in `tests/test_database_roster.py` instead.
+        """
         statements = {
             "user_account": (
                 "INSERT INTO app.user_account (id, email, display_name)"
@@ -692,10 +701,20 @@ class RuntimeIsolationTests(DatabaseTestCase):
                 "DELETE FROM app.team_membership",
             ),
             "player": (
+                # Granted verb, forbidden team: the policy refuses the new row.
                 "INSERT INTO app.player (team_id, display_name)"
                 f" VALUES ('{self.team_b}', 'Intruder')",
-                "UPDATE app.player SET display_name = 'changed'",
+                # Ungranted columns: linking and moving teams are not writable.
+                f"UPDATE app.player SET team_id = '{self.team_b}'",
+                f"UPDATE app.player SET user_id = '{self.coach_a}'",
                 "DELETE FROM app.player",
+            ),
+            "development_goal": (
+                "INSERT INTO app.development_goal (player_id, title, created_by)"
+                f" VALUES ('{self.player_b_row}', 'Intruder', '{self.coach_a}')",
+                f"UPDATE app.development_goal SET player_id = '{self.player_b_row}'",
+                f"UPDATE app.development_goal SET created_by = '{self.coach_a}'",
+                "DELETE FROM app.development_goal",
             ),
         }
         for table, cases in statements.items():
@@ -839,7 +858,8 @@ class ZMigrationTests(unittest.TestCase):
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
-                self.assertEqual(self.function_count(connection), 6)
+                # 0001 six, plus the three `0004` roster and goal helpers.
+                self.assertEqual(self.function_count(connection), 9)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")

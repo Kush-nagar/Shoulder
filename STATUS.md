@@ -17,7 +17,9 @@ Update this file at every task boundary. Keep it factual and short.
 - Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
 - Tasks 1 and 2 are merged; Task 3 started from `76486c5822aa426402945f64be41b9b9c353ab32`. No prior Git history changed.
 - The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.
-- Tasks 1–5 are merged into `main`. Task 6 is **not started**. From Task 6 onward the repository uses the project-block workflow in `CLAUDE.md`; the next step is project planning under `docs/projects/`. Task 5 ships the completed access matrix, reusable isolation fixtures, mutation checks, and policy/grant snapshots that later protected tables extend.
+- Tasks 1–5 are merged into `main`. From Task 6 onward the repository uses the project-block workflow in `CLAUDE.md`; the roadmap is `docs/projects/README.md`.
+- Project Block 1 — Roster and development goals (Tasks 6 and 7): **complete and verified on branch `project-01-roster-goals`, not merged**; awaiting independent review. Evidence: `docs/projects/project-01-roster-goals-verification.md`. `Shoulder Dev` runs `0004_roster_goals`. Invitation links an existing account only, under [ADR 0017](docs/decisions/0017-invitation-links-existing-accounts.md).
+- Project Block 2 — Video ingest and durable work (Tasks 8, 9, 10): **not started**.
 
 ## Task 3 local implementation
 
