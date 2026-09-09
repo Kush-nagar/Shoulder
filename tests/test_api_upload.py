@@ -471,6 +471,11 @@ class UploadApiTests(DatabaseTestCase):
         )
         self.assertEqual(self.video_row(video_id).status, "uploading")
 
+        # The resume screen has to keep working in that window too, not 503.
+        state = client.get(f"/v1/videos/{video_id}/upload-state")
+        self.assertEqual(state.status_code, 200, state.text)
+        self.assertEqual(state.json()["missing_part_numbers"], [])
+
         response = client.post(f"/v1/videos/{video_id}/upload-complete")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.video_row(video_id).status, "uploaded")

@@ -87,6 +87,11 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
     `kinds` is the caller's registered handler set. A worker never claims work
     it cannot run, so an unimplemented kind waits in the queue rather than
     burning an attempt and reaching terminal failure.
+
+    The `attempts < max_attempts` guard is belt and braces: nothing should put
+    an exhausted row back in `queued`, and if anything ever did, claiming it
+    would violate `processing_job_attempts_bounded` and kill the worker rather
+    than fail the job.
     """
     if not kinds:
         return None
@@ -96,6 +101,7 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
                 SELECT id FROM app.processing_job
                 WHERE status = 'queued'
                   AND available_at <= now()
+                  AND attempts < max_attempts
                   AND kind = ANY(:kinds)
                 ORDER BY available_at, created_at
                 FOR UPDATE SKIP LOCKED
@@ -204,21 +210,26 @@ def cancelled(job_id: UUID, worker_id: str) -> bool:
     return updated == 1
 
 
-def release(job_id: UUID, worker_id: str, keep_attempt: bool = True) -> bool:
-    """Return a claimed job to the queue without recording a failure.
+def release(job_id: UUID, worker_id: str) -> bool:
+    """Return a claimed job to the queue and hand its attempt back.
 
-    Used when the worker stops rather than the work failing. A shutdown in the
+    Used when the worker stops rather than the work failing: a shutdown in the
     middle of a job is not a terminal outcome, and marking it `cancelled` would
-    strand a video nobody asked to cancel. `keep_attempt` is false only when
-    nothing ran at all, so a kind with no handler cannot burn its way to
-    terminal failure.
+    strand a video nobody asked to cancel.
+
+    `attempts` counts attempts that reached a conclusion, so a release gives
+    one back. Keeping it would strand the job on its last claim: the row would
+    return to `queued` with `attempts = max_attempts`, and the next claim's
+    increment would violate `processing_job_attempts_bounded`, leaving it
+    queued and permanently unclaimable. A worker that dies instead of releasing
+    is still bounded, because `sweep_expired_leases` keeps that attempt.
     """
     with transaction() as connection:
         updated = connection.execute(
             text("""
                 UPDATE app.processing_job SET
                     status = 'queued',
-                    attempts = CASE WHEN :keep THEN attempts ELSE attempts - 1 END,
+                    attempts = greatest(attempts - 1, 0),
                     available_at = now() + make_interval(secs => :base),
                     locked_at = NULL, locked_by = NULL, heartbeat_at = NULL
                 WHERE id = :id AND status = 'running' AND locked_by = :worker_id
@@ -226,7 +237,6 @@ def release(job_id: UUID, worker_id: str, keep_attempt: bool = True) -> bool:
             {
                 "id": str(job_id),
                 "worker_id": worker_id,
-                "keep": keep_attempt,
                 "base": float(BACKOFF_BASE_SECONDS),
             },
         ).rowcount

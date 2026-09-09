@@ -405,13 +405,34 @@ def sign_upload_parts(
     return SignedParts(expires_in=storage.PART_URL_SECONDS, parts=parts)
 
 
-def reconcile_parts(connection: Connection, video: Any) -> list[storage.StoredPart]:
+def survey(video: Any) -> tuple[bool, list[storage.StoredPart]]:
+    """Ask storage what it holds for this upload.
+
+    Returns whether the object is already assembled, and the parts otherwise.
+    There is a window between assembling the object and committing the
+    transition out of `uploading`: a fault inside it leaves the row open with
+    an upload id storage has discarded. Every route that lists parts would then
+    fail with a 503, so the coach could neither resume nor finish. Recognising
+    the finished object instead is what makes those routes self-healing.
+
+    A genuine storage outage still raises, because `head_object` fails too.
+    """
+    try:
+        return False, storage.list_parts(video.original_key, video.multipart_upload_id)
+    except storage.StorageError:
+        if storage.head_object(video.original_key) == video.size_bytes:
+            return True, []
+        raise
+
+
+def reconcile_parts(
+    connection: Connection, video: Any, stored: list[storage.StoredPart]
+) -> list[storage.StoredPart]:
     """Persist what storage holds. `docs/03-schema.md`: the browser is a cache.
 
     The client never asserts a part. Sizes are checked against the part plan so
     a short or oversized part cannot be recorded as complete.
     """
-    stored = storage.list_parts(video.original_key, video.multipart_upload_id)
     total = storage.part_count(video.size_bytes)
     usable = [
         part
@@ -454,8 +475,11 @@ def read_upload_state(
     try:
         with user_transaction(user_id) as connection:
             video = require_coach(load_video(connection, video_id))
+            assembled = False
             if video.status == "uploading" and video.multipart_upload_id:
-                reconcile_parts(connection, video)
+                assembled, stored = survey(video)
+                if not assembled:
+                    reconcile_parts(connection, video, stored)
             rows = connection.execute(
                 text("""
                     SELECT part_number, etag, size_bytes
@@ -481,9 +505,12 @@ def read_upload_state(
             )
             for row in rows
         ],
-        missing_part_numbers=[
-            number for number in range(1, total + 1) if number not in present
-        ],
+        # An assembled object has nothing missing, even where no part row was
+        # recorded: the bytes are in storage, and asking the coach to send them
+        # again would be false.
+        missing_part_numbers=[]
+        if assembled or video.status == "uploaded"
+        else [number for number in range(1, total + 1) if number not in present],
     )
 
 
@@ -516,8 +543,8 @@ def complete_upload(
                 raise Problem(
                     409, "That upload can no longer be completed.", "upload-not-open"
                 )
-            assembled = already_assembled(video)
-            stored = [] if assembled else reconcile_parts(connection, video)
+            assembled, listed = survey(video)
+            stored = [] if assembled else reconcile_parts(connection, video, listed)
             total = storage.part_count(video.size_bytes)
             if not assembled and sorted(part.part_number for part in stored) != list(
                 range(1, total + 1)
@@ -581,22 +608,6 @@ def complete_upload(
         upload_completed_at=row.upload_completed_at,
         source_expires_at=row.source_expires_at,
     )
-
-
-def already_assembled(video: Any) -> bool:
-    """Did an earlier attempt finish the multipart upload and then fall over?
-
-    There is a window between assembling the object and committing the
-    transition. A database fault inside it would otherwise leave the row
-    `uploading` with an upload id storage has already discarded, so every later
-    completion would fail on `ListParts` and the coach could never finish.
-    Recognising the finished object makes completion self-healing.
-    """
-    try:
-        storage.list_parts(video.original_key, video.multipart_upload_id)
-    except storage.StorageError:
-        return bool(storage.head_object(video.original_key) == video.size_bytes)
-    return False
 
 
 def assemble(key: str, upload_id: str, stored: list[storage.StoredPart]) -> int | None:

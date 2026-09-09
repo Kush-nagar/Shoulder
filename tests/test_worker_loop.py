@@ -91,7 +91,9 @@ class WorkerLoopTests(VideoWorld):
         self.assertEqual(row.status, "queued")
         self.assertIsNone(row.error_code)
         self.assertIsNone(row.locked_by)
-        self.assertEqual(row.attempts, 1)
+        # The attempt is handed back: the work never reached a conclusion, and
+        # keeping it would strand the job on its last claim.
+        self.assertEqual(row.attempts, 0)
 
     def test_a_handler_that_returns_after_shutdown_is_not_a_success(self) -> None:
         """Half-processed work must never be recorded as finished."""

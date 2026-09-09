@@ -117,14 +117,14 @@ overturned.
 
 | Command | Result |
 |---|---|
-| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 283 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
-| `scripts/check-db.ps1` | 283 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
+| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 284 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
+| `scripts/check-db.ps1` | 284 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
 | `scripts/check-storage.ps1` | 64 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
 | `scripts/check-upload.ps1` | 9 browser tests (3 cases × chromium, firefox, webkit) |
 | `scripts/check-auth.ps1` | 6 auth browser tests, unchanged and unweakened |
 | `scripts/check-roster.ps1` | 9 roster browser tests, unchanged apart from the fixture truncation list |
 
-Exact counts: 283 Python tests (36 video schema and isolation, 33 queue, 6
+Exact counts: 284 Python tests (36 video schema and isolation, 35 queue, 6
 worker loop, 33 upload API, 31 storage, 1 large upload; the remainder are the
 unchanged Task 1–7 suites), 26 Node unit tests (11 new), 9 upload browser tests,
 9 roster browser tests, 6 auth browser tests, 3 smoke tests. One test skips: the
@@ -190,6 +190,13 @@ round of fixes was pushed. Four distinct findings, two of them reported by both:
 | 15 | **An assembled upload could become unfinishable.** Bugbot flagged the same window as finding 9, plus a residual: a fault between assembling the object and committing the transition left the row `uploading` with an upload id storage had discarded. Completion then failed on `ListParts` and abort re-raised because the object existed, so the coach could neither finish nor abandon it, and no cleanup deadline was ever set. | Fixed on both halves. `already_assembled` recognises a finished object and completes from it, making completion self-healing; `abort_multipart` now decides whether the failure is real by asking for the upload's parts rather than by looking for the object, so an assembled attempt can still be abandoned. Two API regression tests cover finishing and abandoning from that state. |
 | 16 | **`restore_login_passwords` parsed `str(None)`.** A suite configured with only the three original URLs would raise inside `make_url` before the guard that was meant to skip it. | Fixed with a falsy check before parsing. |
 | 17 | **`fetchGames` ignored `next_cursor`**, so a `?game=` link to a match older than the first fifty would show "Choose a match". | Fixed by resolving a selected match that is not in the list through `GET /v1/games/{game_id}`. Pagination UI is still not built: one team and one season is the MVP scope (`docs/00-decisions.md` D10), and the fallback removes the defect without it. |
+
+Bugbot reviewed the fixes and raised two more, both high and both real:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 18 | **A release on the last attempt stranded the job.** `release` requeued without regard to `max_attempts`, so a graceful stop on the final claim left the row `queued` at `attempts = max_attempts`; the next claim's `attempts + 1` violated `processing_job_attempts_bounded`, and that `IntegrityError` is not a `QueueError`, so the worker process died and the job became permanently unclaimable. | Fixed by settling what `attempts` counts: attempts that reached a conclusion. A release hands its attempt back, so a clean shutdown cannot exhaust a job, while a worker that dies instead of releasing is still bounded because `sweep_expired_leases` keeps the attempt. `claim` also gained an `attempts < max_attempts` guard, so no row can ever be claimed into a check violation. Two regression tests: releasing the last attempt leaves the job claimable, and an exhausted queued row is never claimed. |
+| 19 | **`upload-state` still failed in the assembled-but-uncommitted window.** Completion and abort were fixed in finding 15, but the resume screen also lists parts, so it kept returning 503 for an upload the coach could in fact finish. | Fixed by moving the recognition into one `survey` call that every route shares — it returns either the parts or "already assembled", and still raises on a genuine outage because `head_object` fails too. That also halves the storage calls per request. `upload-state` reports nothing missing once the object is assembled, rather than asking for bytes storage already holds. |
 
 One observation left unchanged: `read_game`, `list_games`, `sign_upload_parts`,
 and `read_video` have no `except DBAPIError`, so a database fault there yields a

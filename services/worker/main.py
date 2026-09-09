@@ -81,9 +81,9 @@ class Worker:
         handler = HANDLERS.get(job.kind)
         if handler is None:
             # Only reachable if HANDLERS changed between the claim query and
-            # here. Nothing ran, so the attempt is handed back: a kind with no
-            # handler must wait, never burn its way to terminal failure.
-            jobs.release(job.id, self.identity, keep_attempt=False)
+            # here. `release` hands the attempt back, so a kind with no handler
+            # waits rather than burning its way to terminal failure.
+            jobs.release(job.id, self.identity)
             return
 
         last_beat = 0.0

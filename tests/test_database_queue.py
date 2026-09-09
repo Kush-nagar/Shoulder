@@ -448,31 +448,58 @@ class QueueTests(VideoWorld):
         with self.admin.connect() as connection, connection.begin():
             self.assertEqual(jobs.request_cancel(connection, job_id), 0)
 
-    def test_releasing_a_job_records_no_failure(self) -> None:
-        """A worker that stops is not a job that failed."""
+    def test_releasing_a_job_records_no_failure_and_returns_its_attempt(self) -> None:
+        """A worker that stops is not a job that failed, or one that tried."""
         self.clear_queue()
         (job_id,) = self.enqueue(1)
         job = jobs.claim("worker-1", self.kinds)
         assert job is not None
+        self.assertEqual(self.job_row(job_id).attempts, 1)
         self.assertTrue(jobs.release(job_id, "worker-1"))
         row = self.job_row(job_id)
         self.assertEqual(row.status, "queued")
-        self.assertEqual(row.attempts, 1, "the attempt did happen")
+        self.assertEqual(row.attempts, 0, "a release hands the attempt back")
         self.assertIsNone(row.error_code)
         self.assertIsNone(row.error_message)
         self.assertIsNone(row.locked_by)
         self.assertIsNone(row.finished_at)
 
-    def test_releasing_an_unrun_job_hands_the_attempt_back(self) -> None:
-        """Block decision 4: an unimplemented kind must not burn attempts."""
+    def test_releasing_the_last_attempt_leaves_the_job_claimable(self) -> None:
+        """Otherwise the next claim would violate the attempts bound and die.
+
+        A released row that kept its attempt would sit at `max_attempts` in
+        `queued`, where the claim's `attempts + 1` breaks
+        `processing_job_attempts_bounded` and strands the job forever.
+        """
         self.clear_queue()
         (job_id,) = self.enqueue(1)
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("UPDATE app.processing_job SET max_attempts = 1 WHERE id = :id"),
+                {"id": job_id},
+            )
         jobs.claim("worker-1", self.kinds)
-        self.assertEqual(self.job_row(job_id).attempts, 1)
-        self.assertTrue(jobs.release(job_id, "worker-1", keep_attempt=False))
-        row = self.job_row(job_id)
-        self.assertEqual(row.status, "queued")
-        self.assertEqual(row.attempts, 0)
+        self.assertTrue(jobs.release(job_id, "worker-1"))
+        self.make_available(job_id)
+        again = jobs.claim("worker-2", self.kinds)
+        assert again is not None
+        self.assertEqual(again.id, job_id)
+        self.assertEqual(again.attempts, 1)
+
+    def test_an_exhausted_queued_row_is_never_claimed(self) -> None:
+        """Belt and braces: claiming it would break the attempts bound."""
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text(
+                    "UPDATE app.processing_job SET attempts = 3, max_attempts = 3"
+                    " WHERE id = :id"
+                ),
+                {"id": job_id},
+            )
+        self.assertIsNone(jobs.claim("worker-1", self.kinds))
+        self.assertEqual(self.job_row(job_id).status, "queued")
 
     def test_a_second_worker_cannot_release_someone_elses_lease(self) -> None:
         self.clear_queue()
