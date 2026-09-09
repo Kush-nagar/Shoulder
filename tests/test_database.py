@@ -787,10 +787,14 @@ class RuntimeIsolationTests(DatabaseTestCase):
 def restore_login_passwords(engine: Engine) -> None:
     """Re-apply the configured logins after a downgrade dropped their roles.
 
-    The passwords come from the URLs this process was given and are quoted by
-    Postgres itself, so no credential is interpolated or logged here.
+    `ALTER ROLE ... PASSWORD` is a utility statement, so Postgres accepts no
+    bind parameter for the secret: it has to be quoted into the statement text.
+    Statement logging is disabled for this transaction instead, so the
+    disposable local credential never reaches the server log.
     """
     with engine.connect() as connection, connection.begin():
+        connection.exec_driver_sql("SET LOCAL log_statement = 'none'")
+        connection.exec_driver_sql("SET LOCAL log_min_duration_statement = -1")
         for role, url in (
             ("shoulder_api", RUNTIME_URL),
             ("shoulder_operator", OPERATOR_URL),

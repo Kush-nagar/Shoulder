@@ -66,8 +66,9 @@ unauthorized identity cannot learn whether a row exists; refused writes assert
 
 ### Policy, grant, and role snapshots
 
-- The exact set of eight policies (table, name, command, roles) must match; any
-  added, removed, or renamed policy fails.
+- The exact set of eight policies (table, command, roles) must match; any added
+  or removed policy fails. Policy names are deliberately not locked, because a
+  name is not authorization semantics.
 - Every runtime policy must consult the caller's identity directly or through a
   membership helper, must not be `true`, and must carry no `WITH CHECK`.
 - All four tables: RLS enabled, forced, owned by `shoulder_migration`.
