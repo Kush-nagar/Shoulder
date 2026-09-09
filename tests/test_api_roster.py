@@ -432,6 +432,33 @@ class RosterApiTests(DatabaseTestCase):
         # Refused before any write: the row is still unlinked.
         self.assertIsNone(self.linked_account(self.unlinked_row))
 
+    def test_archived_players_are_reachable_only_when_asked_for(self) -> None:
+        """Archiving is soft, so an archived player must stay retrievable.
+
+        The roster screen renders them as a section and links to their detail
+        page; if the list could never return them again, the copy promising
+        nothing is deleted would be false.
+        """
+        client = self.client_for(self.coach)
+        self.assertEqual(
+            client.post(f"/v1/players/{self.unlinked_row}/archive").status_code, 200
+        )
+        default = client.get(f"/v1/teams/{self.team}/players")
+        self.assertEqual(default.status_code, 200)
+        self.assertNotIn(str(self.unlinked_row), [row["id"] for row in default.json()])
+        included = client.get(
+            f"/v1/teams/{self.team}/players", params={"include_archived": "true"}
+        )
+        self.assertEqual(included.status_code, 200)
+        archived = [row for row in included.json() if not row["active"]]
+        self.assertEqual([row["id"] for row in archived], [str(self.unlinked_row)])
+        # Active rows still sort first, so the roster screen groups them.
+        self.assertTrue(included.json()[0]["active"])
+        # The goals of an archived player remain readable to their coach.
+        self.assertEqual(
+            client.get(f"/v1/players/{self.unlinked_row}/goals").status_code, 200
+        )
+
     def test_names_are_stored_trimmed_by_every_write_path(self) -> None:
         """Bulk trims, so the single routes must trim identically."""
         client = self.client_for(self.coach)

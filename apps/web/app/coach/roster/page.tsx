@@ -118,7 +118,24 @@ function Body({ children }: { children: ReactNode }) {
 
 export default async function Roster() {
   const token = await requireCoach();
-  const team = (await fetchTeams(token))[0];
+  const teams = await fetchTeams(token);
+  // Null is an outage, not an empty membership list; saying "no team yet" for a
+  // timeout would tell a coach their access was removed.
+  if (teams === null) {
+    return (
+      <>
+        <PageHeader title="Players" />
+        <Body>
+          <h2 className={sectionTitle}>Roster unavailable</h2>
+          <p className="mt-3 max-w-170 text-[15px] leading-[1.5] text-muted">
+            Your roster could not be loaded and nothing was changed. Reload the
+            page to try again.
+          </p>
+        </Body>
+      </>
+    );
+  }
+  const team = teams[0];
   if (!team) {
     return (
       <>
@@ -133,7 +150,9 @@ export default async function Roster() {
       </>
     );
   }
-  const roster = await fetchRoster(token, team.team_id);
+  // Archiving is soft, and this screen offers the archived rows as a section,
+  // so they must be requested explicitly.
+  const roster = await fetchRoster(token, team.team_id, true);
   if (roster === null) notFound();
   const players = roster.filter((player) => player.active);
   const archived = roster.filter((player) => !player.active);

@@ -167,7 +167,7 @@ PLAYER_COLUMNS = """
 # account's row directly. It authorizes on the caller's own coach membership
 # and hides deleted and deletion-pending rows, so an archived player reads back
 # with no account name.
-# ponytail: the lateral re-runs per row, which is fine for a roster capped at
+# NOTE: the lateral re-runs per row, which is fine for a roster capped at
 # 40; give the helper a player-scoped variant if a team ever gets large.
 PLAYER_SOURCE = """
     FROM app.player p
@@ -182,13 +182,16 @@ PLAYER_BY_ID = f"""
     {PLAYER_SOURCE}
     WHERE p.id = :player_id
 """
+# `docs/04-api.md`: "Active roster only by default". A coach can ask for the
+# archived rows too, because archiving is soft and the roster screen offers them
+# as a section; without this they would be unreachable after the first archive.
 TEAM_ROSTER = f"""
     SELECT {PLAYER_COLUMNS}
     {PLAYER_SOURCE}
     WHERE p.team_id = :team_id
-      AND p.deleted_at IS NULL
+      AND (:include_archived OR p.deleted_at IS NULL)
       AND p.deletion_pending_at IS NULL
-    ORDER BY p.jersey_number NULLS LAST, p.display_name, p.id
+    ORDER BY p.active DESC, p.jersey_number NULLS LAST, p.display_name, p.id
 """
 GOAL_RETURNING = """
     id, player_id, title, description, ontology_key, status,
@@ -323,10 +326,14 @@ def list_teams(
 def list_players(
     team_id: UUID,
     user_id: Annotated[str, Depends(authenticated_identity)],
+    include_archived: bool = False,
 ) -> list[RosterPlayer]:
     with user_transaction(user_id) as connection:
         require_coach(load_team(connection, team_id))
-        rows = connection.execute(text(TEAM_ROSTER), {"team_id": str(team_id)}).all()
+        rows = connection.execute(
+            text(TEAM_ROSTER),
+            {"team_id": str(team_id), "include_archived": include_archived},
+        ).all()
     return [roster_player(row) for row in rows]
 
 

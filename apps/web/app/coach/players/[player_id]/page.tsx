@@ -11,7 +11,6 @@ import {
   sectionTitle,
   tertiary,
 } from "../../ui";
-import { CloseGoal } from "./close-goal";
 import { GoalSection } from "./goal-form";
 import { InvitePlayer } from "./invite-player";
 
@@ -39,10 +38,12 @@ export default async function Player({
 }) {
   const { player_id } = await params;
   const token = await requireCoach();
-  const team = (await fetchTeams(token))[0];
-  const roster = team ? await fetchRoster(token, team.team_id) : null;
+  const team = (await fetchTeams(token))?.[0];
+  // Archived rows are requested too: archiving is soft, the roster links to
+  // them, and their goals stay readable.
+  const roster = team ? await fetchRoster(token, team.team_id, true) : null;
   const player = roster?.find((row) => row.id === player_id);
-  // Absent, archived elsewhere, or hidden by policy all land on not-found.
+  // Absent or hidden by policy both land on not-found.
   if (!player) notFound();
   const goals = (await fetchGoals(token, player.id)) ?? [];
   const active = goals.find((goal) => goal.status === "active");
@@ -85,9 +86,11 @@ export default async function Player({
                 />
                 {player.account_name ?? "Not linked"}
               </span>
-              {player.account_name ? null : (
-                <InvitePlayer playerId={player.id} name={player.display_name} />
-              )}
+              <InvitePlayer
+                playerId={player.id}
+                name={player.display_name}
+                accountName={player.account_name ?? null}
+              />
             </dd>
           </div>
         </dl>
@@ -99,21 +102,14 @@ export default async function Player({
           active={
             active
               ? {
+                  id: active.id,
                   title: active.title,
                   description: active.description,
                   setOn: day(active.created_at),
                 }
               : null
           }
-        >
-          {active ? (
-            <CloseGoal
-              playerId={player.id}
-              goalId={active.id}
-              title={active.title}
-            />
-          ) : null}
-        </GoalSection>
+        />
 
         {closed.length > 0 ? (
           <details className="mt-8 max-w-170">

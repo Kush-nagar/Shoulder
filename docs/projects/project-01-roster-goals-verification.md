@@ -143,12 +143,54 @@ field names, never client input; the bulk `taken` query matches the
 `player_active_jersey_key` index predicate exactly; downgrade to base leaves
 zero tables, functions, triggers, and roles.
 
+## Automated review on PR #8 (Cursor Bugbot and Copilot)
+
+Bugbot found a high-severity defect this coordinator's own review missed.
+
+1. **High — archived players were unreachable.** `GET /v1/teams/{team_id}/players`
+   filtered `deleted_at IS NULL`, but the roster screen split that same list on
+   `active` to render its "Archived players" section and the detail page resolved
+   a player from it. So the section was always empty and opening an archived
+   player 404ed, while the copy promised "nothing about them is deleted". The
+   endpoint now takes `include_archived`, which `docs/04-api.md` already implies
+   with "Active roster only **by default**"; active rows still sort first.
+   This was a real need present in the code, not a speculative one, and skipping
+   the parameter as YAGNI during planning was the wrong call. Covered by
+   `test_archived_players_are_reachable_only_when_asked_for`.
+2. **Medium — every invite 422 read as a malformed address.** Under ADR 0017 the
+   ordinary failure is an address that has never signed in, so a coach was sent
+   hunting a typo that was not there. `ApiReply` now carries the RFC 9457 `type`
+   slug and the action distinguishes `invitation-account-not-found` and
+   `player-off-roster` from a genuinely unusable address.
+3. **Medium — an API outage rendered as "No team yet".** `fetchTeams` collapsed a
+   failed call into `[]`. It now returns `null` for a failure, and the roster
+   screen says the roster could not be loaded instead of implying the coach's
+   access was removed.
+4. **Medium — invite and close-goal confirmations unmounted.** Both components
+   existed only while the condition they removed was true, so `useActionState`
+   died before its message could be announced. `GoalSection` now owns the close
+   action as well, and `InvitePlayer` stays mounted after linking. This was
+   recorded as an accepted observation in the coordinator review above; an
+   independent reviewer raising it changed that disposition to "fix".
+5. **Copilot — an undocumented `ponytail:` comment tag** appeared in three files.
+   It is not a convention this repository uses, so it is now `NOTE:`.
+6. **Copilot — a stale comment** in `apps/web/app/coach/ui.ts` claimed only four
+   tokens exist in `globals.css`; it now says "semantic tokens".
+
+Bugbot also independently reported the `link_player_account` "already linked"
+message, which the coordinator review had already fixed in `3ad924d`.
+
+`archive-player.tsx` still cannot announce its success, because the row it
+archives leaves the active table and the component goes with it. Errors announce
+correctly and the visual outcome is immediate. A page-level flash region is the
+fix and belongs with the shell work in a later block.
+
 ## Commands and results
 
 | Command | Result |
 |---|---|
 | `.\scripts\check.ps1` | passed — Biome, TypeScript, 15 Node tests, Ruff, mypy, contract drift, production build, browser-secret scan, 3 smoke browsers, `git diff --check` |
-| `.\scripts\check-db.ps1` | **141 passed**, 0 skipped where required |
+| `.\scripts\check-db.ps1` | **142 passed**, 0 skipped where required |
 | `.\scripts\check-roster.ps1` | **9 passed** (3 tests × Chromium, Firefox, WebKit) |
 | Alembic `upgrade head` → `downgrade base` → `upgrade head` | passed; at base: 0 tables, 0 private functions, 0 triggers, no Shoulder roles |
 | `git diff --check` | clean |

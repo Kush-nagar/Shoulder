@@ -845,7 +845,9 @@ export interface operations {
     };
     list_players_v1_teams__team_id__players_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_archived?: boolean;
+            };
             header?: never;
             path: {
                 team_id: string;

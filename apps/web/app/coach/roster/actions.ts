@@ -23,7 +23,9 @@ function failure(status: number, conflict: string): string {
 
 async function team(token: string) {
   // One team per workspace: the roster is resolved server-side, never posted.
-  return (await fetchTeams(token))[0];
+  // Undefined covers both "no team" and a failed lookup; callers say so plainly
+  // rather than claiming the coach has no team.
+  return (await fetchTeams(token))?.[0];
 }
 
 function optional(form: FormData, name: string): string | null {
@@ -150,6 +152,20 @@ export async function invitePlayer(
     revalidatePath(`/coach/players/${id}`);
     return { message: "Account linked. No message was sent yet.", ok: true };
   }
+  // ADR 0017: the ordinary failure is an address that has never signed in, not
+  // a malformed one. Saying "not usable" for that would send a coach hunting a
+  // typo that is not there.
+  if (reply.problem === "invitation-account-not-found")
+    return {
+      message:
+        "That person has not signed in to Shoulder yet, so there is no account" +
+        " to link. Nothing was saved.",
+    };
+  if (reply.problem === "player-off-roster")
+    return {
+      message:
+        "That player is off the roster, so an account cannot be linked to them.",
+    };
   if (reply.status === 422)
     return { message: "That email address is not usable. Nothing was saved." };
   return {

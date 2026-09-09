@@ -76,7 +76,7 @@ export default async function CoachLayout({
   children: ReactNode;
 }) {
   const session = await coachSession();
-  const team = session ? (await fetchTeams(session.token))[0] : undefined;
+  const team = session ? (await fetchTeams(session.token))?.[0] : undefined;
   return (
     <div className="min-h-dvh">
       <header className={rail}>
@@ -101,7 +101,7 @@ export default async function CoachLayout({
             <ListIcon />
             <RailLabel>Dashboard</RailLabel>
           </button>
-          {/* ponytail: every live page in this block sits under Players, so the
+          {/* NOTE: every live page in this block sits under Players, so the
               current section is static. Read the pathname when /coach grows. */}
           <Link
             href="/coach/roster"

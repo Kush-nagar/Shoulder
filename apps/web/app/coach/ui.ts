@@ -1,6 +1,6 @@
-// Shared class strings and the shared form-action result. Only the four tokens
-// defined in globals.css are used; no arbitrary hex value is introduced here or
-// in any coach component.
+// Shared class strings and the shared form-action result. Only the semantic
+// tokens defined in globals.css are used; no arbitrary hex value is introduced
+// here or in any coach component.
 
 /** Result of a coach form action: one plain sentence plus a success flag. */
 export type ActionState = { message: string; ok?: boolean };

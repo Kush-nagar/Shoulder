@@ -12,7 +12,7 @@ import {
 import { archivePlayer } from "./actions";
 
 /**
- * ponytail: one dialog per row keeps the table a server component. Lift to a
+ * NOTE: one dialog per row keeps the table a server component. Lift to a
  * single shared dialog if a roster ever grows past a few hundred rows.
  */
 export function ArchivePlayer({
