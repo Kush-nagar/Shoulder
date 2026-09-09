@@ -2304,7 +2304,7 @@
     },
     "/v1/videos/{video_id}/upload-complete": {
       "post": {
-        "description": "Finish the upload, start the retention clock, and enqueue the work.\n\nIdempotent by contract: a repeated call on an already completed upload\nreturns the same answer rather than a second completion. Concurrency is\nsettled by the conditional UPDATE, which is the only transition out of\n`uploading`; the loser re-reads the winner's row.",
+        "description": "Finish the upload, start the retention clock, and enqueue the work.\n\nThree phases, because assembling a multi-gigabyte object takes storage tens\nof seconds and the API pool is small: authorize and reconcile in one short\ntransaction, talk to storage holding no lock, then transition and enqueue in\na second short transaction that authorizes again.\n\nIdempotent by contract. The conditional UPDATE in `complete_video` is the\nonly transition out of `uploading`, so it settles a completion race: the\nloser updates no row and reports the winner's answer.",
         "operationId": "complete_upload_v1_videos__video_id__upload_complete_post",
         "parameters": [
           {

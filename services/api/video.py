@@ -29,10 +29,8 @@ from services.api.db import user_transaction
 from services.api.problems import Problem
 from services.api.routes import (
     PRIVATE,
-    UNIQUE_VIOLATION,
     load_team,
     require_coach,
-    sqlstate,
     unavailable,
 )
 from services.api.schemas import (
@@ -498,13 +496,15 @@ def complete_upload(
 ) -> UploadCompleted:
     """Finish the upload, start the retention clock, and enqueue the work.
 
-    Idempotent by contract: a repeated call on an already completed upload
-    returns the same answer rather than a second completion. Concurrency is
-    settled by the conditional UPDATE, which is the only transition out of
-    `uploading`; the loser re-reads the winner's row.
+    Three phases, because assembling a multi-gigabyte object takes storage tens
+    of seconds and the API pool is small: authorize and reconcile in one short
+    transaction, talk to storage holding no lock, then transition and enqueue in
+    a second short transaction that authorizes again.
+
+    Idempotent by contract. The conditional UPDATE in `complete_video` is the
+    only transition out of `uploading`, so it settles a completion race: the
+    loser updates no row and reports the winner's answer.
     """
-    rejected = False
-    row: Any = None
     try:
         with user_transaction(user_id) as connection:
             video = require_coach(load_video(connection, video_id))
@@ -514,36 +514,38 @@ def complete_upload(
                 raise Problem(
                     409, "That upload can no longer be completed.", "upload-not-open"
                 )
-
             stored = reconcile_parts(connection, video)
             total = storage.part_count(video.size_bytes)
-            present = sorted(part.part_number for part in stored)
-            if present != list(range(1, total + 1)):
+            if sorted(part.part_number for part in stored) != list(range(1, total + 1)):
                 raise Problem(
                     409,
                     "Some parts of this match file have not arrived yet.",
                     "upload-incomplete",
                 )
-            storage.complete_multipart(
-                video.original_key, video.multipart_upload_id, stored
-            )
-            # The stored length is the first check that the bytes are the file
-            # the coach declared. Task 11 probes the content itself.
-            size = storage.head_object(video.original_key)
-            if size != video.size_bytes:
-                # Marked here and raised after the transaction commits. Raising
-                # inside it would roll the terminal state back, leaving the row
-                # `uploading` forever with a completed object behind it and no
-                # `first_terminal_failure_at` for the Task 22 sweeper to read.
+            key = video.original_key
+            upload_id = video.multipart_upload_id
+            game_id = video.game_id
+            declared = video.size_bytes
+
+        # No transaction is open here, so no row lock waits on storage.
+        size = assemble(key, upload_id, stored)
+
+        with user_transaction(user_id) as connection:
+            # Authorized again: a membership can be revoked while storage works.
+            video = require_coach(load_video(connection, video_id))
+            if size != declared:
+                # Committed before the 409 is raised. Raising inside the
+                # transaction would roll the terminal state back, leaving the
+                # row `uploading` forever with an assembled object behind it and
+                # no `first_terminal_failure_at` for the Task 22 sweeper.
                 mark_failed(connection, video_id)
                 rejected = True
-                row = None
             else:
-                row = complete_video(connection, video_id, video.game_id)
+                rejected = False
+                row = complete_video(connection, video_id, game_id)
                 if row is None:
-                    # A concurrent request completed it first; report its
-                    # result rather than completing twice.
-                    return completed_response(load_video(connection, video_id))
+                    # Someone else finished first, or an abort won the race.
+                    return settled_response(load_video(connection, video_id))
                 for kind in JOB_KINDS:
                     connection.execute(
                         text("""
@@ -560,11 +562,9 @@ def complete_upload(
                     )
     except storage.StorageError:
         raise storage_unavailable() from None
-    except DBAPIError as error:
-        if sqlstate(error) == UNIQUE_VIOLATION:
-            raise Problem(409, "That upload is already being completed.") from None
+    except DBAPIError:
         raise unavailable() from None
-    if rejected or row is None:
+    if rejected:
         raise Problem(
             409,
             "The stored match file does not match the upload.",
@@ -578,12 +578,39 @@ def complete_upload(
     )
 
 
+def assemble(key: str, upload_id: str, stored: list[storage.StoredPart]) -> int | None:
+    """Complete the multipart upload and report the stored length.
+
+    A concurrent completion is not a failure. When storage refuses because the
+    upload is already gone, the object it left behind is the answer: if it is
+    there, this request's work was done by the other one, and reporting 503 for
+    an upload that actually succeeded would be a lie.
+    """
+    try:
+        storage.complete_multipart(key, upload_id, stored)
+    except storage.StorageError:
+        if storage.head_object(key) is None:
+            raise
+    return storage.head_object(key)
+
+
+def settled_response(video: Any) -> UploadCompleted:
+    """Report a race the conditional UPDATE lost.
+
+    Only `uploaded` is a completion. An abort can win instead, and that row has
+    no completion timestamps to report, so it is a conflict rather than a
+    success.
+    """
+    if video.status != "uploaded":
+        raise Problem(409, "That upload can no longer be completed.", "upload-not-open")
+    return completed_response(video)
+
+
 def complete_video(connection: Connection, video_id: UUID, game_id: UUID) -> Any:
     """The only transition out of `uploading`, so it settles a completion race.
 
-    The loser of the race updates no row and re-reads the winner's answer.
-    `docs/10-security-privacy.md`: both deadlines are set once here and a retry
-    never moves them.
+    `docs/10-security-privacy.md`: both deadlines are set once, here, and no
+    retry can move them, because no later statement writes them again.
     """
     return connection.execute(
         text(f"""

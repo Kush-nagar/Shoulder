@@ -13,8 +13,10 @@ expired URL fails.
 import hashlib
 import os
 import time
+import traceback
 import unittest
 import uuid
+from unittest.mock import patch
 
 import httpx
 
@@ -301,6 +303,42 @@ class StorageTests(unittest.TestCase):
             refused.headers.get("access-control-allow-origin"),
             ("https://evil.example", "*"),
         )
+
+    def test_a_storage_failure_carries_no_key_and_no_provider_chain(self) -> None:
+        """`docs/10-security-privacy.md`: object keys never enter a log.
+
+        A `StorageError` reaches `logging.exception` in the worker. If the
+        botocore cause were chained, that traceback would print the bucket and
+        the key, so the chain is severed and only the short provider code is
+        logged.
+        """
+        key, upload_id = self.start()
+        storage.abort_multipart(key, upload_id)
+        self.uploads.clear()
+        # The logger is asserted on directly rather than through `assertLogs`,
+        # which depends on handler state other suites in this run also touch.
+        with patch.object(storage, "logger") as logged:
+            with self.assertRaises(storage.StorageError) as caught:
+                storage.list_parts(key, upload_id)
+        error = caught.exception
+        # `raise ... from None` clears `__cause__` and sets `__suppress_context__`,
+        # which together stop `traceback` from ever printing the botocore
+        # exception whose message names the bucket and the key.
+        self.assertIsNone(error.__cause__, "the botocore cause must not be chained")
+        self.assertTrue(error.__suppress_context__, "the context must be suppressed")
+        printed = "".join(
+            traceback.format_exception(type(error), error, error.__traceback__)
+        )
+        self.assertNotIn(key, printed)
+        self.assertNotIn("originals/", printed)
+        self.assertNotIn(key, str(error))
+        self.assertNotIn(storage.bucket(), str(error))
+        logged.warning.assert_called_once()
+        recorded = " ".join(str(part) for part in logged.warning.call_args.args)
+        self.assertIn("NoSuchUpload", recorded)
+        self.assertNotIn(key, recorded)
+        self.assertNotIn("originals/", recorded)
+        self.assertNotIn(storage.bucket(), recorded)
 
     def test_head_object_reports_absence_rather_than_raising(self) -> None:
         self.assertIsNone(storage.head_object(f"originals/{uuid.uuid4()}/source.mp4"))

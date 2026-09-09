@@ -204,6 +204,35 @@ def cancelled(job_id: UUID, worker_id: str) -> bool:
     return updated == 1
 
 
+def release(job_id: UUID, worker_id: str, keep_attempt: bool = True) -> bool:
+    """Return a claimed job to the queue without recording a failure.
+
+    Used when the worker stops rather than the work failing. A shutdown in the
+    middle of a job is not a terminal outcome, and marking it `cancelled` would
+    strand a video nobody asked to cancel. `keep_attempt` is false only when
+    nothing ran at all, so a kind with no handler cannot burn its way to
+    terminal failure.
+    """
+    with transaction() as connection:
+        updated = connection.execute(
+            text("""
+                UPDATE app.processing_job SET
+                    status = 'queued',
+                    attempts = CASE WHEN :keep THEN attempts ELSE attempts - 1 END,
+                    available_at = now() + make_interval(secs => :base),
+                    locked_at = NULL, locked_by = NULL, heartbeat_at = NULL
+                WHERE id = :id AND status = 'running' AND locked_by = :worker_id
+            """),
+            {
+                "id": str(job_id),
+                "worker_id": worker_id,
+                "keep": keep_attempt,
+                "base": float(BACKOFF_BASE_SECONDS),
+            },
+        ).rowcount
+    return updated == 1
+
+
 def fail(
     job_id: UUID,
     worker_id: str,
@@ -257,9 +286,10 @@ def fail(
 def sweep_expired_leases(lease_seconds: int = LEASE_SECONDS) -> int:
     """Recover jobs whose worker stopped heartbeating.
 
-    A job with attempts left returns to `queued` with backoff. One that has
-    exhausted them becomes `failed`, so a crash loop ends in a state a coach
-    can be told about instead of cycling forever.
+    A job with attempts left returns to `queued` on the same curve `fail` uses,
+    so a worker that crashes is not retried faster than one that reported an
+    error. One that has exhausted its attempts becomes `failed`, so a crash
+    loop ends in a state a coach can be told about instead of cycling forever.
     """
     with transaction() as connection:
         recovered = connection.execute(
@@ -270,21 +300,33 @@ def sweep_expired_leases(lease_seconds: int = LEASE_SECONDS) -> int:
                     END,
                     available_at = CASE
                         WHEN attempts < max_attempts
-                        THEN now() + make_interval(secs => :backoff)
+                        THEN now() + make_interval(
+                            secs => least(:base * 2 ^ (attempts - 1), :ceiling)
+                        )
                         ELSE available_at
                     END,
                     finished_at = CASE
                         WHEN attempts < max_attempts THEN NULL ELSE now()
                     END,
-                    error_code = 'lease_expired',
-                    error_message = 'Processing stopped unexpectedly and was retried.',
+                    -- A requeued job carries no error. The Block 03 coach
+                    -- surface reads these columns, and "waiting to retry" must
+                    -- not read there as "this failed".
+                    error_code = CASE
+                        WHEN attempts < max_attempts THEN NULL ELSE 'lease_expired'
+                    END,
+                    error_message = CASE
+                        WHEN attempts < max_attempts THEN NULL
+                        ELSE 'Shoulder stopped preparing this video and could'
+                             || ' not finish it.'
+                    END,
                     locked_at = NULL, locked_by = NULL, heartbeat_at = NULL
                 WHERE status = 'running'
                   AND heartbeat_at < now() - make_interval(secs => :lease)
             """),
             {
                 "lease": float(lease_seconds),
-                "backoff": float(BACKOFF_BASE_SECONDS),
+                "base": float(BACKOFF_BASE_SECONDS),
+                "ceiling": float(BACKOFF_MAX_SECONDS),
             },
         ).rowcount
     return int(recovered)

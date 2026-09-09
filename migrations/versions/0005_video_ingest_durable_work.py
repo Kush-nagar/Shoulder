@@ -236,6 +236,14 @@ def upgrade() -> None:
             ON app.processing_job (available_at, created_at)
             WHERE status = 'queued'
     """)
+    # The sweeper's index. Terminal rows are retained deliberately, so without
+    # this a stale-lease sweep would scan the whole table every thirty seconds
+    # for the handful of rows that are actually running.
+    op.execute("""
+        CREATE INDEX processing_job_leased_idx
+            ON app.processing_job (heartbeat_at)
+            WHERE status = 'running'
+    """)
 
     # Membership helpers for the new tables, SECURITY DEFINER for the same
     # reason `private.is_player_coach` is: a policy on `app.video` must not

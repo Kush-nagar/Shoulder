@@ -345,10 +345,14 @@ export interface paths {
          * Complete Upload
          * @description Finish the upload, start the retention clock, and enqueue the work.
          *
-         *     Idempotent by contract: a repeated call on an already completed upload
-         *     returns the same answer rather than a second completion. Concurrency is
-         *     settled by the conditional UPDATE, which is the only transition out of
-         *     `uploading`; the loser re-reads the winner's row.
+         *     Three phases, because assembling a multi-gigabyte object takes storage tens
+         *     of seconds and the API pool is small: authorize and reconcile in one short
+         *     transaction, talk to storage holding no lock, then transition and enqueue in
+         *     a second short transaction that authorizes again.
+         *
+         *     Idempotent by contract. The conditional UPDATE in `complete_video` is the
+         *     only transition out of `uploading`, so it settles a completion race: the
+         *     loser updates no row and reports the winner's answer.
          */
         post: operations["complete_upload_v1_videos__video_id__upload_complete_post"];
         delete?: never;

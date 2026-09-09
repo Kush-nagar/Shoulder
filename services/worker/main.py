@@ -36,7 +36,12 @@ SWEEP_INTERVAL_SECONDS = 30.0
 
 
 class Cancelled(Exception):
-    """A handler saw a cancellation request or lost its lease and stopped."""
+    """A handler saw `keep_going()` return False and stopped.
+
+    It carries no reason on purpose. A handler cannot tell a cancellation from
+    a shutdown or a lost lease, so `Worker.stopped_early` reads the row and
+    decides which of those actually happened.
+    """
 
 
 def worker_id() -> str:
@@ -75,8 +80,10 @@ class Worker:
     def execute(self, job: jobs.Job) -> None:
         handler = HANDLERS.get(job.kind)
         if handler is None:
-            # Only reachable if HANDLERS changed after the claim query ran.
-            jobs.fail(job.id, self.identity, "no_handler", "Nothing can run this yet.")
+            # Only reachable if HANDLERS changed between the claim query and
+            # here. Nothing ran, so the attempt is handed back: a kind with no
+            # handler must wait, never burn its way to terminal failure.
+            jobs.release(job.id, self.identity, keep_attempt=False)
             return
 
         last_beat = 0.0
@@ -95,22 +102,43 @@ class Worker:
         try:
             handler(job, keep_going)
         except Cancelled:
-            if not jobs.cancelled(job.id, self.identity):
-                logger.info("job %s lease was already gone at cancellation", job.id)
+            self.stopped_early(job)
             return
         except Exception:
-            # The exception text may name a path, a key, or a provider. Log it
-            # for the operator; store only the fixed coach-safe strings.
+            # A `StorageError` no longer chains its botocore cause, so this
+            # traceback cannot carry an object key. The stored strings are
+            # fixed and coach-safe either way.
             logger.exception("job %s failed", job.id)
             jobs.fail(
                 job.id,
                 self.identity,
                 "handler_error",
-                "Shoulder could not process this video. It will try again.",
+                "Shoulder could not prepare this video. It will try again.",
             )
+            return
+        if self.stopping.is_set():
+            # A handler that returned instead of raising after `keep_going()`
+            # went false has not finished. Calling that a success would leave a
+            # half-processed video marked ready.
+            self.stopped_early(job)
             return
         if not jobs.succeed(job.id, self.identity):
             logger.warning("job %s finished without a live lease", job.id)
+
+    def stopped_early(self, job: jobs.Job) -> None:
+        """Record what actually stopped the work, and only that.
+
+        Only an explicit cancellation is terminal. A shutdown or a lost lease
+        returns the job to the queue, so a rolling deploy cannot leave a video
+        `cancelled` that nobody asked to cancel.
+        """
+        if jobs.cancel_requested(job.id):
+            if not jobs.cancelled(job.id, self.identity):
+                logger.info("job %s lease was already gone at cancellation", job.id)
+            return
+        if not jobs.release(job.id, self.identity):
+            # The lease had already expired; the sweeper owns the row now.
+            logger.info("job %s lease was already gone when stopping", job.id)
 
     def run(self) -> None:
         logger.info("worker %s started; kinds=%s", self.identity, sorted(HANDLERS))

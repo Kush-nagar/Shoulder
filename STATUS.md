@@ -199,6 +199,11 @@ Recommended next local command: `.\scripts\infra.ps1 start`.
   `services/worker/` runs it as a separate process with no HTTP surface. No
   production handler ships in this block, so enqueued rows wait for Tasks 11 and 12
   rather than burning attempts.
+- Two independent review passes produced 13 findings; all are fixed or explicitly
+  accepted, with regression tests, in the verification record. The load-bearing ones
+  were a rolled-back rejection state, a shutdown that recorded an in-flight job as
+  cancelled, a completion race that reported 503 for an upload that succeeded, and a
+  botocore exception chain that could have carried an object key into a worker log.
 - Proofs: a 2 GB file through the real multipart path in 13 s over 64 parts; two
   workers claiming 100 jobs with no double execution, stable across three runs; a
   browser upload interrupted, reloaded, reselected, and resumed without repeating a

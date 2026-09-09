@@ -10,6 +10,7 @@ are derived from the generated `video.id` and a fixed extension allowlist; a
 caller's filename never reaches a key, a path, or a command.
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -22,6 +23,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mypy_boto3_s3.client import S3Client
+
+logger = logging.getLogger("shoulder.storage")
 
 # `docs/02-architecture.md` fixes the 32 MiB part size; `docs/00-decisions.md`
 # leaves it open for Task 8 measurement, so it stays one constant to revise.
@@ -123,16 +126,34 @@ def get_client() -> "S3Client":
     return client
 
 
+def error_code(error: Exception) -> str:
+    """The provider's short error code, which is safe to record.
+
+    A botocore message names the bucket and the key;
+    `docs/10-security-privacy.md` forbids both in a log. The code
+    (`NoSuchUpload`, `EntityTooSmall`, ...) carries no such value.
+    """
+    if isinstance(error, ClientError):
+        code = error.response.get("Error", {}).get("Code")
+        if isinstance(code, str) and code:
+            return code[:60]
+    return type(error).__name__
+
+
 def _call(operation: str, **arguments: Any) -> Any:
     """Run one storage call and reduce any failure to `StorageError`.
 
-    A provider message can name a bucket, a key, or a credential, and
-    `docs/10-security-privacy.md` forbids all three in a response or a log.
+    The botocore exception is deliberately not chained. Its message names the
+    bucket and the object key, and anything that later calls
+    `logging.exception` on a `StorageError` would print the whole chain
+    (`docs/10-security-privacy.md`: keys never enter logs). The short provider
+    code is logged here instead, which is what an operator actually needs.
     """
     try:
         return getattr(get_client(), operation)(**arguments)
     except (ClientError, BotoCoreError) as error:
-        raise StorageError(f"storage {operation} failed") from error
+        logger.warning("storage %s failed: %s", operation, error_code(error))
+        raise StorageError(f"storage {operation} failed") from None
 
 
 def create_multipart(key: str, content_type: str) -> str:
@@ -248,7 +269,9 @@ def head_object(key: str) -> int | None:
         status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
         if status in (403, 404):
             return None
-        raise StorageError("storage head_object failed") from error
+        logger.warning("storage head_object failed: %s", error_code(error))
+        raise StorageError("storage head_object failed") from None
     except BotoCoreError as error:
-        raise StorageError("storage head_object failed") from error
+        logger.warning("storage head_object failed: %s", error_code(error))
+        raise StorageError("storage head_object failed") from None
     return int(response["ContentLength"])

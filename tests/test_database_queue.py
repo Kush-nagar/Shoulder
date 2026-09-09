@@ -272,7 +272,9 @@ class QueueTests(VideoWorld):
         self.assertEqual(row.status, "queued")
         self.assertEqual(row.attempts, 1)
         self.assertIsNone(row.locked_by)
-        self.assertEqual(row.error_code, "lease_expired")
+        # A job that is merely waiting to retry carries no error; only one that
+        # has given up does. See `test_a_swept_job_that_gives_up_says_so`.
+        self.assertIsNone(row.error_code)
         # A second sweep must not touch an already recovered row.
         self.assertEqual(jobs.sweep_expired_leases(), 0)
 
@@ -445,6 +447,92 @@ class QueueTests(VideoWorld):
         jobs.succeed(job_id, "worker-1")
         with self.admin.connect() as connection, connection.begin():
             self.assertEqual(jobs.request_cancel(connection, job_id), 0)
+
+    def test_releasing_a_job_records_no_failure(self) -> None:
+        """A worker that stops is not a job that failed."""
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        job = jobs.claim("worker-1", self.kinds)
+        assert job is not None
+        self.assertTrue(jobs.release(job_id, "worker-1"))
+        row = self.job_row(job_id)
+        self.assertEqual(row.status, "queued")
+        self.assertEqual(row.attempts, 1, "the attempt did happen")
+        self.assertIsNone(row.error_code)
+        self.assertIsNone(row.error_message)
+        self.assertIsNone(row.locked_by)
+        self.assertIsNone(row.finished_at)
+
+    def test_releasing_an_unrun_job_hands_the_attempt_back(self) -> None:
+        """Block decision 4: an unimplemented kind must not burn attempts."""
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        jobs.claim("worker-1", self.kinds)
+        self.assertEqual(self.job_row(job_id).attempts, 1)
+        self.assertTrue(jobs.release(job_id, "worker-1", keep_attempt=False))
+        row = self.job_row(job_id)
+        self.assertEqual(row.status, "queued")
+        self.assertEqual(row.attempts, 0)
+
+    def test_a_second_worker_cannot_release_someone_elses_lease(self) -> None:
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        jobs.claim("worker-1", self.kinds)
+        self.assertFalse(jobs.release(job_id, "worker-2"))
+        self.assertEqual(self.job_row(job_id).status, "running")
+
+    def test_a_recovered_job_carries_no_error_while_it_waits(self) -> None:
+        """`docs/05-ui.md`: waiting to retry must not read as failed."""
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        jobs.claim("crashing-worker", self.kinds)
+        self.expire_lease(job_id)
+        jobs.sweep_expired_leases()
+        row = self.job_row(job_id)
+        self.assertEqual(row.status, "queued")
+        self.assertIsNone(row.error_code)
+        self.assertIsNone(row.error_message)
+
+    def test_a_swept_job_that_gives_up_says_so(self) -> None:
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("UPDATE app.processing_job SET max_attempts = 1 WHERE id = :id"),
+                {"id": job_id},
+            )
+        jobs.claim("crashing-worker", self.kinds)
+        self.expire_lease(job_id)
+        jobs.sweep_expired_leases()
+        row = self.job_row(job_id)
+        self.assertEqual(row.status, "failed")
+        self.assertEqual(row.error_code, "lease_expired")
+        self.assertNotIn("originals/", row.error_message)
+
+    def test_the_sweeper_backs_off_on_the_same_curve_as_a_failure(self) -> None:
+        """A crash must not be retried faster than a reported error."""
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text(
+                    "UPDATE app.processing_job SET attempts = 3, max_attempts = 20"
+                    " WHERE id = :id"
+                ),
+                {"id": job_id},
+            )
+        jobs.claim("crashing-worker", self.kinds)
+        self.expire_lease(job_id)
+        jobs.sweep_expired_leases()
+        with self.admin.connect() as connection:
+            delay = connection.execute(
+                text(
+                    "SELECT extract(epoch FROM (available_at - now()))"
+                    " FROM app.processing_job WHERE id = :id"
+                ),
+                {"id": job_id},
+            ).scalar_one()
+        self.assertAlmostEqual(float(delay), float(jobs.backoff_seconds(4)), delta=5)
 
     def test_a_succeeded_job_is_released_and_complete(self) -> None:
         self.clear_queue()

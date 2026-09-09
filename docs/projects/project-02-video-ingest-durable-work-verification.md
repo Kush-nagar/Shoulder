@@ -116,16 +116,18 @@ overturned.
 
 | Command | Result |
 |---|---|
-| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 260 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
-| `scripts/check-db.ps1` | 260 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
-| `scripts/check-storage.ps1` | 53 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
+| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 274 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
+| `scripts/check-db.ps1` | 274 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
+| `scripts/check-storage.ps1` | 55 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
 | `scripts/check-upload.ps1` | 9 browser tests (3 cases × chromium, firefox, webkit) |
 | `scripts/check-auth.ps1` | 6 auth browser tests, unchanged and unweakened |
 | `scripts/check-roster.ps1` | 9 roster browser tests, unchanged apart from the fixture truncation list |
 
-Exact counts: 260 Python tests (46 new database/queue, 29 upload API, 25
-storage, 1 large upload), 26 Node unit tests (11 new), 9 upload browser tests,
-9 roster browser tests, 6 auth browser tests, 3 smoke tests.
+Exact counts: 274 Python tests (36 video schema and isolation, 33 queue, 6
+worker loop, 30 upload API, 26 storage, 1 large upload; the remainder are the
+unchanged Task 1–7 suites), 26 Node unit tests (11 new), 9 upload browser tests,
+9 roster browser tests, 6 auth browser tests, 3 smoke tests. One test skips: the
+2 GB proof, which is opt-in and run by `scripts/check-storage.ps1`.
 
 ### The three hard acceptance proofs
 
@@ -148,8 +150,10 @@ storage, 1 large upload), 26 Node unit tests (11 new), 9 upload browser tests,
 
 ## Independent review before the pull request
 
-Reviewed as a security and reliability reviewer against the full branch diff
-from the base SHA, not against the implementation checklist.
+Two passes against the full branch diff from the base SHA, not against the
+implementation checklist: one by the implementer, one by an independent
+reviewer given only `AGENTS.md`, `CLAUDE.md`, the block contract, ADR 0018, and
+the diff.
 
 | # | Finding | Disposition |
 |---|---|---|
@@ -159,11 +163,25 @@ from the base SHA, not against the implementation checklist.
 | 4 | `tests/roster.spec.mjs` truncated a table list that `app.game` now references, so the Project 01 browser suite failed on a foreign-key error. | Fixed by extending the truncation list to the new tables. No roster assertion was changed or removed; all 9 roster tests still pass. |
 | 5 | A file written through a Windows-default encoding left `tests/test_database.py` non-UTF-8 and several files CRLF against the repository's `.gitattributes` policy. | Fixed: re-encoded to UTF-8 and normalised to LF. `git diff --check` and Ruff both pass. |
 
+| 6 | **A shutdown mid-job was recorded as `cancelled`.** `keep_going()` returns False for a shutdown, a cancellation, and a lost lease alike, and `execute` had one outcome for all three. A rolling deploy would leave a video terminally `cancelled` that nobody asked to cancel, never retried. | Fixed: `Worker.stopped_early` reads `cancel_requested_at` and only an explicit cancellation is terminal; anything else calls the new `jobs.release`, which requeues without recording a failure. A handler that returns instead of raising after a shutdown is also released rather than called a success. `tests/test_worker_loop.py` covers all four outcomes. |
+| 7 | **A concurrent second completion returned 503.** The loser's `complete_multipart` hit an upload storage had already finished, and the resulting `StorageError` surfaced as "Match storage could not be reached" for an upload that in fact succeeded. | Fixed: `assemble` treats a refusal whose object is nonetheless present as the other request's success and reports the stored length, so the loser falls through to the conditional UPDATE and returns the winner's answer. |
+| 8 | **An abort winning the completion race produced a bare 500.** The conditional UPDATE returned no row, and building `UploadCompleted` from an aborted row raised a Pydantic error — no RFC 9457 body, contrary to the block contract. | Fixed: `settled_response` returns the completion only when the row really is `uploaded`, and otherwise raises the `upload-not-open` 409. |
+| 9 | **The user transaction was held across two R2 round trips**, locking up to 256 freshly written part rows while storage assembled a multi-gigabyte object, against a 5+5 connection pool. | Fixed: completion is now three phases — authorize and reconcile, then talk to storage holding no transaction, then transition and enqueue in a second short transaction that authorizes again. |
+| 10 | **An unhandled kind burned an attempt.** `jobs.fail` incremented its way toward terminal failure, contradicting block decision 4. | Fixed: `jobs.release(..., keep_attempt=False)` hands the attempt back, since nothing ran. |
+| 11 | **The sweeper requeued with a flat 30-second delay**, so a crashing worker retried faster than one that reported an error, and it had no index: the partial index is on `status='queued'`, while the sweep scans `status='running'` across a table whose terminal rows are retained. | Fixed: the sweeper uses the same backoff curve as `fail`, and migration `0005` adds `processing_job_leased_idx`, partial on `status='running'`. |
+| 12 | **The sweeper stamped `error_code='lease_expired'` on rows it merely requeued**, so the Block 03 coach surface would read "waiting to retry" as "failed". | Fixed: the error columns are set only when the job actually gives up. |
+| 13 | **A `StorageError` chained its botocore cause**, whose message names the bucket and the object key. `logging.exception` in the worker would print the whole chain, which `docs/10-security-privacy.md` forbids. | Fixed: the chain is severed with `raise ... from None` and only the short provider code (`NoSuchUpload`, `InvalidPart`) is logged. `tests/test_storage.py` formats the traceback and asserts no key appears in it. |
+
 Categories checked with no finding: cross-team leakage at the database or API
 layer (asserted in both suites), arbitrary object-key access, browser credential
-leakage, signing another upload's part, duplicate completion, aborted-upload
-reuse, queue double claims, lease theft, transactions held across storage work,
-jobs becoming permanently stuck, and error bodies carrying provider text.
+leakage, signing another upload's part, aborted-upload reuse, queue double
+claims, lease theft, CSRF handling on the new BFF routes, tests that pass
+without exercising the real path, and error bodies carrying provider text.
+
+One observation left unchanged: `read_game`, `list_games`, `sign_upload_parts`,
+and `read_video` have no `except DBAPIError`, so a database fault there yields a
+bare 500 rather than a problem document. The pre-existing roster GETs behave
+identically; changing it is a service-wide question, not a Block 02 defect.
 
 ## Shoulder Dev
 
