@@ -18,8 +18,30 @@ try {
     "ALTER ROLE shoulder_operator PASSWORD '$password';" |
         & docker exec -i $container psql -U postgres -d postgres -q -v ON_ERROR_STOP=1
     if ($LASTEXITCODE) { throw 'Could not set the local operator role password' }
+    "ALTER ROLE shoulder_worker PASSWORD '$password';" |
+        & docker exec -i $container psql -U postgres -d postgres -q -v ON_ERROR_STOP=1
+    if ($LASTEXITCODE) { throw 'Could not set the local worker role password' }
     $env:OPERATOR_DATABASE_URL = "postgresql+psycopg://shoulder_operator:$password@127.0.0.1:54322/postgres"
+    # The background path authorizes differently from the request path, so the
+    # queue and worker-role suites run through their own login. See ADR 0018.
+    $env:WORKER_DATABASE_URL = "postgresql+psycopg://shoulder_worker:$password@127.0.0.1:54322/postgres"
     $env:REQUIRE_DATABASE_TESTS = '1'
+    # infra.ps1 already started MinIO, so the storage suites run here too and
+    # nothing in the discovered set skips. The 2 GB proof stays opt-in and
+    # belongs to scripts/check-storage.ps1.
+    if (!(Test-Path .env.local)) { throw 'Run .\scripts\bootstrap-infra.ps1 first.' }
+    $local = @{}
+    foreach ($line in Get-Content .env.local) {
+        if ($line -match '^\s*#' -or !$line.Trim()) { continue }
+        $pair = $line -split '=', 2
+        $local[$pair[0]] = $pair[1]
+    }
+    $env:R2_ENDPOINT_URL = 'http://127.0.0.1:9000'
+    $env:R2_BUCKET = 'shoulder-local'
+    $env:R2_REGION = 'auto'
+    $env:R2_ACCESS_KEY_ID = $local['MINIO_ROOT_USER']
+    $env:R2_SECRET_ACCESS_KEY = $local['MINIO_ROOT_PASSWORD']
+    $env:REQUIRE_STORAGE_TESTS = '1'
     $env:DATABASE_URL = "postgresql+psycopg://shoulder_api:$password@127.0.0.1:54322/postgres"
     # Local databases are disposable, so the policy mutation checks run here.
     $env:ALLOW_POLICY_MUTATION = '1'
@@ -35,8 +57,17 @@ try {
         & docker exec -i $container psql -U postgres -d postgres -q 2>$null
     'ALTER ROLE shoulder_operator PASSWORD NULL;' |
         & docker exec -i $container psql -U postgres -d postgres -q 2>$null
+    'ALTER ROLE shoulder_worker PASSWORD NULL;' |
+        & docker exec -i $container psql -U postgres -d postgres -q 2>$null
     $env:ALLOW_POLICY_MUTATION = $null
+    $env:REQUIRE_STORAGE_TESTS = $null
+    $env:R2_SECRET_ACCESS_KEY = $null
+    $env:R2_ACCESS_KEY_ID = $null
+    $env:R2_REGION = $null
+    $env:R2_BUCKET = $null
+    $env:R2_ENDPOINT_URL = $null
     $env:OPERATOR_DATABASE_URL = $null
+    $env:WORKER_DATABASE_URL = $null
     $env:REQUIRE_DATABASE_TESTS = $null
     $env:DATABASE_URL = $null
     $env:MIGRATION_DATABASE_URL = $null

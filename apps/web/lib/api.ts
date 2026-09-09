@@ -14,6 +14,9 @@ export type GoalSummary = Schema["GoalSummary"];
 export type RosterPlayer = Schema["RosterPlayer"];
 export type Goal = Schema["Goal"];
 export type BulkResult = Schema["BulkResult"];
+export type Game = Schema["Game"];
+export type GamePage = Schema["GamePage"];
+export type VideoSummary = Schema["VideoSummary"];
 export type InviteResult = Schema["InviteResult"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */
@@ -93,6 +96,20 @@ export async function fetchRoster(
   return (
     await request<RosterPlayer[]>(token, `/v1/teams/${teamId}/players${query}`)
   ).data;
+}
+
+/**
+ * Matches for one team, newest first. Null means the call failed; an empty
+ * array means the team has no match yet, and the screens say each plainly.
+ */
+export async function fetchGames(
+  token: string,
+  teamId: string,
+): Promise<Game[] | null> {
+  return (
+    (await request<GamePage>(token, `/v1/teams/${teamId}/games`)).data?.games ??
+    null
+  );
 }
 
 export async function fetchGoals(

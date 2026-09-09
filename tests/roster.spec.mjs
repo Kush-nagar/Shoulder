@@ -38,7 +38,9 @@ function resetLocalWorkspace() {
       "-v",
       "ON_ERROR_STOP=1",
       "-c",
-      "TRUNCATE app.development_goal, app.player, app.team_membership, app.team",
+      // `app.game` references `app.team`, so a partial list cannot truncate.
+      // Project 02 added game, video, part, and job rows to this workspace.
+      "TRUNCATE app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
     ],
     { stdio: ["ignore", "ignore", "pipe"] },
   );

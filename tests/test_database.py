@@ -26,11 +26,25 @@ from services.api.routes import authorized_operator
 ADMIN_URL = os.environ.get("MIGRATION_DATABASE_URL")
 RUNTIME_URL = os.environ.get("DATABASE_URL")
 OPERATOR_URL = os.environ.get("OPERATOR_DATABASE_URL")
+# The background path logs in as its own role; see ADR 0018. Suites that do
+# not use it still have to restore its password after a downgrade drops it.
+WORKER_URL = os.environ.get("WORKER_DATABASE_URL")
 # Set only where a database is provisioned, so CI cannot skip this suite
 # silently while the shared quality script runs without one.
 REQUIRED = os.environ.get("REQUIRE_DATABASE_TESTS", "").lower() in ("1", "true")
 
-TABLES = ("user_account", "team", "team_membership", "player", "development_goal")
+TABLES = (
+    "user_account",
+    "team",
+    "team_membership",
+    "player",
+    "development_goal",
+    # 0005 — Project 02 ingest and durable work.
+    "game",
+    "video",
+    "video_upload_part",
+    "processing_job",
+)
 
 
 def database_urls_configured(*urls: str | None) -> bool:
@@ -818,6 +832,7 @@ def restore_login_passwords(engine: Engine) -> None:
         for role, url in (
             ("shoulder_api", RUNTIME_URL),
             ("shoulder_operator", OPERATOR_URL),
+            ("shoulder_worker", WORKER_URL),
         ):
             password = make_url(str(url)).password
             if not password:
@@ -851,15 +866,17 @@ class ZMigrationTests(unittest.TestCase):
                         text(
                             "SELECT EXISTS (SELECT 1 FROM pg_roles "
                             "WHERE rolname IN ('shoulder_operator', "
-                            "'shoulder_api', 'shoulder_migration'))"
+                            "'shoulder_api', 'shoulder_migration', "
+                            "'shoulder_worker'))"
                         )
                     ).scalar_one()
                 )
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
-                # 0001 six, plus the three `0004` roster and goal helpers.
-                self.assertEqual(self.function_count(connection), 9)
+                # 0001 six, the three `0004` roster and goal helpers, and the
+                # two `0005` game and video membership helpers.
+                self.assertEqual(self.function_count(connection), 11)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")

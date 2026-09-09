@@ -1,4 +1,4 @@
-name: Task 1 quality
+name: Quality
 on:
   pull_request:
   workflow_dispatch:
@@ -50,11 +50,52 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f tests/fixtures/ci-auth-schema.sql
           uv run --locked alembic upgrade head
           runtime_password="$(openssl rand -hex 24)"
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE shoulder_api PASSWORD '$runtime_password'"
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE shoulder_operator PASSWORD '$runtime_password'"
+          for role in shoulder_api shoulder_operator shoulder_worker; do
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE $role PASSWORD '$runtime_password'"
+          done
           export OPERATOR_DATABASE_URL="postgresql+psycopg://shoulder_operator:$runtime_password@127.0.0.1:5432/postgres"
           export DATABASE_URL="postgresql+psycopg://shoulder_api:$runtime_password@127.0.0.1:5432/postgres"
+          export WORKER_DATABASE_URL="postgresql+psycopg://shoulder_worker:$runtime_password@127.0.0.1:5432/postgres"
           uv run --locked python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Start pinned object storage
+        # The same digest-pinned images infra/compose.yaml runs locally. MinIO
+        # is a step rather than a service container because a service cannot
+        # supply the `server /data` command the image needs.
+        env:
+          MINIO_ROOT_USER: shoulder-ci
+          MINIO_ROOT_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-ci-only
+          MINIO_IMAGE: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          MC_IMAGE: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+        run: |
+          docker run -d --name shoulder-minio --network host -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e MINIO_API_CORS_ALLOW_ORIGIN=http://127.0.0.1:3000 "$MINIO_IMAGE" server /data
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:9000/minio/health/ready && break
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:9000/minio/health/ready
+          docker run --rm --network host -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD --entrypoint /bin/sh "$MC_IMAGE" -ec 'mc alias set ci http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null; mc mb --ignore-existing ci/shoulder-ci >/dev/null; mc anonymous set none ci/shoulder-ci >/dev/null'
+      - name: Storage integration and the upload API
+        # The 2 GB proof stays out of pull-request CI by design
+        # (`docs/11-testing-quality.md`); scripts/check-storage.ps1 runs it.
+        env:
+          PGPASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-ci-only
+          MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:${{ github.run_id }}-${{ github.run_attempt }}-ci-only@127.0.0.1:5432/postgres
+          REQUIRE_DATABASE_TESTS: '1'
+          REQUIRE_STORAGE_TESTS: '1'
+          R2_ENDPOINT_URL: http://127.0.0.1:9000
+          R2_BUCKET: shoulder-ci
+          R2_REGION: auto
+          R2_ACCESS_KEY_ID: shoulder-ci
+          R2_SECRET_ACCESS_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-ci-only
+        run: |
+          runtime_password="$(openssl rand -hex 24)"
+          for role in shoulder_api shoulder_operator shoulder_worker; do
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE $role PASSWORD '$runtime_password'"
+          done
+          export OPERATOR_DATABASE_URL="postgresql+psycopg://shoulder_operator:$runtime_password@127.0.0.1:5432/postgres"
+          export DATABASE_URL="postgresql+psycopg://shoulder_api:$runtime_password@127.0.0.1:5432/postgres"
+          export WORKER_DATABASE_URL="postgresql+psycopg://shoulder_worker:$runtime_password@127.0.0.1:5432/postgres"
+          uv run --locked python -m unittest tests.test_storage tests.test_api_upload -v
       - name: Dependency vulnerabilities
         run: |
           pnpm audit --audit-level=low

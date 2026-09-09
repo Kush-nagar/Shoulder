@@ -38,6 +38,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/games": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Game */
+        post: operations["create_game_v1_games_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/games/{game_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Game
+         * @description Game and video state. Per-player review state arrives with Block 04.
+         */
+        get: operations["read_game_v1_games__game_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/games/{game_id}/videos/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Upload
+         * @description Allocate one multipart upload for an authorized coach.
+         *
+         *     Size, extension, declared type, and part count are all bounded before a
+         *     single URL is signed, per `docs/10-security-privacy.md`. The declared MIME
+         *     type is checked against the extension but is a hint either way: Task 11
+         *     probes the stored bytes before anything trusts them.
+         */
+        post: operations["create_upload_v1_games__game_id__videos_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/goals/{goal_id}": {
         parameters: {
             query?: never;
@@ -171,6 +233,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/games": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Games */
+        get: operations["list_games_v1_teams__team_id__games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/players": {
         parameters: {
             query?: never;
@@ -206,6 +285,112 @@ export interface paths {
          * @description Preview or commit a pasted roster. A partial write never happens.
          */
         post: operations["create_players_bulk_v1_teams__team_id__players_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/videos/{video_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Video */
+        get: operations["read_video_v1_videos__video_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/videos/{video_id}/upload-abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Abort Upload
+         * @description Abandon an incomplete upload. Safe to repeat.
+         *
+         *     The video row is kept in a terminal state so the Task 22 sweeper can find
+         *     it; `docs/10-security-privacy.md` gives an abandoned upload seven days from
+         *     initiation regardless of how many resumes it saw.
+         */
+        post: operations["abort_upload_v1_videos__video_id__upload_abort_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/videos/{video_id}/upload-complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Upload
+         * @description Finish the upload, start the retention clock, and enqueue the work.
+         *
+         *     Idempotent by contract: a repeated call on an already completed upload
+         *     returns the same answer rather than a second completion. Concurrency is
+         *     settled by the conditional UPDATE, which is the only transition out of
+         *     `uploading`; the loser re-reads the winner's row.
+         */
+        post: operations["complete_upload_v1_videos__video_id__upload_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/videos/{video_id}/upload-parts/sign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign Upload Parts
+         * @description Short-lived PUT URLs, each naming one object, one verb, and one part.
+         */
+        post: operations["sign_upload_parts_v1_videos__video_id__upload_parts_sign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/videos/{video_id}/upload-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Upload State
+         * @description The authoritative resume record (`docs/00-decisions.md` D5).
+         */
+        get: operations["read_upload_state_v1_videos__video_id__upload_state_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -267,6 +452,76 @@ export interface components {
             jersey_number: number | null;
             /** Position */
             position: string | null;
+        };
+        /** Game */
+        Game: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "match" | "scrimmage";
+            /** Notes */
+            notes: string | null;
+            /** Opponent */
+            opponent: string | null;
+            /**
+             * Played At
+             * Format: date-time
+             */
+            played_at: string;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+            /**
+             * Videos
+             * @default []
+             */
+            videos: components["schemas"]["VideoSummary"][];
+        };
+        /** GameCreate */
+        GameCreate: {
+            /**
+             * Kind
+             * @default match
+             * @enum {string}
+             */
+            kind: "match" | "scrimmage";
+            /** Notes */
+            notes?: string | null;
+            /** Opponent */
+            opponent?: string | null;
+            /**
+             * Played At
+             * Format: date-time
+             */
+            played_at: string;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /**
+         * GamePage
+         * @description Cursor pagination per `docs/04-api.md`; the cursor is opaque to a client.
+         */
+        GamePage: {
+            /** Games */
+            games: components["schemas"]["Game"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /** Goal */
         Goal: {
@@ -468,6 +723,27 @@ export interface components {
              */
             team_id: string;
         };
+        /** SignPartsRequest */
+        SignPartsRequest: {
+            /** Part Numbers */
+            part_numbers: number[];
+        };
+        /** SignedPart */
+        SignedPart: {
+            /** Part Number */
+            part_number: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Url */
+            url: string;
+        };
+        /** SignedParts */
+        SignedParts: {
+            /** Expires In */
+            expires_in: number;
+            /** Parts */
+            parts: components["schemas"]["SignedPart"][];
+        };
         /** TeamBootstrap */
         TeamBootstrap: {
             /** Age Group */
@@ -514,6 +790,97 @@ export interface components {
              */
             team_id: string;
         };
+        /** UploadCompleted */
+        UploadCompleted: {
+            /**
+             * Source Expires At
+             * Format: date-time
+             */
+            source_expires_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploading" | "uploaded" | "processing" | "ready" | "failed" | "deletion_pending" | "deleted";
+            /**
+             * Upload Completed At
+             * Format: date-time
+             */
+            upload_completed_at: string;
+            /**
+             * Video Id
+             * Format: uuid
+             */
+            video_id: string;
+        };
+        /**
+         * UploadCreate
+         * @description What the browser knows before a byte moves.
+         *
+         *     `size_bytes` is the exact file length, not an estimate: the part plan and
+         *     the completion size check are both derived from it. The declared MIME type
+         *     is validated against the extension but never trusted on its own.
+         */
+        UploadCreate: {
+            /** Content Type */
+            content_type: string;
+            /** Filename */
+            filename: string;
+            /** Sha256 */
+            sha256?: string | null;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** UploadSession */
+        UploadSession: {
+            /** Part Count */
+            part_count: number;
+            /** Part Size Bytes */
+            part_size_bytes: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploading" | "uploaded" | "processing" | "ready" | "failed" | "deletion_pending" | "deleted";
+            /**
+             * Video Id
+             * Format: uuid
+             */
+            video_id: string;
+        };
+        /**
+         * UploadState
+         * @description Server-confirmed resume state. `docs/00-decisions.md` D5: authoritative.
+         */
+        UploadState: {
+            /** Missing Part Numbers */
+            missing_part_numbers: number[];
+            /** Part Count */
+            part_count: number;
+            /** Part Size Bytes */
+            part_size_bytes: number;
+            /** Parts */
+            parts: components["schemas"]["UploadedPart"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploading" | "uploaded" | "processing" | "ready" | "failed" | "deletion_pending" | "deleted";
+            /**
+             * Video Id
+             * Format: uuid
+             */
+            video_id: string;
+        };
+        /** UploadedPart */
+        UploadedPart: {
+            /** Etag */
+            etag: string;
+            /** Part Number */
+            part_number: number;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -526,6 +893,54 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VideoSummary
+         * @description Processing state a coach screen can render. No storage key, by contract.
+         */
+        VideoSummary: {
+            /** Content Type */
+            content_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Height */
+            height?: number | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Original Filename */
+            original_filename: string;
+            /** Part Count */
+            part_count: number;
+            /** Part Size Bytes */
+            part_size_bytes: number;
+            /** Ready At */
+            ready_at?: string | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploading" | "uploaded" | "processing" | "ready" | "failed" | "deletion_pending" | "deleted";
+            /** Upload Completed At */
+            upload_completed_at?: string | null;
+            /** Uploaded Parts */
+            uploaded_parts: number;
+            /** Width */
+            width?: number | null;
         };
     };
     responses: never;
@@ -572,6 +987,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthIdentity"];
+                };
+            };
+        };
+    };
+    create_game_v1_games_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GameCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Game"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_game_v1_games__game_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Game"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_upload_v1_games__game_id__videos_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -853,6 +1367,39 @@ export interface operations {
             };
         };
     };
+    list_games_v1_teams__team_id__games_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GamePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_players_v1_teams__team_id__players_get: {
         parameters: {
             query?: {
@@ -961,6 +1508,165 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkResult"];
+                };
+            };
+        };
+    };
+    read_video_v1_videos__video_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    abort_upload_v1_videos__video_id__upload_abort_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_upload_v1_videos__video_id__upload_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadCompleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_upload_parts_v1_videos__video_id__upload_parts_sign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignPartsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedParts"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_upload_state_v1_videos__video_id__upload_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

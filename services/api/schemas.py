@@ -186,3 +186,131 @@ class Goal(BaseModel):
     created_by: UUID
     created_at: datetime
     closed_at: datetime | None
+
+
+# --- Games, video ingest, and durable work -------------------------------------
+#
+# No response model here carries `original_key`, `playback_key`,
+# `multipart_upload_id`, or a signing credential: `docs/04-api.md` says a video
+# response contains "Metadata and processing state; no storage keys".
+
+GameKind = Literal["match", "scrimmage"]
+VideoStatus = Literal[
+    "uploading",
+    "uploaded",
+    "processing",
+    "ready",
+    "failed",
+    "deletion_pending",
+    "deleted",
+]
+# The stored extension allowlist lives in `services/api/storage.py`; this is the
+# request-side view of it.
+UploadExtension = Literal["mp4", "m4v", "mov"]
+
+
+class GameCreate(BaseModel):
+    team_id: UUID
+    played_at: datetime
+    kind: GameKind = "match"
+    opponent: str | None = Field(default=None, min_length=1, max_length=100)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class VideoSummary(BaseModel):
+    """Processing state a coach screen can render. No storage key, by contract."""
+
+    id: UUID
+    game_id: UUID
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    status: VideoStatus
+    part_size_bytes: int
+    part_count: int
+    uploaded_parts: int
+    duration_ms: int | None = None
+    width: int | None = None
+    height: int | None = None
+    created_at: datetime
+    upload_completed_at: datetime | None = None
+    ready_at: datetime | None = None
+
+
+class Game(BaseModel):
+    id: UUID
+    team_id: UUID
+    opponent: str | None
+    played_at: datetime
+    kind: GameKind
+    notes: str | None
+    created_at: datetime
+    videos: list[VideoSummary] = []
+
+
+class GamePage(BaseModel):
+    """Cursor pagination per `docs/04-api.md`; the cursor is opaque to a client."""
+
+    games: list[Game]
+    next_cursor: str | None = None
+
+
+class UploadCreate(BaseModel):
+    """What the browser knows before a byte moves.
+
+    `size_bytes` is the exact file length, not an estimate: the part plan and
+    the completion size check are both derived from it. The declared MIME type
+    is validated against the extension but never trusted on its own.
+    """
+
+    filename: str = Field(min_length=1, max_length=255)
+    size_bytes: int = Field(gt=0)
+    content_type: str = Field(min_length=1, max_length=100)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class UploadSession(BaseModel):
+    video_id: UUID
+    part_size_bytes: int
+    part_count: int
+    status: VideoStatus
+
+
+class SignPartsRequest(BaseModel):
+    part_numbers: list[int] = Field(min_length=1, max_length=32)
+
+
+class SignedPart(BaseModel):
+    part_number: int
+    url: str
+    size_bytes: int
+    """Exact byte length the client must PUT for this part."""
+
+
+class SignedParts(BaseModel):
+    expires_in: int
+    parts: list[SignedPart]
+
+
+class UploadedPart(BaseModel):
+    part_number: int
+    etag: str
+    size_bytes: int
+
+
+class UploadState(BaseModel):
+    """Server-confirmed resume state. `docs/00-decisions.md` D5: authoritative."""
+
+    video_id: UUID
+    status: VideoStatus
+    part_size_bytes: int
+    part_count: int
+    parts: list[UploadedPart]
+    missing_part_numbers: list[int]
+
+
+class UploadCompleted(BaseModel):
+    video_id: UUID
+    status: VideoStatus
+    upload_completed_at: datetime
+    source_expires_at: datetime
