@@ -10,10 +10,12 @@ nothing, and one account whose membership is revoked mid-test.
 """
 
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
-from test_database import DatabaseTestCase
+from sqlalchemy.exc import DBAPIError
+from test_database import DatabaseTestCase, sqlstate
 
 
 @dataclass(frozen=True)
@@ -121,3 +123,34 @@ class IsolationHarness(DatabaseTestCase):
         with self.runtime.connect() as connection, connection.begin():
             self.as_user(connection, user_id)
             return list(connection.execute(text(sql), parameters).scalars().all())
+
+    def write_as(
+        self, user_id: UUID | str | None, sql: str, **parameters: object
+    ) -> int:
+        """Run one write through the runtime role; return the affected rows.
+
+        A write a policy filters out reports zero rows rather than failing, so
+        the count is the only evidence that a permitted write was refused.
+        """
+        with self.runtime.connect() as connection, connection.begin():
+            self.as_user(connection, user_id)
+            return connection.execute(text(sql), parameters).rowcount
+
+    def refused_as(
+        self, user_id: UUID | str | None, sql: str, **parameters: object
+    ) -> str | None:
+        """Assert one statement is refused through the runtime role.
+
+        Returns its SQLSTATE, so a caller distinguishes a refusal from a write
+        that merely matched no row.
+        """
+        with self.assertRaises(DBAPIError) as caught:
+            with self.runtime.connect() as connection, connection.begin():
+                self.as_user(connection, user_id)
+                connection.execute(text(sql), parameters)
+        return sqlstate(caught.exception)
+
+    def admin_read(self, sql: str, **parameters: object) -> list[Any]:
+        """Read rows as the owner, to prove what a refused write left alone."""
+        with self.admin.connect() as connection:
+            return list(connection.execute(text(sql), parameters).all())

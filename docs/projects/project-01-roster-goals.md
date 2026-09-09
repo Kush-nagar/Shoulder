@@ -109,14 +109,25 @@ New `private` helpers, all `STABLE SECURITY DEFINER SET search_path = ''`, owned
 - `private.is_player_coach(p_player_id uuid) returns boolean` — the caller coaches the
   team of that player row.
 - `private.is_player_self(p_player_id uuid) returns boolean` — the caller's account is
-  linked to that player row and the row is neither deleted nor deletion-pending.
+  linked to that player row, the caller still holds a membership on that team, and the
+  row is neither deleted nor deletion-pending. It mirrors `player_visible_select`
+  exactly, including the membership check migration `0002` added: revoking a membership
+  must end the player's read of their own goal, not only of their roster row.
 - `private.link_player_account(p_player_id uuid, p_email text) returns uuid` —
   `VOLATILE SECURITY DEFINER`. Authorizes on `private.is_player_coach(p_player_id)`,
-  never on an argument. In one transaction: resolves or creates the `app.user_account`
-  row for the normalized email, sets `player.user_id`, and inserts the matching
+  never on an argument. In one transaction: resolves the `app.user_account` row for the
+  normalized email, sets `player.user_id`, and inserts the matching
   `team_membership (team_id, user_id, 'player')`. Returns the account ID. Raises
   `23505` when the player is already linked or the account is linked to another row on
-  that team, `22023` when the email is invalid.
+  that team, `22023` when the email is unusable, `P0002` when no account exists for that
+  address yet, and `42501` when the caller does not coach that player.
+
+  It **links only; it never creates an account.** `app.user_account.id` references
+  `auth.users(id)`, so a profile row cannot exist before its Supabase Auth identity, and
+  this definer holds no privilege on `auth`. Creating the identity would require a
+  service-role credential inside FastAPI, which bypasses RLS and contradicts
+  `services/api/db.py`. Identity creation moves to Task 20 with email delivery. See
+  [ADR 0017](../decisions/0017-invitation-links-existing-accounts.md).
 
 Policies on `app.player` for `shoulder_api` (the existing SELECT policy is unchanged):
 
@@ -170,15 +181,15 @@ Response models (Pydantic, `services/api/schemas.py`):
 ```
 TeamSummary       team_id, name, age_group, season_label, role
 RosterPlayer      id, team_id, display_name, jersey_number, position, active,
-                  account_linked (bool), active_goal (GoalSummary | None)
+                  account_name (str | None), active_goal (GoalSummary | None)
 PlayerCreate      display_name (1..80), jersey_number (0..99 | None), position (1..40 | None)
 PlayerPatch       display_name?, jersey_number?, position?      (all optional, >=1 set)
 BulkRow           display_name, jersey_number, position
 BulkRequest       commit (bool, default false), rows (1..40 BulkRow)
 BulkRowResult     index, display_name, jersey_number, position, errors (list[str])
 BulkResult        committed (bool), rows (list[BulkRowResult]), created (list[uuid])
-InviteRequest     email (EmailStr)
-InviteResult      player_id, user_id, created_account (bool)
+InviteRequest     email
+InviteResult      player_id, user_id
 GoalCreate        title (1..100), description (<=1000 | None), ontology_key (1..80 | None)
 GoalPatch         title?, description?, status?                  (all optional, >=1 set)
 GoalSummary       id, title, status
@@ -187,6 +198,21 @@ Goal              id, player_id, title, description, ontology_key, status,
 ```
 
 `ontology_key` is accepted but never rendered by the web app.
+
+`RosterPlayer.account_name` is the linked account's display name and comes only from
+`private.team_roster(team_id)`, the Task 5 helper built for exactly this consumer. It is
+`null` for an unlinked roster row. No email ever appears in a roster response. The roster
+list is one query:
+
+```sql
+SELECT p.id, p.team_id, p.display_name, p.jersey_number, p.position, p.active,
+       r.account_name, g.id AS goal_id, g.title AS goal_title, g.status AS goal_status
+FROM app.player p
+LEFT JOIN private.team_roster(:team_id) r ON r.player_id = p.id
+LEFT JOIN app.development_goal g ON g.player_id = p.id AND g.status = 'active'
+WHERE p.team_id = :team_id AND p.deleted_at IS NULL AND p.deletion_pending_at IS NULL
+ORDER BY p.jersey_number NULLS LAST, p.display_name
+```
 
 Goal status transitions: `active → achieved | paused | retired`, `paused → active |
 retired`. `achieved` and `retired` are terminal. Any other pair is `409`. Leaving

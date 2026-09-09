@@ -33,7 +33,7 @@ Read only these, and only for the patterns you must match:
 - `migrations/versions/0001_core_identity_schema.py` — role constants, ownership moves,
   `ENABLE`/`FORCE` RLS, owner-maintenance policy, `SECURITY DEFINER` helper style,
   `REVOKE` from `PUBLIC`/`anon`/`authenticated`, and the downgrade shape.
-- `migrations/versions/0003_roster_display.py` — the compact single-purpose migration
+- `migrations/versions/0003_roster_account_display.py` — the compact single-purpose migration
   style and its function ownership/grant/revoke sequence.
 
 # Expected Outputs

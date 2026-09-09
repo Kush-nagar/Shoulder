@@ -18,6 +18,17 @@ from services.api.main import app
 
 
 class AuthTests(unittest.IsolatedAsyncioTestCase):
+    def problem(self, response: Any) -> dict[str, Any]:
+        """Assert the RFC 9457 envelope and return it. Errors carry no more."""
+        self.assertEqual(
+            response.headers.get("content-type"), "application/problem+json"
+        )
+        body: dict[str, Any] = response.json()
+        self.assertEqual(set(body), {"type", "title", "status", "detail", "instance"})
+        self.assertTrue(body["type"].startswith("https://shoulder.local/problems/"))
+        self.assertEqual(body["status"], response.status_code)
+        return body
+
     async def asyncSetUp(self) -> None:
         self.key = ec.generate_private_key(ec.SECP256R1())
         self.other_key = ec.generate_private_key(ec.SECP256R1())
@@ -200,7 +211,9 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
                     headers={"Authorization": f"Bearer {self.token()}"},
                 )
                 self.assertEqual(response.status_code, 401)
-                self.assertEqual(response.json(), {"detail": "Authentication required"})
+                self.assertEqual(
+                    self.problem(response)["title"], "Authentication required"
+                )
 
     async def test_upstream_outages_fail_closed(self) -> None:
         for endpoint in ("jwks_status", "user_status"):
@@ -217,7 +230,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
                     response.headers.get("cache-control"), "private, no-store"
                 )
                 self.assertEqual(
-                    response.json(), {"detail": "Authentication unavailable"}
+                    self.problem(response)["detail"], "Authentication unavailable"
                 )
 
     async def test_network_and_configuration_errors_are_not_cached(self) -> None:

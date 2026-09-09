@@ -1,3 +1,5 @@
+import { ShoulderMark, ShoulderWordmark } from "../../../components/brand";
+
 export default async function SignIn({
   searchParams,
 }: {
@@ -6,6 +8,9 @@ export default async function SignIn({
   const state = await searchParams;
   return (
     <main className="mx-auto max-w-md px-5 py-16">
+      <header className="mb-10">
+        <ShoulderWordmark className="h-auto w-44" />
+      </header>
       <h1 className="text-2xl font-semibold">Sign in to Shoulder</h1>
       {state.sent && (
         <p role="status" className="mt-4">
@@ -40,6 +45,10 @@ export default async function SignIn({
           Email a sign-in link
         </button>
       </form>
+      <footer className="mt-12 flex items-center gap-3 border-t border-line pt-6">
+        <ShoulderMark className="size-6" />
+        <p className="text-sm text-muted">A private tool for one team.</p>
+      </footer>
     </main>
   );
 }

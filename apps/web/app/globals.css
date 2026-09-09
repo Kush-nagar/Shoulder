@@ -1,17 +1,38 @@
 @import "tailwindcss";
 
+/* Values and contrast baselines: docs/09-frontend-design-system.md. */
 :root {
   --sh-paper: #faf9f7;
+  --sh-surface: #ffffff;
+  --sh-surface-subtle: #f3f0ec;
   --sh-ink: #171512;
+  --sh-ink-2: #4e4944;
   --sh-muted: #6b6560;
   --sh-line: #e5e2de;
+  --sh-line-strong: #cfc9c2;
+  --sh-action: #9e472c;
+  --sh-action-hover: #843a24;
+  --sh-action-soft: #f4e4dd;
+  --sh-focus: #7c341f;
+  --sh-error: #9b2c2c;
+  --sh-error-soft: #f9e8e6;
 }
 
 @theme inline {
   --color-paper: var(--sh-paper);
+  --color-surface: var(--sh-surface);
+  --color-surface-subtle: var(--sh-surface-subtle);
   --color-ink: var(--sh-ink);
+  --color-ink-2: var(--sh-ink-2);
   --color-muted: var(--sh-muted);
   --color-line: var(--sh-line);
+  --color-line-strong: var(--sh-line-strong);
+  --color-action: var(--sh-action);
+  --color-action-hover: var(--sh-action-hover);
+  --color-action-soft: var(--sh-action-soft);
+  --color-focus: var(--sh-focus);
+  --color-error: var(--sh-error);
+  --color-error-soft: var(--sh-error-soft);
   --font-sans: var(--font-inter-tight), Arial, sans-serif;
 }
 

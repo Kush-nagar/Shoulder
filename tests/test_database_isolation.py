@@ -46,6 +46,19 @@ EXPECTED_POLICIES = {
     ("team_membership", "team_membership_visible_select", "SELECT", "{shoulder_api}"),
     ("user_account", "user_account_owner_maintenance", "ALL", "{shoulder_migration}"),
     ("user_account", "user_account_self_select", "SELECT", "{shoulder_api}"),
+    # 0004: the coach roster and development-goal write surface.
+    ("player", "player_coach_insert", "INSERT", "{shoulder_api}"),
+    ("player", "player_coach_update", "UPDATE", "{shoulder_api}"),
+    (
+        "development_goal",
+        "development_goal_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    ("development_goal", "development_goal_coach_select", "SELECT", "{shoulder_api}"),
+    ("development_goal", "development_goal_coach_insert", "INSERT", "{shoulder_api}"),
+    ("development_goal", "development_goal_coach_update", "UPDATE", "{shoulder_api}"),
+    ("development_goal", "development_goal_player_select", "SELECT", "{shoulder_api}"),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -53,6 +66,9 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "is_team_coach",
     "is_team_member",
     "team_roster",
+    "is_player_coach",
+    "is_player_self",
+    "link_player_account",
 }
 
 
@@ -108,9 +124,18 @@ class PolicySurfaceTests(DatabaseTestCase):
                     continue
                 # The positive/negative matrix verifies predicate semantics;
                 # spelling a particular helper name is not a security proof.
+                if row.cmd == "INSERT":
+                    # INSERT has no existing row to filter, only a check.
+                    self.assertIsNone(row.qual)
+                    self.assertTrue(row.with_check)
+                    continue
                 self.assertTrue(row.qual)
-                # None of the runtime policies may authorize a write.
-                self.assertIsNone(row.with_check)
+                # A read still may not authorize a write. An UPDATE must carry
+                # both halves, per the access matrix in `docs/03-schema.md`.
+                if row.cmd == "UPDATE":
+                    self.assertTrue(row.with_check)
+                else:
+                    self.assertIsNone(row.with_check)
 
     def test_protected_tables_keep_row_level_security_forced(self) -> None:
         with self.admin.connect() as connection:
@@ -167,7 +192,12 @@ class PolicySurfaceTests(DatabaseTestCase):
             )
         self.assertEqual(
             {(g.grantee, g.table_name, g.privilege_type) for g in table_grants},
-            {("shoulder_api", table, "SELECT") for table in TABLES},
+            # `role_table_grants` reports table-level grants only. A goal row is
+            # inserted whole, so that one is table-level; the roster's INSERT
+            # and both UPDATE surfaces are column-level by design and are
+            # snapshotted per column in `tests/test_database_roster.py`.
+            {("shoulder_api", table, "SELECT") for table in TABLES}
+            | {("shoulder_api", "development_goal", "INSERT")},
         )
         self.assertEqual(set(functions), EXPECTED_RUNTIME_FUNCTIONS)
         # Bootstrap authority stays with the operator role alone.
@@ -363,7 +393,13 @@ class AccessMatrixTests(IsolationHarness):
             [],
         )
 
-    def test_every_table_and_verb_denies_runtime_writes(self) -> None:
+    def test_runtime_writes_outside_the_granted_surface_are_denied(self) -> None:
+        """The bounded roster/goal write surface `0004` added is the only one.
+
+        Both a coach and a player are refused here. A permitted verb that the
+        policy merely filters to zero rows is not an error; those cases are
+        proved by row counts in `tests/test_database_roster.py`.
+        """
         world = self.world
         statements = {
             "user_account": (
@@ -385,10 +421,19 @@ class AccessMatrixTests(IsolationHarness):
                 "DELETE FROM app.team_membership",
             ),
             "player": (
+                # Team B is coached by neither identity under test.
                 "INSERT INTO app.player (team_id, display_name)"
-                f" VALUES ('{world.a.id}', 'Intruder')",
-                "UPDATE app.player SET display_name = 'changed'",
+                f" VALUES ('{world.b.id}', 'Intruder')",
+                f"UPDATE app.player SET team_id = '{world.b.id}'",
+                f"UPDATE app.player SET user_id = '{world.a.coach}'",
                 "DELETE FROM app.player",
+            ),
+            "development_goal": (
+                "INSERT INTO app.development_goal (player_id, title, created_by)"
+                f" VALUES ('{world.b.rows[0]}', 'Intruder', '{world.a.coach}')",
+                f"UPDATE app.development_goal SET player_id = '{world.b.rows[0]}'",
+                f"UPDATE app.development_goal SET created_by = '{world.a.coach}'",
+                "DELETE FROM app.development_goal",
             ),
         }
         for identity in (world.a.coach, world.a.players[0]):

@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/goals/{goal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Goal */
+        patch: operations["update_goal_v1_goals__goal_id__patch"];
+        trace?: never;
+    };
     "/v1/me": {
         parameters: {
             query?: never;
@@ -55,7 +72,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/teams": {
+    "/v1/players/{player_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Player */
+        patch: operations["update_player_v1_players__player_id__patch"];
+        trace?: never;
+    };
+    "/v1/players/{player_id}/archive": {
         parameters: {
             query?: never;
             header?: never;
@@ -65,10 +99,113 @@ export interface paths {
         get?: never;
         put?: never;
         /**
+         * Archive Player
+         * @description Soft removal only. Nothing is deleted and nothing is erased here.
+         */
+        post: operations["archive_player_v1_players__player_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/players/{player_id}/goals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Goals
+         * @description A coach reads their player's goals; a player reads only their own.
+         */
+        get: operations["list_goals_v1_players__player_id__goals_get"];
+        put?: never;
+        /** Create Goal */
+        post: operations["create_goal_v1_players__player_id__goals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/players/{player_id}/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite Player
+         * @description Link an account to a roster row. Delivery is a later task, not this one.
+         */
+        post: operations["invite_player_v1_players__player_id__invite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Teams */
+        get: operations["list_teams_v1_teams_get"];
+        put?: never;
+        /**
          * Bootstrap Team
          * @description Create the single initial team and its coach membership atomically.
          */
         post: operations["bootstrap_team_v1_teams_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Players */
+        get: operations["list_players_v1_teams__team_id__players_get"];
+        put?: never;
+        /**
+         * Create Player
+         * @description Add one roster row. No address is collected here, by design.
+         */
+        post: operations["create_player_v1_teams__team_id__players_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/players/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Players Bulk
+         * @description Preview or commit a pasted roster. A partial write never happens.
+         */
+        post: operations["create_players_bulk_v1_teams__team_id__players_bulk_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -87,6 +224,119 @@ export interface components {
              */
             user_id: string;
         };
+        /** BulkRequest */
+        BulkRequest: {
+            /**
+             * Commit
+             * @default false
+             */
+            commit: boolean;
+            /** Rows */
+            rows: components["schemas"]["BulkRow"][];
+        };
+        /** BulkResult */
+        BulkResult: {
+            /** Committed */
+            committed: boolean;
+            /** Created */
+            created: string[];
+            /** Rows */
+            rows: components["schemas"]["BulkRowResult"][];
+        };
+        /**
+         * BulkRow
+         * @description Deliberately permissive: a bad row earns a per-row error, not a 422 wall.
+         */
+        BulkRow: {
+            /** Display Name */
+            display_name: string;
+            /** Jersey Number */
+            jersey_number?: number | null;
+            /** Position */
+            position?: string | null;
+        };
+        /** BulkRowResult */
+        BulkRowResult: {
+            /** Display Name */
+            display_name: string;
+            /** Errors */
+            errors: string[];
+            /** Index */
+            index: number;
+            /** Jersey Number */
+            jersey_number: number | null;
+            /** Position */
+            position: string | null;
+        };
+        /** Goal */
+        Goal: {
+            /** Closed At */
+            closed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Ontology Key */
+            ontology_key: string | null;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "achieved" | "paused" | "retired";
+            /** Title */
+            title: string;
+        };
+        /** GoalCreate */
+        GoalCreate: {
+            /** Description */
+            description?: string | null;
+            /** Ontology Key */
+            ontology_key?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** GoalPatch */
+        GoalPatch: {
+            /** Description */
+            description?: string | null;
+            /** Status */
+            status?: ("active" | "achieved" | "paused" | "retired") | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** GoalSummary */
+        GoalSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "achieved" | "paused" | "retired";
+            /** Title */
+            title: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -100,6 +350,27 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /** InviteRequest */
+        InviteRequest: {
+            /** Email */
+            email: string;
+        };
+        /**
+         * InviteResult
+         * @description ADR 0017: invitation links an existing account; it never creates one.
+         */
+        InviteResult: {
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
         };
         /** LinkedPlayer */
         LinkedPlayer: {
@@ -134,6 +405,59 @@ export interface components {
              */
             user_id: string;
         };
+        /** PlayerCreate */
+        PlayerCreate: {
+            /** Display Name */
+            display_name: string;
+            /** Jersey Number */
+            jersey_number?: number | null;
+            /** Position */
+            position?: string | null;
+        };
+        /**
+         * PlayerPatch
+         * @description Only the fields present in the request are written.
+         */
+        PlayerPatch: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Jersey Number */
+            jersey_number?: number | null;
+            /** Position */
+            position?: string | null;
+        };
+        /**
+         * RosterPlayer
+         * @description One roster row.
+         *
+         *     `account_name` is the linked account's display name and comes only from
+         *     `private.team_roster`, the Task 5 helper built for this consumer. It is the
+         *     sole path to another account's name: `user_account` is self-only under RLS.
+         *     It is never an address, and it is null for an unlinked or archived row.
+         */
+        RosterPlayer: {
+            /** Account Name */
+            account_name?: string | null;
+            /** Active */
+            active: boolean;
+            active_goal?: components["schemas"]["GoalSummary"] | null;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Jersey Number */
+            jersey_number: number | null;
+            /** Position */
+            position: string | null;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
         /** TeamBootstrap */
         TeamBootstrap: {
             /** Age Group */
@@ -155,6 +479,25 @@ export interface components {
         };
         /** TeamCreated */
         TeamCreated: {
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /** TeamSummary */
+        TeamSummary: {
+            /** Age Group */
+            age_group: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "coach" | "player";
+            /** Season Label */
+            season_label: string;
             /**
              * Team Id
              * Format: uuid
@@ -223,6 +566,41 @@ export interface operations {
             };
         };
     };
+    update_goal_v1_goals__goal_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                goal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoalPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Goal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_v1_me_get: {
         parameters: {
             query?: never;
@@ -239,6 +617,193 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    update_player_v1_players__player_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlayerPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RosterPlayer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_player_v1_players__player_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RosterPlayer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_goals_v1_players__player_id__goals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Goal"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_goal_v1_players__player_id__goals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Goal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invite_player_v1_players__player_id__invite_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_teams_v1_teams_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamSummary"][];
                 };
             };
         };
@@ -274,6 +839,116 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_players_v1_teams__team_id__players_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RosterPlayer"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_player_v1_teams__team_id__players_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlayerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RosterPlayer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_players_bulk_v1_teams__team_id__players_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkResult"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkResult"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkResult"];
                 };
             };
         };
