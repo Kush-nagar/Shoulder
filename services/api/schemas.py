@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 TeamRole = Literal["coach", "player"]
 GoalStatus = Literal["active", "achieved", "paused", "retired"]
@@ -78,18 +78,28 @@ class RosterPlayer(BaseModel):
     active_goal: GoalSummary | None = None
 
 
+# Bulk rows are trimmed before validation, so single writes trim too; otherwise
+# the same pasted name is stored differently depending on which route saved it.
+Name = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)
+]
+Position = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)
+]
+
+
 class PlayerCreate(BaseModel):
-    display_name: str = Field(min_length=1, max_length=80)
+    display_name: Name
     jersey_number: int | None = Field(default=None, ge=0, le=99)
-    position: str | None = Field(default=None, min_length=1, max_length=40)
+    position: Position | None = None
 
 
 class PlayerPatch(BaseModel):
     """Only the fields present in the request are written."""
 
-    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    display_name: Name | None = None
     jersey_number: int | None = Field(default=None, ge=0, le=99)
-    position: str | None = Field(default=None, min_length=1, max_length=40)
+    position: Position | None = None
 
     @model_validator(mode="after")
     def at_least_one_change(self) -> Self:

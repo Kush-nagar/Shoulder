@@ -407,6 +407,48 @@ class RosterApiTests(DatabaseTestCase):
             422,
         )
 
+    def test_invite_names_an_off_roster_player_rather_than_calling_it_linked(
+        self,
+    ) -> None:
+        """An archived player is refused, and the reason is the true one.
+
+        `private.link_player_account` folds "already linked", "archived", and
+        "deletion pending" into one branch, so the database alone would tell a
+        coach a player is linked to an account when they are not.
+        """
+        client = self.client_for(self.coach)
+        self.assertEqual(
+            client.post(f"/v1/players/{self.unlinked_row}/archive").status_code, 200
+        )
+        response = client.post(
+            f"/v1/players/{self.unlinked_row}/invite",
+            json={"email": self.emails[self.player]},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(
+            response.json()["type"],
+            "https://shoulder.local/problems/player-off-roster",
+        )
+        # Refused before any write: the row is still unlinked.
+        self.assertIsNone(self.linked_account(self.unlinked_row))
+
+    def test_names_are_stored_trimmed_by_every_write_path(self) -> None:
+        """Bulk trims, so the single routes must trim identically."""
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/teams/{self.team}/players",
+            json={"display_name": "  Spaced Name  ", "position": "  Winger  "},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["display_name"], "Spaced Name")
+        self.assertEqual(created.json()["position"], "Winger")
+        patched = client.patch(
+            f"/v1/players/{created.json()['id']}",
+            json={"display_name": "  Retrimmed  "},
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        self.assertEqual(patched.json()["display_name"], "Retrimmed")
+
     # --- archive ------------------------------------------------------------
 
     def test_archive_is_soft_and_idempotent(self) -> None:

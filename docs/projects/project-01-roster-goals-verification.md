@@ -85,12 +85,70 @@ resolved the defects below, regenerated contracts, and ran all verification.
    approved wordmark and mark moved to `/auth/sign-in`, the public entry, keeping
    `tests/smoke.spec.mjs` at full strength.
 
+## Independent full-block review (PR #8)
+
+Reviewed `cf7d0a0..f7146f6` as one system. Two defects fixed, six observations
+recorded with no code change.
+
+**Fixed**
+
+- **Invitation blamed the wrong cause for an off-roster player.**
+  `private.link_player_account` folds "already linked", archived, and
+  deletion-pending into one `NOT FOUND` branch and raises `23505`, so the API
+  told a coach an archived player was "already linked to an account" when they
+  were not. The refusal itself was correct; only the reason was false. The route
+  now names the true cause with 409 `player-off-roster` before calling the
+  helper, and the helper stays as the backstop. Covered by
+  `test_invite_names_an_off_roster_player_rather_than_calling_it_linked`.
+- **Single writes did not trim names; bulk did.** The same pasted name was
+  stored differently depending on which route saved it. `PlayerCreate` and
+  `PlayerPatch` now trim through `StringConstraints`, matching
+  `check_bulk_rows`. No OpenAPI change. Covered by
+  `test_names_are_stored_trimmed_by_every_write_path`.
+
+**Observations, no change**
+
+- Success messages in `invite-player.tsx`, `close-goal.tsx`, and
+  `archive-player.tsx` are unreachable: each component unmounts when the change
+  it made re-renders the page, so `useActionState` cannot survive to show them.
+  Error paths are correct — the dialog stays open and announces through
+  `role="alert"` — and the visual outcome of each success is immediate. A
+  page-level flash region is the fix; it belongs with the shell work in a later
+  block, not here.
+- Unhandled 500s fall through to Starlette's plain-text handler rather than a
+  problem document, and so carry no `Cache-Control: private, no-store`. No data
+  leaks (no traceback outside debug). Pre-existing since Task 3, not introduced
+  here.
+- `PLAYER_BY_ID` does not fence `deletion_pending_at` for a coach read. Nothing
+  in this block sets that column; Task 22 owns deletion fencing.
+- `PATCH /v1/goals/{goal_id}` permits editing a closed goal's title and
+  description, which the UI does not offer. Coach-only and within their own
+  team; `docs/06-tasks.md` does not forbid it.
+- No test proves the proxy refreshes a session cookie on `/coach/**`
+  specifically; the merged auth suite covers `/auth/session`. The matcher fix is
+  verified by inspection and by the roster suite signing in and navigating.
+- Cross-team **player**-to-player API isolation is proved at the database layer
+  by `tests/test_database_roster.py`; the API fixture has one player, so the
+  API-layer proof is coach-to-coach.
+
+**Confirmed sound**
+
+Column-level grants deny `team_id` and `user_id` writes for all four identities
+with SQLSTATE `42501` plus an owner read-back; helper authorization always
+derives from the caller's own membership, never an argument; 403 only where the
+row is visible through RLS and 404 everywhere else, asserted per route; the
+problem body asserts an exact key set and the absence of a name, `@`, a table
+name, a SQLSTATE, and `SELECT`; `assignments()` builds SET clauses from Pydantic
+field names, never client input; the bulk `taken` query matches the
+`player_active_jersey_key` index predicate exactly; downgrade to base leaves
+zero tables, functions, triggers, and roles.
+
 ## Commands and results
 
 | Command | Result |
 |---|---|
 | `.\scripts\check.ps1` | passed — Biome, TypeScript, 15 Node tests, Ruff, mypy, contract drift, production build, browser-secret scan, 3 smoke browsers, `git diff --check` |
-| `.\scripts\check-db.ps1` | **139 passed**, 0 skipped where required |
+| `.\scripts\check-db.ps1` | **141 passed**, 0 skipped where required |
 | `.\scripts\check-roster.ps1` | **9 passed** (3 tests × Chromium, Firefox, WebKit) |
 | Alembic `upgrade head` → `downgrade base` → `upgrade head` | passed; at base: 0 tables, 0 private functions, 0 triggers, no Shoulder roles |
 | `git diff --check` | clean |

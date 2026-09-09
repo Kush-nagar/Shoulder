@@ -176,7 +176,9 @@ PLAYER_SOURCE = """
         ON g.player_id = p.id AND g.status = 'active'
 """
 PLAYER_BY_ID = f"""
-    SELECT {PLAYER_COLUMNS}, private.is_player_coach(p.id) AS is_coach
+    SELECT {PLAYER_COLUMNS}, private.is_player_coach(p.id) AS is_coach,
+        (p.deleted_at IS NOT NULL OR p.deletion_pending_at IS NOT NULL)
+            AS off_roster
     {PLAYER_SOURCE}
     WHERE p.id = :player_id
 """
@@ -516,7 +518,17 @@ def invite_player(
     """Link an account to a roster row. Delivery is a later task, not this one."""
     try:
         with user_transaction(user_id) as connection:
-            require_coach(load_player(connection, player_id))
+            player = require_coach(load_player(connection, player_id))
+            if player.off_roster:
+                # The helper refuses this too, but its one "not linkable" branch
+                # cannot say which cause applied. Name it here instead of
+                # telling a coach a player is linked when they are not.
+                raise Problem(
+                    409,
+                    "That player is off the roster, so an account cannot be"
+                    " linked to them.",
+                    "player-off-roster",
+                )
             account_id = connection.execute(
                 text("SELECT private.link_player_account(:player_id, :email)"),
                 {"player_id": str(player_id), "email": request.email},
