@@ -6,18 +6,18 @@ Update this file at every task boundary. Keep it factual and short.
 
 - Current phase: Phase A — Foundation.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: `D:\Shoulder`, branch `task-5-rls-isolation`; one writer.
+- Checkout: `D:\Shoulder`, branch `main`; one writer.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
 - Last verified: 2026-09-08; Task 5 local migration cycle, 75 database tests, 6 auth browser tests and full check passed. Hosted isolation was independently verified. All review verification blockers are resolved; see `docs/task-5-verification.md`.
 - Task 2 — Local infrastructure: **complete** under its recorded local scope.
 - Task 3 — Verified authentication and session identity: **complete for the owner-authorized local scope**; merged as PR #3. Production-domain acceptance is deferred under ADR 0014.
 - Task 4 — Core schema, baseline RLS, and role-aware identity: **complete**, merged as PR #5. Evidence: `docs/task-4-verification.md`.
-- Current task: Task 5 — Extend the RLS isolation harness; **verified; ready for final delta review**, not merged. The development project runs `0003_roster_display` on PostgreSQL 17. Evidence: `docs/task-5-verification.md`.
+- Task 5 — Extend the RLS isolation harness: **complete**, merged as PR #6 into `main` at `470dc77`. The development project `Shoulder Dev` runs `0003_roster_display` on PostgreSQL 17. Evidence: `docs/task-5-verification.md`.
 - Task 1 PR #1 merged into remote `main` as `198dbc25395f6be4e8da60167a7889c3bd62f5da`, including review repair `2c62d05`; quality and Bugbot passed with all review threads addressed.
 - Tasks 1 and 2 are merged; Task 3 started from `76486c5822aa426402945f64be41b9b9c353ab32`. No prior Git history changed.
 - The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.
-- Next numbered task: Task 6 — Roster workflows, **not started**. Task 5 ships the completed access matrix, reusable isolation fixtures, mutation checks, and policy/grant snapshots that later protected tables extend.
+- Tasks 1–5 are merged into `main`. Task 6 is **not started**. From Task 6 onward the repository uses the project-block workflow in `CLAUDE.md`; the next step is project planning under `docs/projects/`. Task 5 ships the completed access matrix, reusable isolation fixtures, mutation checks, and policy/grant snapshots that later protected tables extend.
 
 ## Task 3 local implementation
 
@@ -168,7 +168,7 @@ Recommended next local command: `.\scripts\infra.ps1 start`.
 ## Independent Task 4 review
 
 - Fixed revoked-player access, restricted bootstrap to a separate operator role, and removed role/grant artifacts on base downgrade; ADR 0016 records the operator boundary.
-- The previous linked-development blocker is resolved by the Shoulder Dev deployment. Task 5 is next eligible but has not started.
+- The previous linked-development blocker is resolved by the `Shoulder Dev` deployment, which is the development project for all later work.
 - Independent verification: 38 real Supabase DB tests and 38 exact-image CI-fixture tests passed; up/down/up and role cleanup passed; 6 real auth browser tests and the full check passed.
 - Final delta review: confirmed Shoulder Dev revision and remote role separation read-only; strengthened the local-version guard regression and corrected superseded deployment-blocked statements.
 - Final delta checks: four repository tests, disabled-guard mutation check, full `check.ps1`, and `git diff --check` passed.
