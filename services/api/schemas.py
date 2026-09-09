@@ -65,7 +65,12 @@ class RosterPlayer(BaseModel):
     `account_name` is the linked account's display name and comes only from
     `private.team_roster`, the Task 5 helper built for this consumer. It is the
     sole path to another account's name: `user_account` is self-only under RLS.
-    It is never an address, and it is null for an unlinked or archived row.
+    It is never an address.
+
+    That helper hides archived and deletion-pending rows, so `account_name` is
+    null for them even when an account is attached. `account_linked` reads
+    `player.user_id` directly and stays truthful for every row, so a screen
+    never calls a linked player unlinked or offers to link them again.
     """
 
     id: UUID
@@ -74,6 +79,7 @@ class RosterPlayer(BaseModel):
     jersey_number: int | None
     position: str | None
     active: bool
+    account_linked: bool = False
     account_name: str | None = None
     active_goal: GoalSummary | None = None
 

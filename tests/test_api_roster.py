@@ -459,6 +459,30 @@ class RosterApiTests(DatabaseTestCase):
             client.get(f"/v1/players/{self.unlinked_row}/goals").status_code, 200
         )
 
+    def test_an_archived_linked_player_still_reads_as_linked(self) -> None:
+        """`private.team_roster` hides archived rows, but the link is real.
+
+        Reporting only `account_name` would call a linked player unlinked and
+        offer to link them again, which `player-off-roster` then refuses.
+        """
+        client = self.client_for(self.coach)
+        roster = client.get(f"/v1/teams/{self.team}/players").json()
+        linked = next(row for row in roster if row["id"] == str(self.player_row))
+        self.assertTrue(linked["account_linked"])
+        self.assertEqual(linked["account_name"], "Player A1")
+
+        self.assertEqual(
+            client.post(f"/v1/players/{self.player_row}/archive").status_code, 200
+        )
+        included = client.get(
+            f"/v1/teams/{self.team}/players", params={"include_archived": "true"}
+        ).json()
+        archived = next(row for row in included if row["id"] == str(self.player_row))
+        self.assertFalse(archived["active"])
+        # The name is withheld by the helper; the link itself is still reported.
+        self.assertIsNone(archived["account_name"])
+        self.assertTrue(archived["account_linked"])
+
     def test_names_are_stored_trimmed_by_every_write_path(self) -> None:
         """Bulk trims, so the single routes must trim identically."""
         client = self.client_for(self.coach)

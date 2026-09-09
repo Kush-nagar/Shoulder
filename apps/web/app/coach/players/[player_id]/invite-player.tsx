@@ -17,11 +17,11 @@ import {
 export function InvitePlayer({
   playerId,
   name,
-  accountName,
+  linkable,
 }: {
   playerId: string;
   name: string;
-  accountName: string | null;
+  linkable: boolean;
 }) {
   const [state, submit, pending] = useActionState(invitePlayer, {
     message: "",
@@ -40,7 +40,7 @@ export function InvitePlayer({
   // confirmation with it, leaving a screen reader with nothing.
   return (
     <>
-      {accountName ? null : (
+      {linkable ? (
         <button
           type="button"
           aria-label={`Link an account for ${name}`}
@@ -49,7 +49,7 @@ export function InvitePlayer({
         >
           Link an account
         </button>
-      )}
+      ) : null}
       {state.message ? (
         <p
           role={state.ok ? "status" : "alert"}
@@ -58,7 +58,7 @@ export function InvitePlayer({
           {state.message}
         </p>
       ) : null}
-      {accountName ? null : (
+      {linkable ? (
         <dialog ref={box} aria-labelledby={titleId} className={dialog}>
           <form action={submit} className="p-5">
             <h2 id={titleId} className={componentTitle}>
@@ -106,7 +106,7 @@ export function InvitePlayer({
             )}
           </form>
         </dialog>
-      )}
+      ) : null}
     </>
   );
 }

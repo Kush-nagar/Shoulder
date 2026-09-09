@@ -7,6 +7,22 @@ import type { ActionState } from "../../ui";
 
 const closing: GoalStatus[] = ["achieved", "paused", "retired"];
 
+/**
+ * One action for both goal writes, chosen by the form's `intent`.
+ *
+ * Two separate `useActionState` hooks each keep their own last message, so a
+ * component holding both cannot tell which fired most recently and would
+ * announce a stale one. A single hook is always last-action-wins.
+ */
+export async function goalAction(
+  previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  return form.get("intent") === "close"
+    ? closeGoal(previous, form)
+    : createGoal(previous, form);
+}
+
 export async function createGoal(
   _previous: ActionState,
   form: FormData,

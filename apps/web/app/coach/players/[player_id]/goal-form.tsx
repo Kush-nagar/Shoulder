@@ -13,7 +13,7 @@ import {
   secondary,
   tertiary,
 } from "../../ui";
-import { closeGoal, createGoal } from "./actions";
+import { goalAction } from "./actions";
 
 export type ActiveGoal = {
   id: string;
@@ -45,12 +45,9 @@ export function GoalSection({
   name: string;
   active: ActiveGoal | null;
 }) {
-  const [created, submitCreate, creating] = useActionState(createGoal, {
-    message: "",
-  });
-  const [closed, submitClose, closing] = useActionState(closeGoal, {
-    message: "",
-  });
+  // One hook for both writes: the newest outcome always wins, which two hooks
+  // could not guarantee.
+  const [state, submit, pending] = useActionState(goalAction, { message: "" });
   const form = useRef<HTMLFormElement>(null);
   const box = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -60,28 +57,25 @@ export function GoalSection({
   const groupId = useId();
 
   useEffect(() => {
-    if (created.ok) form.current?.reset();
-  }, [created]);
+    if (!state.ok) return;
+    form.current?.reset();
+    box.current?.close();
+  }, [state]);
 
-  useEffect(() => {
-    if (closed.ok) box.current?.close();
-  }, [closed]);
-
-  // The most recent outcome of either action, announced from a slot that
-  // outlives both the panel and the form.
-  const latest = created.message ? created : closed;
-  const announcement = latest.message ? (
+  // Announced from a slot that outlives both the panel and the form.
+  const announcement = state.message ? (
     <p
-      role={latest.ok ? "status" : "alert"}
+      role={state.ok ? "status" : "alert"}
       className="mt-3 text-[15px] font-medium"
     >
-      {latest.message}
+      {state.message}
     </p>
   ) : null;
 
   const closeDialog = active ? (
     <dialog ref={box} aria-labelledby={closeId} className={dialog}>
-      <form action={submitClose} className="p-5">
+      <form action={submit} className="p-5">
+        <input type="hidden" name="intent" value="close" />
         <h2 id={closeId} className={componentTitle}>
           Close “{active.title}”?
         </h2>
@@ -123,13 +117,13 @@ export function GoalSection({
           >
             Keep it active
           </button>
-          <button type="submit" disabled={closing} className={primary}>
-            {closing ? "Saving…" : "Close goal"}
+          <button type="submit" disabled={pending} className={primary}>
+            {pending ? "Saving…" : "Close goal"}
           </button>
         </div>
-        {closed.message && !closed.ok ? (
+        {state.message && !state.ok ? (
           <p role="alert" className="mt-3 text-[15px] font-medium">
-            {closed.message}
+            {state.message}
           </p>
         ) : null}
       </form>
@@ -167,7 +161,7 @@ export function GoalSection({
 
   return (
     <div className="mt-3 max-w-170">
-      <form ref={form} action={submitCreate} aria-labelledby={headingId}>
+      <form ref={form} action={submit} aria-labelledby={headingId}>
         <h3 id={headingId} className={componentTitle}>
           Set a goal
         </h3>
@@ -198,8 +192,8 @@ export function GoalSection({
           className={`mt-1 w-full rounded-lg border border-line bg-white p-3 text-[15px] leading-[1.5] text-ink hover:border-muted ${focus}`}
         />
         <div className="mt-4">
-          <button type="submit" disabled={creating} className={primary}>
-            {creating ? "Saving…" : "Set a goal"}
+          <button type="submit" disabled={pending} className={primary}>
+            {pending ? "Saving…" : "Set a goal"}
           </button>
         </div>
       </form>

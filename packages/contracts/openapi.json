@@ -583,8 +583,13 @@
         "type": "object"
       },
       "RosterPlayer": {
-        "description": "One roster row.\n\n`account_name` is the linked account's display name and comes only from\n`private.team_roster`, the Task 5 helper built for this consumer. It is the\nsole path to another account's name: `user_account` is self-only under RLS.\nIt is never an address, and it is null for an unlinked or archived row.",
+        "description": "One roster row.\n\n`account_name` is the linked account's display name and comes only from\n`private.team_roster`, the Task 5 helper built for this consumer. It is the\nsole path to another account's name: `user_account` is self-only under RLS.\nIt is never an address.\n\nThat helper hides archived and deletion-pending rows, so `account_name` is\nnull for them even when an account is attached. `account_linked` reads\n`player.user_id` directly and stays truthful for every row, so a screen\nnever calls a linked player unlinked or offers to link them again.",
         "properties": {
+          "account_linked": {
+            "default": false,
+            "title": "Account Linked",
+            "type": "boolean"
+          },
           "account_name": {
             "anyOf": [
               {

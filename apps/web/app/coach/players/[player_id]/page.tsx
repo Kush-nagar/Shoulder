@@ -82,14 +82,18 @@ export default async function Player({
               <span className="flex items-center gap-2">
                 <span
                   aria-hidden="true"
-                  className={`size-1.5 shrink-0 rounded-full border border-ink ${player.account_name ? "bg-ink" : ""}`}
+                  className={`size-1.5 shrink-0 rounded-full border border-ink ${player.account_linked ? "bg-ink" : ""}`}
                 />
-                {player.account_name ?? "Not linked"}
+                {player.account_name ??
+                  (player.account_linked ? "Linked" : "Not linked")}
               </span>
               <InvitePlayer
                 playerId={player.id}
                 name={player.display_name}
-                accountName={player.account_name ?? null}
+                // Archiving hides the account name but not the link, and an
+                // off-roster player cannot be linked at all, so neither state
+                // may offer the control.
+                linkable={!player.account_linked && player.active}
               />
             </dd>
           </div>

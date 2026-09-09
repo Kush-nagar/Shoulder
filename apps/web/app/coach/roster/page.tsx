@@ -15,9 +15,15 @@ export const dynamic = "force-dynamic";
 const cell = "px-3 py-3 align-top";
 const head = "px-3 py-2 text-[13px] font-semibold";
 
+/** `account_name` is hidden for archived rows, but the link itself is not. */
+function accountState(player: RosterPlayer): string {
+  if (player.account_name) return player.account_name;
+  return player.account_linked ? "Linked" : "Not linked";
+}
+
 function nextAction(player: RosterPlayer): string {
   if (!player.active_goal) return "Set a goal";
-  if (!player.account_name) return "Invite";
+  if (!player.account_linked) return "Invite";
   return "Open";
 }
 
@@ -35,8 +41,7 @@ function Row({ player }: { player: RosterPlayer }) {
         </Link>
         {/* Low-priority columns become secondary row text before scrolling. */}
         <span className={`${metadata} mt-1 block md:hidden`}>
-          {player.position ?? "No position"} ·{" "}
-          {player.account_name ?? "Not linked"}
+          {player.position ?? "No position"} · {accountState(player)}
         </span>
       </td>
       <td className={`${cell} tabular-nums`}>{player.jersey_number ?? "—"}</td>
@@ -54,9 +59,9 @@ function Row({ player }: { player: RosterPlayer }) {
         <span className="flex items-center gap-2">
           <span
             aria-hidden="true"
-            className={`size-1.5 shrink-0 rounded-full border border-ink ${player.account_name ? "bg-ink" : ""}`}
+            className={`size-1.5 shrink-0 rounded-full border border-ink ${player.account_linked ? "bg-ink" : ""}`}
           />
-          {player.account_name ?? "Not linked"}
+          {accountState(player)}
         </span>
       </td>
       <td className={cell}>

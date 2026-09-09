@@ -185,12 +185,31 @@ archives leaves the active table and the component goes with it. Errors announce
 correctly and the visual outcome is immediate. A page-level flash region is the
 fix and belongs with the shell work in a later block.
 
+### Second Bugbot pass — two defects in the first round of fixes
+
+Both were introduced by the fixes above, and both were real.
+
+7. **The goal live region announced a stale action.** `GoalSection` held two
+   `useActionState` hooks and picked the create result whenever it had a message,
+   so closing a goal after setting one in the same session still read "Goal set."
+   Two hooks cannot say which fired last. Both writes now go through a single
+   `goalAction` server action chosen by a form `intent`, so the announcement is
+   always the newest outcome — the exact behaviour the merge was meant to give.
+8. **An archived but linked player read as "Not linked".** Making archived rows
+   reachable exposed that `account_name` comes from `private.team_roster`, which
+   hides archived rows, so the detail page called a linked player unlinked and
+   offered a link control that `player-off-roster` then refused. `RosterPlayer`
+   now also carries `account_linked`, read straight from `player.user_id`, which
+   stays truthful for every row; the name remains the helper's alone. The invite
+   control appears only when the player is both unlinked and on the roster.
+   Covered by `test_an_archived_linked_player_still_reads_as_linked`.
+
 ## Commands and results
 
 | Command | Result |
 |---|---|
 | `.\scripts\check.ps1` | passed — Biome, TypeScript, 15 Node tests, Ruff, mypy, contract drift, production build, browser-secret scan, 3 smoke browsers, `git diff --check` |
-| `.\scripts\check-db.ps1` | **142 passed**, 0 skipped where required |
+| `.\scripts\check-db.ps1` | **143 passed**, 0 skipped where required |
 | `.\scripts\check-roster.ps1` | **9 passed** (3 tests × Chromium, Firefox, WebKit) |
 | Alembic `upgrade head` → `downgrade base` → `upgrade head` | passed; at base: 0 tables, 0 private functions, 0 triggers, no Shoulder roles |
 | `git diff --check` | clean |

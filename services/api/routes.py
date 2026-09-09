@@ -159,7 +159,7 @@ def bootstrap_team(request: TeamBootstrap, response: Response) -> TeamCreated:
 # filters the roster list only.
 PLAYER_COLUMNS = """
     p.id, p.team_id, p.display_name, p.jersey_number, p.position, p.active,
-    r.account_name,
+    p.user_id IS NOT NULL AS account_linked, r.account_name,
     g.id AS goal_id, g.title AS goal_title, g.status AS goal_status
 """
 # `private.team_roster` is the only path to a linked account's display name:
@@ -264,6 +264,7 @@ def roster_player(row: Any) -> RosterPlayer:
         jersey_number=row.jersey_number,
         position=row.position,
         active=row.active,
+        account_linked=row.account_linked,
         account_name=row.account_name,
         active_goal=(
             GoalSummary(id=row.goal_id, title=row.goal_title, status=row.goal_status)
@@ -376,6 +377,7 @@ def create_player(
         jersey_number=request.jersey_number,
         position=request.position,
         active=True,
+        account_linked=False,
         account_name=None,
         active_goal=None,
     )
