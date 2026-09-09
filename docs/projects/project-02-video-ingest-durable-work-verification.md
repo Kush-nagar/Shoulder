@@ -117,15 +117,15 @@ overturned.
 
 | Command | Result |
 |---|---|
-| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 284 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
-| `scripts/check-db.ps1` | 284 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
-| `scripts/check-storage.ps1` | 64 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
+| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 286 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
+| `scripts/check-db.ps1` | 286 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
+| `scripts/check-storage.ps1` | 66 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
 | `scripts/check-upload.ps1` | 9 browser tests (3 cases × chromium, firefox, webkit) |
 | `scripts/check-auth.ps1` | 6 auth browser tests, unchanged and unweakened |
 | `scripts/check-roster.ps1` | 9 roster browser tests, unchanged apart from the fixture truncation list |
 
-Exact counts: 284 Python tests (36 video schema and isolation, 35 queue, 6
-worker loop, 33 upload API, 31 storage, 1 large upload; the remainder are the
+Exact counts: 286 Python tests (36 video schema and isolation, 35 queue, 6
+worker loop, 33 upload API, 33 storage, 1 large upload; the remainder are the
 unchanged Task 1–7 suites), 26 Node unit tests (11 new), 9 upload browser tests,
 9 roster browser tests, 6 auth browser tests, 3 smoke tests. One test skips: the
 2 GB proof, which is opt-in and run by `scripts/check-storage.ps1`.
@@ -197,6 +197,13 @@ Bugbot reviewed the fixes and raised two more, both high and both real:
 |---|---|---|
 | 18 | **A release on the last attempt stranded the job.** `release` requeued without regard to `max_attempts`, so a graceful stop on the final claim left the row `queued` at `attempts = max_attempts`; the next claim's `attempts + 1` violated `processing_job_attempts_bounded`, and that `IntegrityError` is not a `QueueError`, so the worker process died and the job became permanently unclaimable. | Fixed by settling what `attempts` counts: attempts that reached a conclusion. A release hands its attempt back, so a clean shutdown cannot exhaust a job, while a worker that dies instead of releasing is still bounded because `sweep_expired_leases` keeps the attempt. `claim` also gained an `attempts < max_attempts` guard, so no row can ever be claimed into a check violation. Two regression tests: releasing the last attempt leaves the job claimable, and an exhausted queued row is never claimed. |
 | 19 | **`upload-state` still failed in the assembled-but-uncommitted window.** Completion and abort were fixed in finding 15, but the resume screen also lists parts, so it kept returning 503 for an upload the coach could in fact finish. | Fixed by moving the recognition into one `survey` call that every route shares — it returns either the parts or "already assembled", and still raises on a genuine outage because `head_object` fails too. That also halves the storage calls per request. `upload-state` reports nothing missing once the object is assembled, rather than asking for bytes storage already holds. |
+
+A third pass on those fixes raised one more:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 20 | **Abort read an outage as success.** Finding 15's fix decided whether an abort failure was real by asking for the upload's parts — but during an outage that call fails too, so abort would report the attempt abandoned while the multipart upload kept accruing storage. | Fixed by giving `StorageError` the provider's short error code, which names no bucket and no key and is therefore safe to carry. Abort now treats only `NoSuchUpload` and its siblings as "already gone" and re-raises everything else; `survey` and `assemble` use the same discriminator instead of inferring absence from a second failing call. Two tests: a simulated outage surfaces, and an absent upload reports a code that says so. |
+| 21 | **The browser resume test raced its own upload.** `inParallel` rejects as soon as one part is refused, so the component surfaced the failure while part one's PUT was still settling, and the assertion read the server too early. Product behaviour was correct; the test was not. | Fixed by polling the authoritative `upload-state` until it reports the part, rather than reading it once. The assertion is unchanged in strength. |
 
 One observation left unchanged: `read_game`, `list_games`, `sign_upload_parts`,
 and `read_video` have no `except DBAPIError`, so a database fault there yields a

@@ -222,6 +222,29 @@ class StorageTests(unittest.TestCase):
         storage.abort_multipart(key, upload_id)
         self.uploads.clear()
 
+    def test_abort_surfaces_a_real_failure_instead_of_claiming_success(self) -> None:
+        """Telling a coach an upload was abandoned while it accrues storage.
+
+        "The upload is gone" is what abort wanted; an outage is not, and the
+        provider's error code is the only reliable way to tell them apart.
+        """
+        key, upload_id = self.start()
+        outage = storage.StorageError("storage abort failed", "InternalError")
+        with patch.object(storage, "_call", side_effect=outage):
+            with self.assertRaises(storage.StorageError) as caught:
+                storage.abort_multipart(key, upload_id)
+        self.assertEqual(caught.exception.code, "InternalError")
+        # The upload really is still there, which is why it had to be reported.
+        self.assertEqual(storage.list_parts(key, upload_id), [])
+
+    def test_an_absent_upload_reports_the_code_that_says_so(self) -> None:
+        key, upload_id = self.start()
+        storage.abort_multipart(key, upload_id)
+        self.uploads.clear()
+        with self.assertRaises(storage.StorageError) as caught:
+            storage.list_parts(key, upload_id)
+        self.assertIn(caught.exception.code, storage.ABSENT_CODES)
+
     def test_an_assembled_upload_can_still_be_abandoned(self) -> None:
         """Otherwise a coach could neither finish nor abandon the attempt.
 

@@ -419,7 +419,10 @@ def survey(video: Any) -> tuple[bool, list[storage.StoredPart]]:
     """
     try:
         return False, storage.list_parts(video.original_key, video.multipart_upload_id)
-    except storage.StorageError:
+    except storage.StorageError as error:
+        if error.code not in storage.ABSENT_CODES:
+            # Storage is down or refusing, not answering "that upload is gone".
+            raise
         if storage.head_object(video.original_key) == video.size_bytes:
             return True, []
         raise
@@ -620,8 +623,8 @@ def assemble(key: str, upload_id: str, stored: list[storage.StoredPart]) -> int 
     """
     try:
         storage.complete_multipart(key, upload_id, stored)
-    except storage.StorageError:
-        if storage.head_object(key) is None:
+    except storage.StorageError as error:
+        if error.code not in storage.ABSENT_CODES or storage.head_object(key) is None:
             raise
     return storage.head_object(key)
 

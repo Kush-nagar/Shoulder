@@ -226,14 +226,21 @@ test("an interrupted upload resumes without repeating a completed part", async (
   // The honest copy: nothing claims the upload survives the tab closing.
   await expect(page.getByText("It is safe to close this tab")).toHaveCount(0);
 
-  // The server is authoritative about what arrived.
+  // The server is authoritative about what arrived. Poll for it: the component
+  // reports the failure as soon as one part is refused, while part one may
+  // still be in flight, and asserting immediately would race that PUT.
   const videoId = latestVideoId(gameId);
-  const state = await context.request.get(
-    `/api/videos/${videoId}/upload-state`,
-  );
-  expect(state.status()).toBe(200);
-  const before = await state.json();
-  expect(before.parts.map((part) => part.part_number)).toEqual([1]);
+  let before;
+  await expect
+    .poll(async () => {
+      const state = await context.request.get(
+        `/api/videos/${videoId}/upload-state`,
+      );
+      expect(state.status()).toBe(200);
+      before = await state.json();
+      return before.parts.map((part) => part.part_number);
+    })
+    .toEqual([1]);
   expect(before.missing_part_numbers).toEqual([2, 3]);
   const firstEtag = before.parts[0].etag;
 

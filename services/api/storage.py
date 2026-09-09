@@ -62,7 +62,22 @@ UNDECLARED_MEDIA = frozenset({"", "application/octet-stream", "binary/octet-stre
 
 
 class StorageError(Exception):
-    """Object storage refused or could not answer. Never carries provider text."""
+    """Object storage refused or could not answer.
+
+    Carries the provider's short error code and nothing else. The code
+    (`NoSuchUpload`, `InvalidPart`, ...) names no bucket and no key, so it is
+    safe to record, and it is the only reliable way to tell "the thing is
+    already gone" from "storage is down" — a distinction abort depends on.
+    """
+
+    def __init__(self, message: str, code: str = "Unknown") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# S3 codes meaning the multipart upload or object is simply not there. Anything
+# else is an outage, a refusal, or a bug, and must not be read as success.
+ABSENT_CODES = frozenset({"NoSuchUpload", "NoSuchKey", "NoSuchBucket", "404"})
 
 
 @dataclass(frozen=True)
@@ -182,8 +197,9 @@ def _call(operation: str, **arguments: Any) -> Any:
     try:
         return getattr(get_client(), operation)(**arguments)
     except (ClientError, BotoCoreError) as error:
-        logger.warning("storage %s failed: %s", operation, error_code(error))
-        raise StorageError(f"storage {operation} failed") from None
+        code = error_code(error)
+        logger.warning("storage %s failed: %s", operation, code)
+        raise StorageError(f"storage {operation} failed", code) from None
 
 
 def create_multipart(key: str, content_type: str) -> str:
@@ -286,17 +302,13 @@ def abort_multipart(key: str, upload_id: str) -> None:
     """
     try:
         _call("abort_multipart_upload", Bucket=bucket(), Key=key, UploadId=upload_id)
-    except StorageError:
-        # The upload being gone is the outcome abort wanted. Distinguish that
-        # from an outage by asking for its parts: an upload that still exists
-        # answers, and only then is the failure real. Checking for the object
-        # instead would re-raise forever once a completion assembled one, which
-        # would leave a coach unable to abandon the attempt at all.
-        try:
-            list_parts(key, upload_id)
-        except StorageError:
-            return
-        raise
+    except StorageError as error:
+        # The upload being gone is the outcome abort wanted, and it is exactly
+        # what a second abort or an already-completed upload reports. Anything
+        # else is a real failure and has to surface: swallowing it would tell a
+        # coach the attempt was abandoned while it kept accruing storage.
+        if error.code not in ABSENT_CODES:
+            raise
 
 
 def head_object(key: str) -> int | None:
@@ -307,9 +319,11 @@ def head_object(key: str) -> int | None:
         status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
         if status in (403, 404):
             return None
-        logger.warning("storage head_object failed: %s", error_code(error))
-        raise StorageError("storage head_object failed") from None
+        code = error_code(error)
+        logger.warning("storage head_object failed: %s", code)
+        raise StorageError("storage head_object failed", code) from None
     except BotoCoreError as error:
-        logger.warning("storage head_object failed: %s", error_code(error))
-        raise StorageError("storage head_object failed") from None
+        code = error_code(error)
+        logger.warning("storage head_object failed: %s", code)
+        raise StorageError("storage head_object failed", code) from None
     return int(response["ContentLength"])
