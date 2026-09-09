@@ -1,6 +1,9 @@
 packages:
   - apps/*
   - packages/*
+overrides:
+  # The parent pins vulnerable 4.3.1; use the GHSA-2883-xcg3-v3hh patch.
+  '@redocly/openapi-core>js-yaml': 4.3.2
 minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - '@playwright/test@1.63.0'

@@ -30,6 +30,10 @@ select = ["E", "F", "I", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+# Use mypy's supported file cache; SQLite DLLs may be blocked on managed Windows.
+sqlite_cache = false
 explicit_package_bases = true
+# Test suites share fixtures by module name, matching unittest discovery.
+mypy_path = "tests"
 files = ["services/api", "scripts", "tests"]
 exclude = ["node_modules", ".venv", ".tools"]

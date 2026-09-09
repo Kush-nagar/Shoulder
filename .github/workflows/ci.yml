@@ -44,6 +44,7 @@ jobs:
         env:
           PGPASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-ci-only
           REQUIRE_DATABASE_TESTS: '1'
+          ALLOW_POLICY_MUTATION: '1'
           MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:${{ github.run_id }}-${{ github.run_attempt }}-ci-only@127.0.0.1:5432/postgres
         run: |
           psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f tests/fixtures/ci-auth-schema.sql
@@ -53,7 +54,7 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE shoulder_operator PASSWORD '$runtime_password'"
           export OPERATOR_DATABASE_URL="postgresql+psycopg://shoulder_operator:$runtime_password@127.0.0.1:5432/postgres"
           export DATABASE_URL="postgresql+psycopg://shoulder_api:$runtime_password@127.0.0.1:5432/postgres"
-          uv run --locked python -m unittest discover -s tests -p test_database.py -v
+          uv run --locked python -m unittest discover -s tests -p 'test_database*.py' -v
       - name: Dependency vulnerabilities
         run: |
           pnpm audit --audit-level=low

@@ -16,6 +16,7 @@ from alembic.config import Config
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from services.api.auth import authenticated_identity, get_verifier
@@ -30,6 +31,35 @@ OPERATOR_URL = os.environ.get("OPERATOR_DATABASE_URL")
 REQUIRED = os.environ.get("REQUIRE_DATABASE_TESTS", "").lower() in ("1", "true")
 
 TABLES = ("user_account", "team", "team_membership", "player")
+
+
+def database_urls_configured(*urls: str | None) -> bool:
+    """Every URL the harness opens must be present, or it cannot skip cleanly."""
+    return all(bool(url) for url in urls)
+
+
+def require_local_database(*urls: str | None) -> None:
+    """Reject hosted targets and libpq overrides before destructive tests."""
+    if any(os.environ.get(key) for key in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE")):
+        raise ValueError("Destructive tests reject libpq connection overrides")
+    destinations = set()
+    for value in urls:
+        url = make_url(value or "postgresql://")
+        if (
+            url.host not in ("127.0.0.1", "::1")
+            or url.database != "postgres"
+            or url.port not in (5432, 54322)
+            or url.query
+        ):
+            raise ValueError("Destructive database tests require literal local URLs")
+        destinations.add((url.host, url.port, url.database))
+    if len(destinations) != 1:
+        raise ValueError("Database test URLs must target the same local database")
+
+
+# The suites below open an operator engine too, so a partial configuration
+# must skip rather than fail while constructing it.
+CONFIGURED = database_urls_configured(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
 
 
 def sqlstate(error: DBAPIError) -> str | None:
@@ -52,6 +82,22 @@ class ConfigurationTests(unittest.TestCase):
             self.assertTrue(RUNTIME_URL, "DATABASE_URL is required")
             self.assertTrue(OPERATOR_URL, "OPERATOR_DATABASE_URL is required")
 
+    def test_skip_guard_covers_every_url_the_harness_opens(self) -> None:
+        """A partial configuration skips; it must not fail on engine creation."""
+        for admin in ("url", None):
+            for runtime in ("url", None):
+                for operator in ("url", None):
+                    with self.subTest(admin=admin, runtime=runtime, operator=operator):
+                        self.assertEqual(
+                            database_urls_configured(admin, runtime, operator),
+                            bool(admin and runtime and operator),
+                        )
+        for suite in (DatabaseTestCase, ZMigrationTests):
+            with self.subTest(suite=suite.__name__):
+                self.assertEqual(
+                    getattr(suite, "__unittest_skip__", False), not CONFIGURED
+                )
+
     def test_product_schema_is_not_exposed_to_the_data_api(self) -> None:
         with open("supabase/config.toml", encoding="utf-8") as handle:
             config = handle.read()
@@ -62,7 +108,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("app", exposed)
 
 
-@unittest.skipUnless(ADMIN_URL and RUNTIME_URL, "database URLs are not configured")
+@unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class DatabaseTestCase(unittest.TestCase):
     admin: Engine
     runtime: Engine
@@ -73,6 +119,15 @@ class DatabaseTestCase(unittest.TestCase):
         cls.admin = create_engine(str(ADMIN_URL))
         cls.runtime = create_engine(str(RUNTIME_URL))
         cls.operator = create_engine(str(OPERATOR_URL))
+        with cls.runtime.connect() as connection:
+            identity = connection.execute(
+                text("SELECT session_user, current_user")
+            ).one()
+            if tuple(identity) != ("shoulder_api", "shoulder_api"):
+                cls.admin.dispose()
+                cls.runtime.dispose()
+                cls.operator.dispose()
+                raise AssertionError("Isolation tests require the shoulder_api login")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -88,9 +143,12 @@ class DatabaseTestCase(unittest.TestCase):
     def cleanup(self) -> None:
         # Product rows first: team.created_by is ON DELETE RESTRICT by contract.
         with self.admin.connect() as connection, connection.begin():
-            connection.execute(text("DELETE FROM app.player"))
-            connection.execute(text("DELETE FROM app.team_membership"))
-            connection.execute(text("DELETE FROM app.team"))
+            # Delete only workspaces owned by accounts created by this test.
+            # Team foreign keys cascade to its roster and memberships.
+            connection.execute(
+                text("DELETE FROM app.team WHERE created_by = ANY(:users)"),
+                {"users": self.created_users},
+            )
             for user_id in self.created_users:
                 connection.execute(
                     text("DELETE FROM auth.users WHERE id = :id"), {"id": user_id}
@@ -726,11 +784,41 @@ class RuntimeIsolationTests(DatabaseTestCase):
             )
 
 
-@unittest.skipUnless(ADMIN_URL and RUNTIME_URL, "database URLs are not configured")
+def restore_login_passwords(engine: Engine) -> None:
+    """Re-apply the configured logins after a downgrade dropped their roles.
+
+    `ALTER ROLE ... PASSWORD` is a utility statement, so Postgres accepts no
+    bind parameter for the secret; `format('%L')` quotes it into the statement
+    text, where a server with statement logging on would record it. That is
+    acceptable only because `require_local_database` confines this suite to a
+    local disposable server and `scripts/check-db.ps1` generates the password
+    per run and clears it afterwards. Suppressing `log_statement` is not an
+    option here: it is superuser-only and local `postgres` is not a superuser.
+    """
+    with engine.connect() as connection, connection.begin():
+        for role, url in (
+            ("shoulder_api", RUNTIME_URL),
+            ("shoulder_operator", OPERATOR_URL),
+        ):
+            password = make_url(str(url)).password
+            if not password:
+                continue
+            statement = connection.execute(
+                text(
+                    "SELECT format('ALTER ROLE %I PASSWORD %L',"
+                    " cast(:role AS text), cast(:password AS text))"
+                ),
+                {"role": role, "password": password},
+            ).scalar_one()
+            connection.exec_driver_sql(statement)
+
+
+@unittest.skipUnless(CONFIGURED, "database URLs are not configured")
 class ZMigrationTests(unittest.TestCase):
     """Runs last by name: it rebuilds the schema this suite depends on."""
 
     def test_zz_downgrade_and_clean_reupgrade(self) -> None:
+        require_local_database(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
         config = Config("alembic.ini")
         engine = create_engine(str(ADMIN_URL))
         try:
@@ -751,10 +839,12 @@ class ZMigrationTests(unittest.TestCase):
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
-                self.assertEqual(self.function_count(connection), 5)
+                self.assertEqual(self.function_count(connection), 6)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")
+            # The downgrade dropped the login roles; later suites still need them.
+            restore_login_passwords(engine)
             engine.dispose()
 
     @staticmethod
