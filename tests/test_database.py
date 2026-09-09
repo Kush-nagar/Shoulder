@@ -788,13 +788,14 @@ def restore_login_passwords(engine: Engine) -> None:
     """Re-apply the configured logins after a downgrade dropped their roles.
 
     `ALTER ROLE ... PASSWORD` is a utility statement, so Postgres accepts no
-    bind parameter for the secret: it has to be quoted into the statement text.
-    Statement logging is disabled for this transaction instead, so the
-    disposable local credential never reaches the server log.
+    bind parameter for the secret; `format('%L')` quotes it into the statement
+    text, where a server with statement logging on would record it. That is
+    acceptable only because `require_local_database` confines this suite to a
+    local disposable server and `scripts/check-db.ps1` generates the password
+    per run and clears it afterwards. Suppressing `log_statement` is not an
+    option here: it is superuser-only and local `postgres` is not a superuser.
     """
     with engine.connect() as connection, connection.begin():
-        connection.exec_driver_sql("SET LOCAL log_statement = 'none'")
-        connection.exec_driver_sql("SET LOCAL log_min_duration_statement = -1")
         for role, url in (
             ("shoulder_api", RUNTIME_URL),
             ("shoulder_operator", OPERATOR_URL),
