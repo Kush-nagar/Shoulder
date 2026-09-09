@@ -1,6 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { fetchGames, fetchTeams, type VideoSummary } from "../../../lib/api";
+import {
+  fetchGame,
+  fetchGames,
+  fetchTeams,
+  type VideoSummary,
+} from "../../../lib/api";
 import { requireCoach } from "../session";
 import { PageHeader } from "../shell";
 import { focus, metadata, panel, sectionTitle } from "../ui";
@@ -58,7 +63,10 @@ export default async function UploadPage({
   if (!team) notFound();
   const games = await fetchGames(token, team.team_id);
   const selectedId = (await searchParams).game;
-  const selected = games?.find((game) => game.id === selectedId);
+  // The list is one page; a link to an older match resolves on its own.
+  const selected =
+    games?.find((game) => game.id === selectedId) ??
+    (selectedId ? await fetchGame(token, selectedId) : undefined);
 
   return (
     <>

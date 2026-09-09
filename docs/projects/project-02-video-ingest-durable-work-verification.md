@@ -6,6 +6,7 @@ Evidence index for the project block covering **Task 8**, **Task 9**, and
 - Base `main`: `7528259f319a19903fc096bb4b4a0f57860cc3df`
 - Branch: `project-02-video-ingest-durable-work`
 - Verified: 2026-09-09
+- Pull request: [#10](https://github.com/Kush-nagar/Shoulder/pull/10)
 - Local stack: Supabase CLI 2.116.0, PostgreSQL 17.6, MinIO
   `RELEASE.2025-09-07T16-13-09Z`
 - Remote development project: **not touched by this block**; `Shoulder Dev`
@@ -116,15 +117,15 @@ overturned.
 
 | Command | Result |
 |---|---|
-| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 274 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
-| `scripts/check-db.ps1` | 274 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
-| `scripts/check-storage.ps1` | 55 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
+| `scripts/check.ps1` | Biome format/lint, TypeScript, 26 Node tests, Ruff, strict mypy, 283 Python tests, generated-contract drift, production build, browser-secret scan, 3 smoke tests × 3 engines, `git diff --check` — all passed |
+| `scripts/check-db.ps1` | 283 Python tests, 1 skip (the opt-in 2 GB proof), migrations up/down/up, policy-mutation checks |
+| `scripts/check-storage.ps1` | 64 storage and upload API tests, the 2 GB multipart proof, bucket empty afterwards |
 | `scripts/check-upload.ps1` | 9 browser tests (3 cases × chromium, firefox, webkit) |
 | `scripts/check-auth.ps1` | 6 auth browser tests, unchanged and unweakened |
 | `scripts/check-roster.ps1` | 9 roster browser tests, unchanged apart from the fixture truncation list |
 
-Exact counts: 274 Python tests (36 video schema and isolation, 33 queue, 6
-worker loop, 30 upload API, 26 storage, 1 large upload; the remainder are the
+Exact counts: 283 Python tests (36 video schema and isolation, 33 queue, 6
+worker loop, 33 upload API, 31 storage, 1 large upload; the remainder are the
 unchanged Task 1–7 suites), 26 Node unit tests (11 new), 9 upload browser tests,
 9 roster browser tests, 6 auth browser tests, 3 smoke tests. One test skips: the
 2 GB proof, which is opt-in and run by `scripts/check-storage.ps1`.
@@ -177,6 +178,18 @@ layer (asserted in both suites), arbitrary object-key access, browser credential
 leakage, signing another upload's part, aborted-upload reuse, queue double
 claims, lease theft, CSRF handling on the new BFF routes, tests that pass
 without exercising the real path, and error bodies carrying provider text.
+
+## Automated review on the pull request
+
+GitHub Copilot and Cursor Bugbot reviewed commit `c12dd5d`, before the first
+round of fixes was pushed. Four distinct findings, two of them reported by both:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 14 | **A MOV whose browser reports no type was refused.** Safari and several Windows builds send an empty `File.type` for `.mov`; the client defaulted to `video/mp4` and the server then rejected it as contradicting the extension. A valid match file was refused for saying nothing at all. | Fixed at the boundary the documents name. `docs/04-api.md` says "do not trust the request's MIME type", so `storage.declared_media` now resolves the stored type from the validated extension: an absent or generic type is accepted, a type that positively contradicts the extension is still refused, and the canonical type is what gets stored. The client sends `file.type` verbatim, empty included, instead of guessing. Covered by `DeclaredMediaTests` and an API case for both empty and `application/octet-stream`. |
+| 15 | **An assembled upload could become unfinishable.** Bugbot flagged the same window as finding 9, plus a residual: a fault between assembling the object and committing the transition left the row `uploading` with an upload id storage had discarded. Completion then failed on `ListParts` and abort re-raised because the object existed, so the coach could neither finish nor abandon it, and no cleanup deadline was ever set. | Fixed on both halves. `already_assembled` recognises a finished object and completes from it, making completion self-healing; `abort_multipart` now decides whether the failure is real by asking for the upload's parts rather than by looking for the object, so an assembled attempt can still be abandoned. Two API regression tests cover finishing and abandoning from that state. |
+| 16 | **`restore_login_passwords` parsed `str(None)`.** A suite configured with only the three original URLs would raise inside `make_url` before the guard that was meant to skip it. | Fixed with a falsy check before parsing. |
+| 17 | **`fetchGames` ignored `next_cursor`**, so a `?game=` link to a match older than the first fifty would show "Choose a match". | Fixed by resolving a selected match that is not in the list through `GET /v1/games/{game_id}`. Pagination UI is still not built: one team and one season is the MVP scope (`docs/00-decisions.md` D10), and the fallback removes the defect without it. |
 
 One observation left unchanged: `read_game`, `list_games`, `sign_upload_parts`,
 and `read_video` have no `except DBAPIError`, so a database fault there yields a

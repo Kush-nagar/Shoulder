@@ -834,6 +834,10 @@ def restore_login_passwords(engine: Engine) -> None:
             ("shoulder_operator", OPERATOR_URL),
             ("shoulder_worker", WORKER_URL),
         ):
+            # A suite may run with only the three original URLs configured, and
+            # `make_url("None")` would raise before any guard could skip it.
+            if not url:
+                continue
             password = make_url(str(url)).password
             if not password:
                 continue

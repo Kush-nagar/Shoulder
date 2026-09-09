@@ -823,11 +823,12 @@ export interface components {
          *
          *     `size_bytes` is the exact file length, not an estimate: the part plan and
          *     the completion size check are both derived from it. The declared MIME type
-         *     is validated against the extension but never trusted on its own.
+         *     is checked for a contradiction with the extension and is otherwise a hint;
+         *     Task 11 probes the stored bytes before anything trusts them.
          */
         UploadCreate: {
             /** Content Type */
-            content_type: string;
+            content_type?: string | null;
             /** Filename */
             filename: string;
             /** Sha256 */

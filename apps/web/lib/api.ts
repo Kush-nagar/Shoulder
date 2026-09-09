@@ -112,6 +112,19 @@ export async function fetchGames(
   );
 }
 
+/**
+ * One match by id. Null means absent or hidden by row-level security.
+ *
+ * `fetchGames` returns only the first page, so a link to an older match than
+ * that page covers still has to resolve; this is the fallback for it.
+ */
+export async function fetchGame(
+  token: string,
+  gameId: string,
+): Promise<Game | null> {
+  return (await request<Game>(token, `/v1/games/${gameId}`)).data;
+}
+
 export async function fetchGoals(
   token: string,
   playerId: string,

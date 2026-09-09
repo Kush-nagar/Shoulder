@@ -198,7 +198,10 @@ export function Uploader({
             body: JSON.stringify({
               filename: file.name,
               size_bytes: file.size,
-              content_type: file.type || "video/mp4",
+              // Sent exactly as the browser reports it, empty included: some
+              // browsers recognise no type for `.mov`, and the server resolves
+              // the stored type from the validated extension anyway.
+              content_type: file.type,
             }),
           });
           videoId = session.video_id;

@@ -307,12 +307,14 @@ def create_upload(
             "That match file is larger than Shoulder accepts.",
             "upload-too-large",
         )
-    if request.content_type not in storage.ALLOWED_MEDIA[extension][1]:
+    try:
+        content_type = storage.declared_media(extension, request.content_type)
+    except storage.StorageError:
         raise Problem(
             422,
             "That file type does not match its extension.",
             "unsupported-media-type",
-        )
+        ) from None
     parts = storage.part_count(request.size_bytes)
     if parts > storage.MAX_PARTS:
         raise Problem(422, "That match file needs too many parts.", "upload-too-large")
@@ -326,7 +328,7 @@ def create_upload(
             # is written in the same statement that reserves the id.
             video_id = connection.execute(text("SELECT gen_random_uuid()")).scalar_one()
             key = storage.original_key(UUID(str(video_id)), extension)
-            upload_id = storage.create_multipart(key, request.content_type)
+            upload_id = storage.create_multipart(key, content_type)
             connection.execute(
                 text("""
                     INSERT INTO app.video (
@@ -343,7 +345,7 @@ def create_upload(
                     "game_id": str(game_id),
                     "original_key": key,
                     "original_filename": display_filename(request.filename),
-                    "content_type": request.content_type,
+                    "content_type": content_type,
                     "size_bytes": request.size_bytes,
                     "sha256": request.sha256,
                     "multipart_upload_id": upload_id,
@@ -514,9 +516,12 @@ def complete_upload(
                 raise Problem(
                     409, "That upload can no longer be completed.", "upload-not-open"
                 )
-            stored = reconcile_parts(connection, video)
+            assembled = already_assembled(video)
+            stored = [] if assembled else reconcile_parts(connection, video)
             total = storage.part_count(video.size_bytes)
-            if sorted(part.part_number for part in stored) != list(range(1, total + 1)):
+            if not assembled and sorted(part.part_number for part in stored) != list(
+                range(1, total + 1)
+            ):
                 raise Problem(
                     409,
                     "Some parts of this match file have not arrived yet.",
@@ -528,7 +533,7 @@ def complete_upload(
             declared = video.size_bytes
 
         # No transaction is open here, so no row lock waits on storage.
-        size = assemble(key, upload_id, stored)
+        size = declared if assembled else assemble(key, upload_id, stored)
 
         with user_transaction(user_id) as connection:
             # Authorized again: a membership can be revoked while storage works.
@@ -576,6 +581,22 @@ def complete_upload(
         upload_completed_at=row.upload_completed_at,
         source_expires_at=row.source_expires_at,
     )
+
+
+def already_assembled(video: Any) -> bool:
+    """Did an earlier attempt finish the multipart upload and then fall over?
+
+    There is a window between assembling the object and committing the
+    transition. A database fault inside it would otherwise leave the row
+    `uploading` with an upload id storage has already discarded, so every later
+    completion would fail on `ListParts` and the coach could never finish.
+    Recognising the finished object makes completion self-healing.
+    """
+    try:
+        storage.list_parts(video.original_key, video.multipart_upload_id)
+    except storage.StorageError:
+        return bool(storage.head_object(video.original_key) == video.size_bytes)
+    return False
 
 
 def assemble(key: str, upload_id: str, stored: list[storage.StoredPart]) -> int | None:

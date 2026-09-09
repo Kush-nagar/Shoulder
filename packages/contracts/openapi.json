@@ -1027,13 +1027,19 @@
         "type": "object"
       },
       "UploadCreate": {
-        "description": "What the browser knows before a byte moves.\n\n`size_bytes` is the exact file length, not an estimate: the part plan and\nthe completion size check are both derived from it. The declared MIME type\nis validated against the extension but never trusted on its own.",
+        "description": "What the browser knows before a byte moves.\n\n`size_bytes` is the exact file length, not an estimate: the part plan and\nthe completion size check are both derived from it. The declared MIME type\nis checked for a contradiction with the extension and is otherwise a hint;\nTask 11 probes the stored bytes before anything trusts them.",
         "properties": {
           "content_type": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Content Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
           },
           "filename": {
             "maxLength": 255,
@@ -1061,8 +1067,7 @@
         },
         "required": [
           "filename",
-          "size_bytes",
-          "content_type"
+          "size_bytes"
         ],
         "title": "UploadCreate",
         "type": "object"

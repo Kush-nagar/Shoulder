@@ -47,6 +47,18 @@ ALLOWED_MEDIA: dict[str, tuple[str, frozenset[str]]] = {
     "m4v": ("m4v", frozenset({"video/x-m4v", "video/mp4"})),
     "mov": ("mov", frozenset({"video/quicktime"})),
 }
+# Extension -> the type actually stored on the object. The declared type is
+# never stored, so a browser that guesses cannot decide what the object claims
+# to be.
+CANONICAL_MEDIA: dict[str, str] = {
+    "mp4": "video/mp4",
+    "m4v": "video/x-m4v",
+    "mov": "video/quicktime",
+}
+# A browser that recognises no type for a file sends one of these, or nothing.
+# Safari and several Windows builds do exactly that for `.mov`. Treating that
+# as a contradiction would reject a valid match file for saying nothing at all.
+UNDECLARED_MEDIA = frozenset({"", "application/octet-stream", "binary/octet-stream"})
 
 
 class StorageError(Exception):
@@ -60,6 +72,24 @@ class StoredPart:
     part_number: int
     etag: str
     size_bytes: int
+
+
+def declared_media(extension: str, content_type: str | None) -> str:
+    """Resolve the stored content type from the extension and a hint.
+
+    The extension is validated; the declared type is only a hint. An absent or
+    generic type resolves to the extension's canonical type, and a type that
+    positively contradicts the extension is refused. `ffprobe` in Task 11 is
+    what finally decides what the bytes are.
+    """
+    if extension not in ALLOWED_MEDIA:
+        raise StorageError("unsupported media extension")
+    declared = (content_type or "").split(";")[0].strip().lower()
+    if declared in UNDECLARED_MEDIA:
+        return CANONICAL_MEDIA[extension]
+    if declared not in ALLOWED_MEDIA[extension][1]:
+        raise StorageError("declared type contradicts the extension")
+    return CANONICAL_MEDIA[extension]
 
 
 def original_key(video_id: UUID, extension: str) -> str:
@@ -257,8 +287,16 @@ def abort_multipart(key: str, upload_id: str) -> None:
     try:
         _call("abort_multipart_upload", Bucket=bucket(), Key=key, UploadId=upload_id)
     except StorageError:
-        if head_object(key) is not None:
-            raise
+        # The upload being gone is the outcome abort wanted. Distinguish that
+        # from an outage by asking for its parts: an upload that still exists
+        # answers, and only then is the failure real. Checking for the object
+        # instead would re-raise forever once a completion assembled one, which
+        # would leave a coach unable to abandon the attempt at all.
+        try:
+            list_parts(key, upload_id)
+        except StorageError:
+            return
+        raise
 
 
 def head_object(key: str) -> int | None:

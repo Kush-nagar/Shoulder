@@ -96,6 +96,53 @@ class PartPlanTests(unittest.TestCase):
                     storage.original_key(uuid.uuid4(), extension)
 
 
+class DeclaredMediaTests(unittest.TestCase):
+    """The extension is validated; the browser's type is only a hint.
+
+    `docs/04-api.md`: "Validate filename extension and probed media type; do not
+    trust the request's MIME type." Several browsers report no type at all for
+    `.mov`, and refusing those would reject a valid match file for saying
+    nothing.
+    """
+
+    def test_an_undeclared_type_resolves_from_the_extension(self) -> None:
+        for declared in (None, "", "application/octet-stream", "binary/octet-stream"):
+            with self.subTest(declared=declared):
+                self.assertEqual(
+                    storage.declared_media("mov", declared), "video/quicktime"
+                )
+                self.assertEqual(storage.declared_media("mp4", declared), "video/mp4")
+
+    def test_a_matching_type_is_accepted_and_stored_canonically(self) -> None:
+        self.assertEqual(
+            storage.declared_media("mov", "video/quicktime"), "video/quicktime"
+        )
+        # An m4v may arrive declared as either; the stored type is the canonical
+        # one, so the object never claims to be what a browser guessed.
+        self.assertEqual(storage.declared_media("m4v", "video/mp4"), "video/x-m4v")
+        self.assertEqual(storage.declared_media("m4v", "video/x-m4v"), "video/x-m4v")
+
+    def test_parameters_and_case_do_not_defeat_the_check(self) -> None:
+        self.assertEqual(
+            storage.declared_media("mp4", "VIDEO/MP4; codecs=avc1"), "video/mp4"
+        )
+
+    def test_a_type_that_contradicts_the_extension_is_refused(self) -> None:
+        for extension, declared in (
+            ("mp4", "video/quicktime"),
+            ("mov", "video/mp4"),
+            ("mp4", "text/html"),
+            ("mp4", "image/png"),
+        ):
+            with self.subTest(extension=extension, declared=declared):
+                with self.assertRaises(storage.StorageError):
+                    storage.declared_media(extension, declared)
+
+    def test_an_extension_outside_the_allowlist_is_refused(self) -> None:
+        with self.assertRaises(storage.StorageError):
+            storage.declared_media("mkv", "video/x-matroska")
+
+
 @unittest.skipUnless(CONFIGURED, "object storage is not configured")
 class StorageTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -174,6 +221,20 @@ class StorageTests(unittest.TestCase):
         storage.abort_multipart(key, upload_id)
         storage.abort_multipart(key, upload_id)
         self.uploads.clear()
+
+    def test_an_assembled_upload_can_still_be_abandoned(self) -> None:
+        """Otherwise a coach could neither finish nor abandon the attempt.
+
+        Once a completion assembles the object, the multipart upload is gone.
+        Abort has to read that as done rather than as a failure, or the row
+        stays `uploading` forever with no cleanup deadline.
+        """
+        key, upload_id = self.start()
+        self.put(storage.sign_part(key, upload_id, 1), b"a" * storage.PART_SIZE_BYTES)
+        storage.complete_multipart(key, upload_id, storage.list_parts(key, upload_id))
+        self.uploads.clear()
+        self.addCleanup(self.delete_object, key)
+        storage.abort_multipart(key, upload_id)
 
     def test_completing_an_aborted_upload_fails(self) -> None:
         key, upload_id = self.start()

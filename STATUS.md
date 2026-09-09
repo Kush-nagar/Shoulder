@@ -199,7 +199,8 @@ Recommended next local command: `.\scripts\infra.ps1 start`.
   `services/worker/` runs it as a separate process with no HTTP surface. No
   production handler ships in this block, so enqueued rows wait for Tasks 11 and 12
   rather than burning attempts.
-- Two independent review passes produced 13 findings; all are fixed or explicitly
+- Three review passes (implementer, independent reviewer, and the pull request's
+  automated reviewers) produced 17 findings; all are fixed or explicitly
   accepted, with regression tests, in the verification record. The load-bearing ones
   were a rolled-back rejection state, a shutdown that recorded an in-flight job as
   cancelled, a completion race that reported 503 for an upload that succeeded, and a

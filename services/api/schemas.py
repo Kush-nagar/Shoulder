@@ -260,12 +260,16 @@ class UploadCreate(BaseModel):
 
     `size_bytes` is the exact file length, not an estimate: the part plan and
     the completion size check are both derived from it. The declared MIME type
-    is validated against the extension but never trusted on its own.
+    is checked for a contradiction with the extension and is otherwise a hint;
+    Task 11 probes the stored bytes before anything trusts them.
     """
 
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
-    content_type: str = Field(min_length=1, max_length=100)
+    # Optional and allowed to be empty: several browsers recognise no type for
+    # `.mov`, and `docs/04-api.md` treats the declared type as a hint anyway.
+    # The stored type is resolved from the validated extension.
+    content_type: str | None = Field(default=None, max_length=100)
     sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 

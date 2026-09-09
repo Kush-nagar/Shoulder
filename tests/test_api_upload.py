@@ -266,6 +266,23 @@ class UploadApiTests(DatabaseTestCase):
         )
         self.assertEqual(response.status_code, 422)
 
+    def test_a_mov_whose_browser_reports_no_type_is_accepted(self) -> None:
+        """Several browsers recognise no type for `.mov`.
+
+        `docs/04-api.md` treats the declared type as a hint, so silence is not a
+        contradiction. The stored type comes from the validated extension.
+        """
+        client = self.client_for(self.coach)
+        game_id = self.create_game(client)
+        for declared in ("", "application/octet-stream"):
+            with self.subTest(declared=declared):
+                session = self.start_upload(
+                    client, game_id, filename="match.mov", content_type=declared
+                )
+                row = self.video_row(UUID(session["video_id"]))
+                self.assertEqual(row.content_type, "video/quicktime")
+                self.assertTrue(row.original_key.endswith("source.mov"))
+
     def test_a_file_beyond_the_configured_ceiling_is_refused(self) -> None:
         client = self.client_for(self.coach)
         game_id = self.create_game(client)
@@ -430,6 +447,56 @@ class UploadApiTests(DatabaseTestCase):
                 ("transcode", f"transcode:{video_id}:v1"),
             ],
         )
+
+    def test_an_upload_assembled_by_a_failed_attempt_can_still_finish(self) -> None:
+        """The window between assembling the object and committing the row.
+
+        A fault there would otherwise leave the row `uploading` with an upload
+        id storage has discarded, so every later completion failed on
+        `ListParts` and the coach could never finish or abandon the attempt.
+        """
+        client = self.client_for(self.coach)
+        game_id = self.create_game(client)
+        session = self.start_upload(client, game_id)
+        video_id = UUID(session["video_id"])
+        self.upload_part(client, video_id, 1, b"a" * SMALL)
+
+        # Assemble the object exactly as a completion would, then leave the row
+        # untouched, which is the state a crash in the second phase produces.
+        row = self.video_row(video_id)
+        storage.complete_multipart(
+            row.original_key,
+            row.multipart_upload_id,
+            storage.list_parts(row.original_key, row.multipart_upload_id),
+        )
+        self.assertEqual(self.video_row(video_id).status, "uploading")
+
+        response = client.post(f"/v1/videos/{video_id}/upload-complete")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.video_row(video_id).status, "uploaded")
+        self.assertEqual(len(self.jobs_for(video_id)), 2)
+
+    def test_an_upload_assembled_by_a_failed_attempt_can_still_be_abandoned(
+        self,
+    ) -> None:
+        """The other half of the same window: abandoning must stay possible."""
+        client = self.client_for(self.coach)
+        game_id = self.create_game(client)
+        session = self.start_upload(client, game_id)
+        video_id = UUID(session["video_id"])
+        self.upload_part(client, video_id, 1, b"a" * SMALL)
+        row = self.video_row(video_id)
+        storage.complete_multipart(
+            row.original_key,
+            row.multipart_upload_id,
+            storage.list_parts(row.original_key, row.multipart_upload_id),
+        )
+
+        response = client.post(f"/v1/videos/{video_id}/upload-abort")
+        self.assertEqual(response.status_code, 200, response.text)
+        failed = self.video_row(video_id)
+        self.assertEqual(failed.status, "failed")
+        self.assertIsNotNone(failed.first_terminal_failure_at)
 
     def test_a_repeated_completion_is_idempotent(self) -> None:
         client = self.client_for(self.coach)
