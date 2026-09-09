@@ -85,10 +85,12 @@ EXPECTED_UPDATE_COLUMNS = {
 }
 
 # proname -> (identity arguments, volatility)
+# `pg_get_function_identity_arguments` emits parameter names, so these pin the
+# signature the API and the policies call by name, not only the types.
 NEW_HELPERS = {
-    "is_player_coach": ("uuid", "s"),
-    "is_player_self": ("uuid", "s"),
-    "link_player_account": ("uuid, text", "v"),
+    "is_player_coach": ("p_player_id uuid", "s"),
+    "is_player_self": ("p_player_id uuid", "s"),
+    "link_player_account": ("p_player_id uuid, p_email text", "v"),
 }
 
 

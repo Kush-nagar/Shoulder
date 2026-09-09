@@ -23,7 +23,9 @@ try {
     $env:DATABASE_URL = "postgresql+psycopg://shoulder_api:$password@127.0.0.1:54322/postgres"
     # Local databases are disposable, so the policy mutation checks run here.
     $env:ALLOW_POLICY_MUTATION = '1'
-    & ./.tools/uv.exe run --locked python -m unittest discover -s tests -p 'test_database*.py' -v
+    # `test_*.py`, not `test_database*.py`: the roster API suite also needs a
+    # real database, and a pattern that misses it would skip it silently.
+    & ./.tools/uv.exe run --locked python -m unittest discover -s tests -p 'test_*.py' -v
     if ($LASTEXITCODE) { throw 'Database isolation tests failed' }
     & ./scripts/infra.ps1 health
 } finally {

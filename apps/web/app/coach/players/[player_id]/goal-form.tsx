@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useActionState, useEffect, useId, useRef } from "react";
 import {
   componentTitle,
@@ -7,17 +8,35 @@ import {
   focus,
   label,
   metadata,
+  panel,
   primary,
 } from "../../ui";
 import { createGoal } from "./actions";
 
-/** One active goal at a time. The server refuses a second one. */
-export function GoalForm({
+export type ActiveGoal = {
+  title: string;
+  description: string | null;
+  setOn: string;
+};
+
+/**
+ * One active goal at a time; the server refuses a second one.
+ *
+ * The panel and the form live in one mounted component on purpose. Setting a
+ * goal replaces the form with the panel, and a component that unmounts takes
+ * its own confirmation with it — leaving a screen reader with silence. Owning
+ * both states keeps the live region alive across that swap.
+ */
+export function GoalSection({
   playerId,
   name,
+  active,
+  children,
 }: {
   playerId: string;
   name: string;
+  active: ActiveGoal | null;
+  children?: ReactNode;
 }) {
   const [state, submit, pending] = useActionState(createGoal, { message: "" });
   const form = useRef<HTMLFormElement>(null);
@@ -29,12 +48,43 @@ export function GoalForm({
     if (state.ok) form.current?.reset();
   }, [state]);
 
+  const message = state.message ? (
+    <p
+      role={state.ok ? "status" : "alert"}
+      className="mt-3 text-[15px] font-medium"
+    >
+      {state.message}
+    </p>
+  ) : null;
+
+  if (active) {
+    return (
+      <div className="mt-3 max-w-170">
+        <div className={`${panel} p-5`}>
+          <p className="text-[17px] leading-[1.35] font-semibold">
+            {active.title}
+          </p>
+          {active.description ? (
+            <p className="mt-3 text-[15px] leading-[1.5]">
+              {active.description}
+            </p>
+          ) : null}
+          <p className={`${metadata} mt-4`}>Set {active.setOn}</p>
+          {children ? (
+            <div className="mt-4 border-t border-line pt-4">{children}</div>
+          ) : null}
+        </div>
+        {message}
+      </div>
+    );
+  }
+
   return (
     <form
       ref={form}
       action={submit}
       aria-labelledby={headingId}
-      className="max-w-170"
+      className="mt-3 max-w-170"
     >
       <h3 id={headingId} className={componentTitle}>
         Set a goal
@@ -70,14 +120,7 @@ export function GoalForm({
           {pending ? "Saving…" : "Set a goal"}
         </button>
       </div>
-      {state.message ? (
-        <p
-          role={state.ok ? "status" : "alert"}
-          className="mt-3 text-[15px] font-medium"
-        >
-          {state.message}
-        </p>
-      ) : null}
+      {message}
     </form>
   );
 }

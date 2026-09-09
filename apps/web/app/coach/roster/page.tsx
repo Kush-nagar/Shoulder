@@ -138,49 +138,37 @@ export default async function Roster() {
   const players = roster.filter((player) => player.active);
   const archived = roster.filter((player) => !player.active);
 
-  if (players.length === 0 && archived.length === 0) {
-    return (
-      <>
-        <PageHeader title="Players" />
-        <Body>
-          <h2 className={sectionTitle}>Build your roster</h2>
-          <p className="mt-3 max-w-170 text-[15px] leading-[1.5] text-muted">
-            Paste your team list to start. You never need a player’s email
-            address to add them.
-          </p>
-          <div className="mt-6">
-            <BulkPaste heading="Paste your team list" />
-          </div>
-          <AddPlayer />
-        </Body>
-      </>
-    );
-  }
-
+  // One tree for both states. Every client form keeps the same slot among its
+  // siblings, so saving the first player neither remounts a form nor hides it
+  // behind a disclosure, and the confirmation the coach just earned survives.
+  const empty = players.length === 0 && archived.length === 0;
   const table = <Table players={players} />;
   return (
     <>
       <PageHeader
         title="Players"
-        description={`${players.length} on the roster`}
+        description={empty ? undefined : `${players.length} on the roster`}
       />
       <Body>
-        {players.length > 10 ? (
+        {empty ? (
+          <div>
+            <h2 className={sectionTitle}>Build your roster</h2>
+            <p className="mt-3 max-w-170 text-[15px] leading-[1.5] text-muted">
+              Paste your team list to start. You never need a player’s email
+              address to add them.
+            </p>
+          </div>
+        ) : players.length > 10 ? (
           <RosterSearch total={players.length}>{table}</RosterSearch>
         ) : (
           table
         )}
         <AddPlayer />
-        <details className="mt-6 border-t border-line pt-4">
-          <summary
-            className={`${componentTitle} cursor-pointer rounded-sm ${focus}`}
-          >
-            Add several at once
-          </summary>
-          <div className="mt-4">
-            <BulkPaste heading="Paste more players" />
-          </div>
-        </details>
+        <div className="mt-6 border-t border-line pt-4">
+          <BulkPaste
+            heading={empty ? "Add several at once" : "Add several more at once"}
+          />
+        </div>
         {archived.length > 0 ? (
           <details className="mt-6 border-t border-line pt-4">
             <summary

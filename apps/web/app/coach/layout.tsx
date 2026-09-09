@@ -133,12 +133,15 @@ export default async function CoachLayout({
         </div>
       </header>
       <div className="lg:ml-18 xl:ml-54">
+        {/* A landmark, not a bare paragraph: below the labelled rail this is
+            the only place the current team and season appear. */}
         {team ? (
-          <p
+          <section
+            aria-label="Current team"
             className={`${metadata} border-b border-line px-5 py-2 md:px-6 lg:px-8 xl:hidden`}
           >
             {team.name} · {team.season_label}
-          </p>
+          </section>
         ) : null}
         <main className="mx-auto max-w-360">{children}</main>
       </div>

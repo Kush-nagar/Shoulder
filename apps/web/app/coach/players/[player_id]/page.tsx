@@ -12,7 +12,7 @@ import {
   tertiary,
 } from "../../ui";
 import { CloseGoal } from "./close-goal";
-import { GoalForm } from "./goal-form";
+import { GoalSection } from "./goal-form";
 import { InvitePlayer } from "./invite-player";
 
 export const dynamic = "force-dynamic";
@@ -93,30 +93,27 @@ export default async function Player({
         </dl>
 
         <h2 className={`${sectionTitle} mt-8`}>Development goal</h2>
-        {active ? (
-          <div className={`${panel} mt-3 max-w-170 p-5`}>
-            <p className="text-[17px] leading-[1.35] font-semibold">
-              {active.title}
-            </p>
-            {active.description ? (
-              <p className="mt-3 text-[15px] leading-[1.5]">
-                {active.description}
-              </p>
-            ) : null}
-            <p className={`${metadata} mt-4`}>Set {day(active.created_at)}</p>
-            <div className="mt-4 border-t border-line pt-4">
-              <CloseGoal
-                playerId={player.id}
-                goalId={active.id}
-                title={active.title}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="mt-3">
-            <GoalForm playerId={player.id} name={player.display_name} />
-          </div>
-        )}
+        <GoalSection
+          playerId={player.id}
+          name={player.display_name}
+          active={
+            active
+              ? {
+                  title: active.title,
+                  description: active.description,
+                  setOn: day(active.created_at),
+                }
+              : null
+          }
+        >
+          {active ? (
+            <CloseGoal
+              playerId={player.id}
+              goalId={active.id}
+              title={active.title}
+            />
+          ) : null}
+        </GoalSection>
 
         {closed.length > 0 ? (
           <details className="mt-8 max-w-170">

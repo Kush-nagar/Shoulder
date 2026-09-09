@@ -15,7 +15,42 @@ const widths = [
 ];
 let createdEmail;
 
+/**
+ * `private.bootstrap_initial_team` deliberately creates the one initial team
+ * only when none exists (ADR 0016), and a coach membership cannot be granted
+ * any other way through the API. Each test therefore starts from an empty
+ * workspace in the disposable local database. The fixed container name is the
+ * guard: this never reaches a hosted project.
+ */
+function resetLocalWorkspace() {
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      "supabase_db_shoulder-local",
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-q",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      "TRUNCATE app.development_goal, app.player, app.team_membership, app.team",
+    ],
+    { stdio: ["ignore", "ignore", "pipe"] },
+  );
+}
+
+test.beforeEach(() => {
+  resetLocalWorkspace();
+});
+
 test.afterEach(async ({ request }) => {
+  // Product rows reference the account, so they go before the Auth user.
+  resetLocalWorkspace();
   if (!createdEmail) return;
   // Test process only. The privileged local cleanup credential never reaches
   // a web/API process, browser, file, trace, or assertion output.
@@ -155,6 +190,8 @@ test("keyboard path through paste, preview, confirm, and saved", async ({
   await expect(paste).toBeFocused();
 
   const footnote = page.getByText("All rows are added together");
+  // Vertical position is the layout-shift invariant; sub-pixel horizontal
+  // drift from centring is not movement a reader can see.
   const before = await footnote.boundingBox();
   await expect(page.getByText("Nothing pasted yet.")).toBeVisible();
 
@@ -163,7 +200,9 @@ test("keyboard path through paste, preview, confirm, and saved", async ({
   );
   await expect(page.getByText("3 rows ready to add.")).toBeVisible();
   // The preview region reserves its geometry, so nothing below it moves.
-  expect(await footnote.boundingBox()).toEqual(before);
+  const after = await footnote.boundingBox();
+  expect(after.y).toBeCloseTo(before.y, 1);
+  expect(after.height).toBeCloseTo(before.height, 1);
 
   const confirm = page.getByRole("button", { name: "Add 3 players" });
   await page.keyboard.press("Tab");
@@ -175,9 +214,7 @@ test("keyboard path through paste, preview, confirm, and saved", async ({
     await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
   }
   // Preview rows are honest about a bad row and block the all-or-nothing save.
-  await page.getByText("Add several at once").click();
-  const second = page.getByLabel("Paste your roster");
-  await second.fill("Dee Okafor, 7\nEli Park, 7");
+  await page.getByLabel("Paste your roster").fill("Dee Okafor, 7\nEli Park, 7");
   await expect(
     page.getByText("2 of 2 rows need a fix.", { exact: false }),
   ).toBeVisible();
@@ -222,7 +259,10 @@ test("inline add row adds one player without collecting an email", async ({
   await page.getByLabel("Goal (required)").fill("Scan before receiving");
   await page.getByRole("button", { name: "Set a goal" }).click();
   await expect(page.getByRole("status")).toContainText("Goal set.");
-  await expect(page.getByText("Scan before receiving")).toBeVisible();
+  // Exact: the close-goal dialog heading quotes the same title.
+  await expect(
+    page.getByText("Scan before receiving", { exact: true }),
+  ).toBeVisible();
 });
 
 test("accessible names, axe, and no horizontal scroll at coach widths", async ({
@@ -256,7 +296,9 @@ test("accessible names, axe, and no horizontal scroll at coach widths", async ({
       }
       expect(
         await page
-          .locator("input, textarea")
+          // Hidden inputs carry server-derived ids; they are not perceivable
+          // and cannot take a label.
+          .locator("input:not([type=hidden]), textarea")
           .evaluateAll(
             (elements) =>
               elements.filter(
