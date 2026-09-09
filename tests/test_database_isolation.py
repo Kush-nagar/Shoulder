@@ -720,10 +720,20 @@ class PolicyMutationTests(IsolationHarness):
                     "polqual::text, polwithcheck::text FROM pg_policy ORDER BY oid"
                 )
             ).all()
+            membership_sql = text(
+                "SELECT roleid, member, grantor, admin_option, inherit_option, "
+                "set_option FROM pg_auth_members ORDER BY roleid, member, grantor"
+            )
+            memberships_before = connection.execute(membership_sql).all()
             connection.rollback()
             transaction = connection.begin()
             try:
                 connection.execute(text(statement))
+                # Supabase postgres has ADMIN but not SET on created roles.
+                # This grant and the policy change are never committed.
+                connection.execute(
+                    text("GRANT shoulder_api TO CURRENT_USER WITH SET TRUE")
+                )
                 connection.execute(text("SET LOCAL ROLE shoulder_api"))
                 self.assertEqual(
                     connection.execute(text("SELECT current_user")).scalar_one(),
@@ -735,13 +745,25 @@ class PolicyMutationTests(IsolationHarness):
                     self.assertCountEqual(actual, expected)
             finally:
                 transaction.rollback()
-            after = connection.execute(
-                text(
-                    "SELECT oid, polname, polcmd, polpermissive, polroles, "
-                    "polqual::text, polwithcheck::text FROM pg_policy ORDER BY oid"
+                after = connection.execute(
+                    text(
+                        "SELECT oid, polname, polcmd, polpermissive, polroles, "
+                        "polqual::text, polwithcheck::text FROM pg_policy ORDER BY oid"
+                    )
+                ).all()
+                self.assertEqual(after, before)
+                self.assertEqual(
+                    connection.execute(membership_sql).all(), memberships_before
                 )
-            ).all()
-            self.assertEqual(after, before)
+
+    def test_probe_error_restores_policies_and_role_memberships(self) -> None:
+        with self.assertRaises(ProgrammingError) as caught:
+            self.assert_mutation_detected(
+                "ALTER POLICY team_member_select ON app.team USING (true)",
+                "SELECT nonexistent_task5_column FROM app.team",
+                [],
+            )
+        self.assertEqual(sqlstate(caught.exception), "42703")
 
     def test_broadened_team_policy_is_detected(self) -> None:
         self.assert_mutation_detected(

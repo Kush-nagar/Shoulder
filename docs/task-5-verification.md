@@ -2,7 +2,7 @@
 
 Repository `D:\Shoulder`, branch `task-5-rls-isolation`, base `86773f0` (merged
 `main`); one writer. Date: 2026-09-08.
-Status: **independent review fixes applied; local verification blocked; not merged**.
+Status: **all required local verification passed; ready for final delta review; not merged**.
 
 The independent review addendum below supersedes earlier verification claims.
 Earlier results are implementation history, not independent proof of these fixes.
@@ -278,3 +278,62 @@ metadata claim is made. No hosted policy mutation or downgrade was performed.
   inspection confirms 0003 creates/drops only the roster helper; this does not
   replace execution of the required local migration cycle.
 - Task 6 remains unstarted and is not eligible until Task 5 verification passes.
+
+
+## Verification follow-up — 2026-09-08
+
+The owner explicitly authorized pushing `b34dda3` to
+`Kush-nagar/Shoulder:task-5-rls-isolation`. The push succeeded and both the remote
+branch and tracking ref were verified at the full commit ID; the working tree
+was clean before follow-up edits. No PR was opened and nothing was merged.
+
+### Environment recovery
+
+Docker startup failed on stale Windows socket reparse points. With Docker
+stopped, only directories verified to contain zero-byte socket files were
+renamed to preserve their contents. Docker recreated both runtime directories
+and started successfully; no containers, volumes, credentials, or security
+settings were reset. The issue recurred after an intervening Docker shutdown
+and was recovered with the same bounded procedure. Socket backups remain
+outside the repository; Docker may require that recovery again after shutdown.
+
+Windows Code Integrity events 3033 and 3077 confirm `_sqlite3.pyd` was rejected
+by signing policy. Installed mypy 2.3.1 explicitly supports a non-SQLite cache;
+`pyproject.toml` now sets `sqlite_cache = false`. Strict type checking remains
+unchanged. The exact `check.ps1` command passes with this supported path, without
+loading the blocked DLL or changing Application Control policy.
+
+### Local mutation defect and regression
+
+The first local run exposed that Supabase's non-superuser `postgres` has ADMIN
+but not SET permission on `shoulder_api`. The mutation transaction now grants
+SET to its current administrator before assuming the runtime role, and rolls
+that grant back with the policy mutation. It grants no role to the runtime.
+Exact `pg_auth_members` and `pg_policy` rows are checked after rollback. A new
+regression deliberately triggers SQLSTATE 42703 during the probe and verifies
+both catalogs still return to their original state. Hosted execution remains
+hard-blocked by the existing local-target guard.
+
+### Fresh local verification
+
+- Task 4 `0002_task4_privileges` baseline to Task 5 `0003_roster_display`:
+  upgrade succeeded; **36 isolation/guard/mutation tests passed**, none skipped.
+- Downgrade to Task 4: roster helper removed; definitions, policies, table
+  privileges/ownership/RLS, helper ACLs and role configuration matched the
+  captured Task 4 baseline.
+- Re-upgrade: catalog matched the first upgraded state; **36 tests passed again**.
+- `check-db.ps1`: **75 passed**, none skipped; includes a full base downgrade
+  and rebuild, all Task 4 tests, all Task 5 tests, and local health checks.
+- `check.ps1`: **passed** on the final code changes, including strict mypy,
+  Ruff/Biome, TypeScript, unit tests, unchanged generated contracts, production
+  build, browser-bundle checks, secret checks and three browser smoke tests.
+  Its database-free unit discovery has 16 passed / 68 skipped; the separate
+  required database run above supplies database evidence.
+- `check-auth.ps1`: **6 passed** across Chromium, Firefox and WebKit; the final
+  full script exited 0 after health verification, fixture cleanup and safe stack
+  shutdown. The stack is stopped by the test script with local data backed up.
+- No application schema, migration, production dependency or Task 6 code changed.
+
+Final `git diff --check` passed. All required local verification blockers are
+resolved. Task 5 awaits final delta review; no PR was opened or merged and
+Task 6 has not been started.
