@@ -59,6 +59,38 @@ EXPECTED_POLICIES = {
     ("development_goal", "development_goal_coach_insert", "INSERT", "{shoulder_api}"),
     ("development_goal", "development_goal_coach_update", "UPDATE", "{shoulder_api}"),
     ("development_goal", "development_goal_player_select", "SELECT", "{shoulder_api}"),
+    # 0005: games, video ingest, and the durable queue. Players appear nowhere
+    # here on purpose: `docs/03-schema.md` gives them no access to any of these
+    # four tables, so absence is the policy.
+    ("game", "game_owner_maintenance", "ALL", "{shoulder_migration}"),
+    ("game", "game_coach_select", "SELECT", "{shoulder_api}"),
+    ("game", "game_coach_insert", "INSERT", "{shoulder_api}"),
+    ("video", "video_owner_maintenance", "ALL", "{shoulder_migration}"),
+    ("video", "video_coach_select", "SELECT", "{shoulder_api}"),
+    ("video", "video_coach_insert", "INSERT", "{shoulder_api}"),
+    ("video", "video_coach_update", "UPDATE", "{shoulder_api}"),
+    ("video", "video_worker_select", "SELECT", "{shoulder_worker}"),
+    ("video", "video_worker_update", "UPDATE", "{shoulder_worker}"),
+    (
+        "video_upload_part",
+        "video_upload_part_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    ("video_upload_part", "video_upload_part_coach_select", "SELECT", "{shoulder_api}"),
+    ("video_upload_part", "video_upload_part_coach_insert", "INSERT", "{shoulder_api}"),
+    ("video_upload_part", "video_upload_part_coach_update", "UPDATE", "{shoulder_api}"),
+    ("video_upload_part", "video_upload_part_coach_delete", "DELETE", "{shoulder_api}"),
+    (
+        "processing_job",
+        "processing_job_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    ("processing_job", "processing_job_coach_select", "SELECT", "{shoulder_api}"),
+    ("processing_job", "processing_job_coach_insert", "INSERT", "{shoulder_api}"),
+    ("processing_job", "processing_job_worker_select", "SELECT", "{shoulder_worker}"),
+    ("processing_job", "processing_job_worker_update", "UPDATE", "{shoulder_worker}"),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -69,7 +101,12 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "is_player_coach",
     "is_player_self",
     "link_player_account",
+    "is_game_coach",
+    "is_video_coach",
 }
+# ADR 0018: the worker holds no `private` execute grant, because it authorizes
+# nothing on a user's behalf.
+EXPECTED_WORKER_FUNCTIONS: set[str] = set()
 
 
 class MutationGuardTests(unittest.TestCase):
@@ -163,7 +200,8 @@ class PolicySurfaceTests(DatabaseTestCase):
                     FROM information_schema.role_table_grants
                     WHERE table_schema IN ('app', 'private')
                       AND grantee IN ('shoulder_api', 'shoulder_operator',
-                                      'anon', 'authenticated', 'PUBLIC')
+                                      'shoulder_worker', 'anon',
+                                      'authenticated', 'PUBLIC')
                 """)
             ).all()
             functions = (
@@ -190,6 +228,18 @@ class PolicySurfaceTests(DatabaseTestCase):
                 .scalars()
                 .all()
             )
+            worker_functions = (
+                connection.execute(
+                    text("""
+                    SELECT p.proname
+                    FROM pg_proc p
+                    WHERE p.pronamespace = 'private'::regnamespace
+                      AND has_function_privilege('shoulder_worker', p.oid, 'EXECUTE')
+                """)
+                )
+                .scalars()
+                .all()
+            )
         self.assertEqual(
             {(g.grantee, g.table_name, g.privilege_type) for g in table_grants},
             # `role_table_grants` reports table-level grants only. A goal row is
@@ -197,11 +247,22 @@ class PolicySurfaceTests(DatabaseTestCase):
             # and both UPDATE surfaces are column-level by design and are
             # snapshotted per column in `tests/test_database_roster.py`.
             {("shoulder_api", table, "SELECT") for table in TABLES}
-            | {("shoulder_api", "development_goal", "INSERT")},
+            | {
+                ("shoulder_api", "development_goal", "INSERT"),
+                ("shoulder_api", "game", "INSERT"),
+                ("shoulder_api", "video_upload_part", "INSERT"),
+                ("shoulder_api", "video_upload_part", "DELETE"),
+                # ADR 0018: the worker reads every job and every video, and
+                # holds no INSERT or DELETE anywhere. Its UPDATE surface is
+                # column-level and snapshotted in `test_database_video.py`.
+                ("shoulder_worker", "processing_job", "SELECT"),
+                ("shoulder_worker", "video", "SELECT"),
+            },
         )
         self.assertEqual(set(functions), EXPECTED_RUNTIME_FUNCTIONS)
         # Bootstrap authority stays with the operator role alone.
         self.assertEqual(set(operator_functions), {"bootstrap_initial_team"})
+        self.assertEqual(set(worker_functions), EXPECTED_WORKER_FUNCTIONS)
 
     def test_definer_helpers_cannot_escalate(self) -> None:
         with self.admin.connect() as connection:

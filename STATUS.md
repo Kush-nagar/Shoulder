@@ -19,7 +19,25 @@ Update this file at every task boundary. Keep it factual and short.
 - The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.
 - Tasks 1–5 are merged into `main`. From Task 6 onward the repository uses the project-block workflow in `CLAUDE.md`; the roadmap is `docs/projects/README.md`.
 - Project Block 1 — Roster and development goals (Tasks 6 and 7): **complete**, merged as PR #8 into `main` at `ba3b52e`. Evidence: `docs/projects/project-01-roster-goals-verification.md`. `Shoulder Dev` runs `0004_roster_goals`. Invitation links an existing account only, under [ADR 0017](docs/decisions/0017-invitation-links-existing-accounts.md).
-- Project Block 2 — Video ingest and durable work (Tasks 8, 9, 10): **not started**.
+- Project Block 2 — Video ingest and durable work (Tasks 8, 9, 10): **implemented and
+  locally verified on branch `project-02-video-ingest-durable-work`; not merged**.
+  Evidence: `docs/projects/project-02-video-ingest-durable-work-verification.md`.
+  Migration `0005_video_ingest` adds `game`, `video`, `video_upload_part`, and
+  `processing_job` with RLS, plus the `shoulder_worker` runtime role under
+  [ADR 0018](docs/decisions/0018-worker-database-role.md). `Shoulder Dev` now runs
+  **`0005_video_ingest`**: 9 tables, 11 `private` functions, 34 policies, forced RLS
+  on all 9, zero `anon`/`authenticated`/`PUBLIC` grants, and column grants matching
+  the contract. Remote behavioural suites could not run on that pass because the
+  project host is IPv6-only and this workstation's IPv6 path to it went down after
+  the migration; the gap and its retry procedure are recorded in the verification
+  record. The private R2 bucket and its CORS list still need an owner-selected
+  production origin before any deployment.
+- The block was requested as "Task 9 durable job table, Task 10 ffmpeg → HLS". That
+  contradicts `docs/06-tasks.md` (Task 9 is the resumable upload UI, Task 10 is the
+  durable queue, transcode is Task 11) and HLS is forbidden by `AGENTS.md` rule 8 and
+  ADR 0001. The conflict was raised before implementation and the owner chose the
+  repository-canonical scope. No ADR was overturned and nothing in the block
+  transcodes.
 
 ## Task 3 local implementation
 
@@ -166,6 +184,41 @@ failures and reruns, are recorded in `docs/task-1-verification.md`.
 - Remaining product, retention, privacy, and CV decisions stay governed by `docs/00-decisions.md` and ADRs 0001–0011.
 
 Recommended next local command: `.\scripts\infra.ps1 start`.
+
+## Project Block 2 local implementation
+
+- Task 8: `app.game`, `app.video`, `app.video_upload_part` with forced RLS and
+  column-level write grants; `services/api/storage.py` wrapping pinned `boto3` for
+  multipart start/sign/list/complete/abort, object existence, and object-specific
+  signed GET; nine coach routes in `services/api/video.py`. Object keys are
+  `originals/{video_id}/source.{ext}` derived from the generated id and a three-entry
+  extension allowlist, never from a submitted filename. Parts are reconciled from
+  `ListParts`, never claimed by the client.
+- Task 9: `/coach/upload` with match creation, file validation, three concurrent part
+  PUTs straight to storage, `localStorage` resume hints, server-authoritative
+  reconciliation, reselect-the-same-file recovery, and the exact `docs/05-ui.md`
+  tab-closure copy. Five same-origin BFF routes, each naming one fixed upstream path.
+- Task 10: `app.processing_job` with idempotency keys, `FOR UPDATE SKIP LOCKED`
+  claims, leases, heartbeats, exponential backoff to a five-minute ceiling,
+  cooperative cancellation, bounded terminal failure, and a stale-lease sweeper;
+  `services/worker/` runs it as a separate process with no HTTP surface. No
+  production handler ships in this block, so enqueued rows wait for Tasks 11 and 12
+  rather than burning attempts.
+- Three review passes (implementer, independent reviewer, and the pull request's
+  automated reviewers, across four rounds) produced 21 findings; all are fixed or explicitly
+  accepted, with regression tests, in the verification record. The load-bearing ones
+  were a rolled-back rejection state, a shutdown that recorded an in-flight job as
+  cancelled, a completion race that reported 503 for an upload that succeeded, and a
+  botocore exception chain that could have carried an object key into a worker log.
+- Proofs: a 2 GB file through the real multipart path in 13 s over 64 parts; two
+  workers claiming 100 jobs with no double execution, stable across three runs; a
+  browser upload interrupted, reloaded, reselected, and resumed without repeating a
+  completed part, on Chromium, Firefox, and WebKit.
+- `boto3` 1.43.91 is the one new production dependency; the rationale is recorded in
+  `docs/projects/project-02-video-ingest-durable-work.md`.
+- No ML, CV, scoring, ranking, comparison, parent surface, or player-facing text was
+  added. No existing test was skipped or weakened; `tests/roster.spec.mjs` extended its
+  fixture truncation list because `app.game` now references `app.team`.
 
 ## Independent Task 4 review
 

@@ -1,9 +1,11 @@
+import Link from "next/link";
+
 import { pageTitle, secondary } from "./ui";
 
 /**
  * The 64px content header: page title plus the persistent primary action.
- * "Upload match" stays visible and disabled in this block rather than
- * pointing at a route that does not exist yet.
+ * `docs/05-ui.md`: "Upload match" is the persistent primary action on ordinary
+ * coach pages.
  */
 export function PageHeader({
   title,
@@ -22,9 +24,9 @@ export function PageHeader({
           </p>
         ) : null}
       </div>
-      <button type="button" disabled title="Coming soon" className={secondary}>
+      <Link href="/coach/upload" className={secondary}>
         Upload match
-      </button>
+      </Link>
     </header>
   );
 }

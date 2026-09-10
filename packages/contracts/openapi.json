@@ -154,6 +154,161 @@
         "title": "BulkRowResult",
         "type": "object"
       },
+      "Game": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "match",
+              "scrimmage"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent"
+          },
+          "played_at": {
+            "format": "date-time",
+            "title": "Played At",
+            "type": "string"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          },
+          "videos": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/VideoSummary"
+            },
+            "title": "Videos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "team_id",
+          "opponent",
+          "played_at",
+          "kind",
+          "notes",
+          "created_at"
+        ],
+        "title": "Game",
+        "type": "object"
+      },
+      "GameCreate": {
+        "properties": {
+          "kind": {
+            "default": "match",
+            "enum": [
+              "match",
+              "scrimmage"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent"
+          },
+          "played_at": {
+            "format": "date-time",
+            "title": "Played At",
+            "type": "string"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "played_at"
+        ],
+        "title": "GameCreate",
+        "type": "object"
+      },
+      "GamePage": {
+        "description": "Cursor pagination per `docs/04-api.md`; the cursor is opaque to a client.",
+        "properties": {
+          "games": {
+            "items": {
+              "$ref": "#/components/schemas/Game"
+            },
+            "title": "Games",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "games"
+        ],
+        "title": "GamePage",
+        "type": "object"
+      },
       "Goal": {
         "properties": {
           "closed_at": {
@@ -663,6 +818,68 @@
         "title": "RosterPlayer",
         "type": "object"
       },
+      "SignPartsRequest": {
+        "properties": {
+          "part_numbers": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Part Numbers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "part_numbers"
+        ],
+        "title": "SignPartsRequest",
+        "type": "object"
+      },
+      "SignedPart": {
+        "properties": {
+          "part_number": {
+            "title": "Part Number",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "url",
+          "size_bytes"
+        ],
+        "title": "SignedPart",
+        "type": "object"
+      },
+      "SignedParts": {
+        "properties": {
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/SignedPart"
+            },
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expires_in",
+          "parts"
+        ],
+        "title": "SignedParts",
+        "type": "object"
+      },
       "TeamBootstrap": {
         "properties": {
           "age_group": {
@@ -769,6 +986,208 @@
         "title": "TeamSummary",
         "type": "object"
       },
+      "UploadCompleted": {
+        "properties": {
+          "source_expires_at": {
+            "format": "date-time",
+            "title": "Source Expires At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "uploaded",
+              "processing",
+              "ready",
+              "failed",
+              "deletion_pending",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "upload_completed_at": {
+            "format": "date-time",
+            "title": "Upload Completed At",
+            "type": "string"
+          },
+          "video_id": {
+            "format": "uuid",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "video_id",
+          "status",
+          "upload_completed_at",
+          "source_expires_at"
+        ],
+        "title": "UploadCompleted",
+        "type": "object"
+      },
+      "UploadCreate": {
+        "description": "What the browser knows before a byte moves.\n\n`size_bytes` is the exact file length, not an estimate: the part plan and\nthe completion size check are both derived from it. The declared MIME type\nis checked for a contradiction with the extension and is otherwise a hint;\nTask 11 probes the stored bytes before anything trusts them.",
+        "properties": {
+          "content_type": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "size_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "size_bytes"
+        ],
+        "title": "UploadCreate",
+        "type": "object"
+      },
+      "UploadSession": {
+        "properties": {
+          "part_count": {
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "part_size_bytes": {
+            "title": "Part Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "uploaded",
+              "processing",
+              "ready",
+              "failed",
+              "deletion_pending",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "video_id": {
+            "format": "uuid",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "video_id",
+          "part_size_bytes",
+          "part_count",
+          "status"
+        ],
+        "title": "UploadSession",
+        "type": "object"
+      },
+      "UploadState": {
+        "description": "Server-confirmed resume state. `docs/00-decisions.md` D5: authoritative.",
+        "properties": {
+          "missing_part_numbers": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Missing Part Numbers",
+            "type": "array"
+          },
+          "part_count": {
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "part_size_bytes": {
+            "title": "Part Size Bytes",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/UploadedPart"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "uploaded",
+              "processing",
+              "ready",
+              "failed",
+              "deletion_pending",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "video_id": {
+            "format": "uuid",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "video_id",
+          "status",
+          "part_size_bytes",
+          "part_count",
+          "parts",
+          "missing_part_numbers"
+        ],
+        "title": "UploadState",
+        "type": "object"
+      },
+      "UploadedPart": {
+        "properties": {
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
+          "part_number": {
+            "title": "Part Number",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "part_number",
+          "etag",
+          "size_bytes"
+        ],
+        "title": "UploadedPart",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -807,6 +1226,134 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VideoSummary": {
+        "description": "Processing state a coach screen can render. No storage key, by contract.",
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "part_count": {
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "part_size_bytes": {
+            "title": "Part Size Bytes",
+            "type": "integer"
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready At"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "uploaded",
+              "processing",
+              "ready",
+              "failed",
+              "deletion_pending",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "upload_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Completed At"
+          },
+          "uploaded_parts": {
+            "title": "Uploaded Parts",
+            "type": "integer"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "original_filename",
+          "content_type",
+          "size_bytes",
+          "status",
+          "part_size_bytes",
+          "part_count",
+          "uploaded_parts",
+          "created_at"
+        ],
+        "title": "VideoSummary",
         "type": "object"
       }
     },
@@ -862,6 +1409,151 @@
           }
         ],
         "summary": "Identity"
+      }
+    },
+    "/v1/games": {
+      "post": {
+        "operationId": "create_game_v1_games_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GameCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Game"
+      }
+    },
+    "/v1/games/{game_id}": {
+      "get": {
+        "description": "Game and video state. Per-player review state arrives with Block 04.",
+        "operationId": "read_game_v1_games__game_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Game"
+      }
+    },
+    "/v1/games/{game_id}/videos/uploads": {
+      "post": {
+        "description": "Allocate one multipart upload for an authorized coach.\n\nSize, extension, declared type, and part count are all bounded before a\nsingle URL is signed, per `docs/10-security-privacy.md`. The declared MIME\ntype is checked against the extension but is a hint either way: Task 11\nprobes the stored bytes before anything trusts them.",
+        "operationId": "create_upload_v1_games__game_id__videos_uploads_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Upload"
       }
     },
     "/v1/goals/{goal_id}": {
@@ -1284,6 +1976,67 @@
         "summary": "Bootstrap Team"
       }
     },
+    "/v1/teams/{team_id}/games": {
+      "get": {
+        "operationId": "list_games_v1_teams__team_id__games_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Games"
+      }
+    },
     "/v1/teams/{team_id}/players": {
       "get": {
         "operationId": "list_players_v1_teams__team_id__players_get",
@@ -1461,6 +2214,245 @@
           }
         ],
         "summary": "Create Players Bulk"
+      }
+    },
+    "/v1/videos/{video_id}": {
+      "get": {
+        "operationId": "read_video_v1_videos__video_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Video"
+      }
+    },
+    "/v1/videos/{video_id}/upload-abort": {
+      "post": {
+        "description": "Abandon an incomplete upload. Safe to repeat.\n\nThe video row is kept in a terminal state so the Task 22 sweeper can find\nit; `docs/10-security-privacy.md` gives an abandoned upload seven days from\ninitiation regardless of how many resumes it saw.",
+        "operationId": "abort_upload_v1_videos__video_id__upload_abort_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Abort Upload"
+      }
+    },
+    "/v1/videos/{video_id}/upload-complete": {
+      "post": {
+        "description": "Finish the upload, start the retention clock, and enqueue the work.\n\nThree phases, because assembling a multi-gigabyte object takes storage tens\nof seconds and the API pool is small: authorize and reconcile in one short\ntransaction, talk to storage holding no lock, then transition and enqueue in\na second short transaction that authorizes again.\n\nIdempotent by contract. The conditional UPDATE in `complete_video` is the\nonly transition out of `uploading`, so it settles a completion race: the\nloser updates no row and reports the winner's answer.",
+        "operationId": "complete_upload_v1_videos__video_id__upload_complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadCompleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Complete Upload"
+      }
+    },
+    "/v1/videos/{video_id}/upload-parts/sign": {
+      "post": {
+        "description": "Short-lived PUT URLs, each naming one object, one verb, and one part.",
+        "operationId": "sign_upload_parts_v1_videos__video_id__upload_parts_sign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignPartsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedParts"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sign Upload Parts"
+      }
+    },
+    "/v1/videos/{video_id}/upload-state": {
+      "get": {
+        "description": "The authoritative resume record (`docs/00-decisions.md` D5).",
+        "operationId": "read_upload_state_v1_videos__video_id__upload_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Upload State"
       }
     }
   }
