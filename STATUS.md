@@ -2,6 +2,43 @@
 
 Update this file at every task boundary. Keep it factual and short.
 
+## Supervisor checkpoint
+
+Durable execution state. A fresh session should read this first, then verify it
+against Git and GitHub before editing anything.
+
+| Field | Value |
+|---|---|
+| Last verified `main` | `465b894895383fc6374fd87d569ad60d2830e06f` |
+| Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`) |
+| Current block | **Block 03 — Media processing and coach playback** (Tasks 11, 12, 13); not started |
+| Current worker / branch | none active |
+| Open PRs | none |
+| Database revision | `0005_video_ingest` locally and on `Shoulder Dev` |
+| Last full verification | 2026-09-10 on `465b894`: repository quality gate green except the Firefox engine (see environment limitations); 286 Python tests; Block 02 gates green on `5f69f9e` |
+| Blockers | none that require a human |
+| Next action | Start a fresh-context Block 03 worker from `main` at `465b894`; its first job is pinned `ffmpeg`/`ffprobe` tooling and a generated golden fixture, neither of which exists yet |
+
+### Environment limitations on this workstation
+
+- **Firefox browser tests cannot run locally.** Windows Smart App Control is
+  enforcing (`VerifiedAndReputablePolicyState = 1`) and blocks Mozilla's
+  `lgpllibs.dll`: `LoadLibrary` returns 4551, "An Application Control policy has
+  blocked this file." A clean Playwright reinstall does not change it. Chromium
+  and WebKit pass. GitHub CI runs all three engines on Ubuntu and is green, so
+  the matrix is still verified — just not on this machine. No security policy
+  was disabled, changed, or bypassed.
+- **`Shoulder Dev` is IPv6-only** (`db.gzbwlancwxhtausyokxt.supabase.co` →
+  `2600:1f10:4d85:4400::daa0`). This workstation's IPv6 path to it is
+  intermittent; Alembic reached it, and minutes later TCP 5432 did not. Remote
+  behavioural suites are retryable when the path is up.
+- **Not cloud-portable yet.** `scripts/check.ps1` is cross-platform and needs no
+  Docker, but the six other check scripts start the Supabase CLI stack and MinIO
+  through Docker. The blocker is Docker-in-sandbox for the Supabase Auth server:
+  the magic-link browser suites need a real Auth server, and CI only substitutes
+  a bare `postgres` service plus `tests/fixtures/ci-auth-schema.sql`, which
+  cannot serve magic links.
+
 ## Current state
 
 - Current phase: Phase B — Video. Phase A (Tasks 1–7) is complete and merged.
@@ -19,8 +56,8 @@ Update this file at every task boundary. Keep it factual and short.
 - The Postgres 17 versus 16 prerequisite is **resolved** and merged as PR #4: [ADR 0015](docs/decisions/0015-postgres-major-version-contract.md) contracts Postgres 17 for local and production, with evidence in `docs/task-4-prerequisite-verification.md`.
 - Tasks 1–5 are merged into `main`. From Task 6 onward the repository uses the project-block workflow in `CLAUDE.md`; the roadmap is `docs/projects/README.md`.
 - Project Block 1 — Roster and development goals (Tasks 6 and 7): **complete**, merged as PR #8 into `main` at `ba3b52e`. Evidence: `docs/projects/project-01-roster-goals-verification.md`. `Shoulder Dev` runs `0004_roster_goals`. Invitation links an existing account only, under [ADR 0017](docs/decisions/0017-invitation-links-existing-accounts.md).
-- Project Block 2 — Video ingest and durable work (Tasks 8, 9, 10): **implemented and
-  locally verified on branch `project-02-video-ingest-durable-work`; not merged**.
+- Project Block 2 — Video ingest and durable work (Tasks 8, 9, 10): **complete**,
+  merged as PR #10 into `main` at `465b894`.
   Evidence: `docs/projects/project-02-video-ingest-durable-work-verification.md`.
   Migration `0005_video_ingest` adds `game`, `video`, `video_upload_part`, and
   `processing_job` with RLS, plus the `shoulder_worker` runtime role under
