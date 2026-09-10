@@ -24,9 +24,14 @@ Update this file at every task boundary. Keep it factual and short.
   Evidence: `docs/projects/project-02-video-ingest-durable-work-verification.md`.
   Migration `0005_video_ingest` adds `game`, `video`, `video_upload_part`, and
   `processing_job` with RLS, plus the `shoulder_worker` runtime role under
-  [ADR 0018](docs/decisions/0018-worker-database-role.md). `Shoulder Dev` still runs
-  `0004_roster_goals`: the remote migration is outstanding and is tied to the private
-  R2 bucket and CORS decision, which needs an owner-selected production origin.
+  [ADR 0018](docs/decisions/0018-worker-database-role.md). `Shoulder Dev` now runs
+  **`0005_video_ingest`**: 9 tables, 11 `private` functions, 34 policies, forced RLS
+  on all 9, zero `anon`/`authenticated`/`PUBLIC` grants, and column grants matching
+  the contract. Remote behavioural suites could not run on that pass because the
+  project host is IPv6-only and this workstation's IPv6 path to it went down after
+  the migration; the gap and its retry procedure are recorded in the verification
+  record. The private R2 bucket and its CORS list still need an owner-selected
+  production origin before any deployment.
 - The block was requested as "Task 9 durable job table, Task 10 ffmpeg → HLS". That
   contradicts `docs/06-tasks.md` (Task 9 is the resumable upload UI, Task 10 is the
   durable queue, transcode is Task 11) and HLS is forbidden by `AGENTS.md` rule 8 and

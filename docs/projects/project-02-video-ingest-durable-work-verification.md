@@ -212,17 +212,50 @@ identically; changing it is a service-wide question, not a Block 02 defect.
 
 ## Shoulder Dev
 
-**Not touched.** This block was verified entirely against the local disposable
-stack. `Shoulder Dev` still runs `0004_roster_goals` and holds no fixture rows
-from this work.
+`docs/projects/README.md` marks this block "Remote: yes", so migration `0005`
+was deployed to `Shoulder Dev` (`gzbwlancwxhtausyokxt`, PostgreSQL 17) through
+the repository Alembic workflow, never the dashboard. Pre-deployment revision
+was `0004_roster_goals` with zero drift and none of the four Block 02 tables
+present. The project was not downgraded; reversibility is proven locally.
 
-The migration is ready to deploy but has not been, because Block 02 has no
-remote-only behaviour to prove: the storage boundary needs a private R2 bucket
-and its CORS list, and the owner has not selected a production domain to put in
-`infra/r2-cors.json`. Deploying the schema without that would add tables the
-remote project cannot yet exercise. `docs/projects/README.md` marks this block
-"Remote: yes"; that step is recorded as outstanding rather than skipped, and
-belongs with the R2 bucket decision.
+| Check | Result |
+|---|---|
+| Revision before / after | `0004_roster_goals` → **`0005_video_ingest`** |
+| `app` tables | 5 → **9** |
+| `private` functions | 9 → **11** |
+| Policies on `app` | 15 → **34** (the 19 this block adds) |
+| Tables with RLS enabled **and** forced | **9 of 9** |
+| Policy predicates on the four new tables | match the local snapshot exactly, all 19 |
+| `shoulder_worker` role | present, `NOBYPASSRLS`, not superuser |
+| `anon`, `authenticated`, `PUBLIC` grants on the new tables | **0** |
+| `shoulder_api` column grants | `video` INSERT includes `id`/`original_key`, UPDATE excludes both; no DELETE anywhere; no UPDATE on `processing_job` |
+| `shoulder_worker` column grants | `SELECT` + column-scoped `UPDATE` only; no `INSERT`, no `DELETE`, no `playback_key`, no `private` execute |
+| `processing_job` indexes | 5, including the claim and lease partial indexes |
+| Fixture rows created by this verification | **0** |
+
+The Supabase MCP role was refused `SET ROLE shoulder_api` with `42501`, which
+is the correct answer: the management path cannot impersonate the runtime role
+even to run a test.
+
+### One remote check that could not run, and why
+
+The behavioural isolation suites were not run against `Shoulder Dev` on this
+pass. `db.gzbwlancwxhtausyokxt.supabase.co` resolves IPv6-only
+(`2600:1f10:4d85:4400::daa0`) and this workstation's IPv6 path to it went down
+between the migration and the suite run: Alembic connected successfully, and
+minutes later `Test-NetConnection` to port 5432 failed twice. That is a network
+condition on this machine, not a product or schema defect, and nothing about it
+is specific to Block 02.
+
+What that leaves: every structural property above is verified on the remote,
+and the behavioural properties those policies produce are verified locally
+against the same migration by 286 tests. The gap is behavioural confirmation
+*on the remote host*. It is retryable at any time with
+`tests.test_database_video`, `tests.test_database_queue`,
+`tests.test_worker_loop`, and `tests.test_database_isolation` pointed at the
+remote URLs once IPv6 reaches the host, and it needs a `shoulder_worker`
+password provisioned for that run. It is recorded here as an open item rather
+than quietly omitted.
 
 ## Known risks
 
