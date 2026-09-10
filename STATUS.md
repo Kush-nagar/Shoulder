@@ -9,15 +9,15 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `465b894895383fc6374fd87d569ad60d2830e06f` |
-| Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`) |
-| Current block | **Block 03 — Media processing and coach playback** (Tasks 11, 12, 13); not started |
-| Current worker / branch | none active |
-| Open PRs | none |
+| Last verified `main` | `5f55cb3a4435bed0361bed9ed78bc547180013a8` |
+| Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11) |
+| Current block | **Block 03 — Media processing and coach playback** (Tasks 11, 12, 13); in progress |
+| Current worker / branch | one implementation worker on `project-03-media-playback`, branched from `5f55cb3` |
+| Open PRs | none yet for Block 03; the worker opens one when its verification passes |
 | Database revision | `0005_video_ingest` locally and on `Shoulder Dev` |
 | Last full verification | 2026-09-10 on `465b894`: repository quality gate green except the Firefox engine (see environment limitations); 286 Python tests; Block 02 gates green on `5f69f9e` |
 | Blockers | none that require a human |
-| Next action | Start a fresh-context Block 03 worker from `main` at `465b894`; its first job is pinned `ffmpeg`/`ffprobe` tooling and a generated golden fixture, neither of which exists yet |
+| Next action | Await the Block 03 worker's report, verify its claims independently, then shepherd its PR through CI and review. If the worker is gone, inspect `project-03-media-playback` on GitHub and resume from whatever it committed. Its first job was pinned `ffmpeg`/`ffprobe` tooling and a generated golden fixture, neither of which existed at `5f55cb3` |
 
 ### Environment limitations on this workstation
 
