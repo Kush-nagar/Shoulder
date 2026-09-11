@@ -39,7 +39,7 @@ browser's own `<video>` element.
 | **T11** test: ffmpeg failure | refused continuation | `test_a_refused_continuation_stops_the_encode` | passed |
 | **T11** worker write access | `migrations/versions/0006_media_playback.py` | column grant pinned by `test_the_worker_writes_only_the_columns_its_work_produces` | passed |
 | **T12** sprites and timestamp index | `media.sprite_sheets`, `media.index_document` | `SpriteTests` | passed |
-| **T12** bounded dimensions, deterministic layout | `services/timeline.py` | `SpriteGeometryTests`, `tests/timeline.test.mjs` | passed |
+| **T12** bounded dimensions, deterministic layout | `services/timeline.py` | `SpriteGeometryTests` and `tests/timeline.test.mjs`, both against an explicit shared table | passed |
 | **T12** done: not hundreds of images | `MAX_SHEETS = 4` | a 90-minute match is 4 objects; asserted at the API layer too | passed |
 | **T13** player wrapper | `player.tsx` | typecheck, lint, production build | passed |
 | **T13** signed-URL refresh preserving time | `player.tsx` refresh effect | playhead and play state restored across re-sign | implemented |
@@ -126,7 +126,39 @@ test time into a temporary directory and deleted afterwards, per
 | Browser smoke | chromium and webkit passed |
 | Migrations up/down/up | `0005` → `0006` → `0005` → `0006` clean |
 
+## Automated review on PR #13
+
+GitHub Copilot and Cursor Bugbot reviewed commit `8b70fe6`. Twelve findings;
+six fixed in `78c889f`, six outstanding and described below rather than closed.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **The cross-language geometry tests compared each implementation to itself.** `test_geometry_is_deterministic` and its TypeScript twin asserted `f(x) == f(x)`, which passes even if Python and TypeScript have drifted apart — the exact failure they existed to catch, and which this record claimed they covered. | Fixed. Both now assert an explicit written-out table of duration → interval, tiles, sheets. The earlier claim in this record was wrong and is corrected here. |
+| 2 | **The worker stored the source's dimensions and duration**, but the player sizes its frame and scrubber from those columns and loads the 720p file. A 1080p upload reported 1920×1080 for a 1280×720 object. | Fixed: the output is probed after transcode. Duration comes from the same probe, so a truncated transcode cannot report the source's full length. |
+| 3 | **`_even` rounded to the nearest even number**, so a 1279×719 source became 1280×720 — an upscale, contradicting `playback_size`'s documented promise. | Fixed: it floors. Regression test added. |
+| 4 | **The timeline signed sheets without checking they existed.** Transcode marks a video `ready` on its own and the thumbnail job is a separate queue entry, so the scrubber could receive URLs that 404 with no way to tell why. | Fixed: the published index object is the readiness signal, returning `409 timeline-not-ready`. Playback does not depend on thumbnails and still works. Test added for both halves. |
+| 5 | **Sprite URLs expired without refresh.** They carry the same fifteen-minute expiry as the playback URL but were fetched once, so a long review kept working video beside silently failing thumbnails. | Fixed: both are re-signed on the same tick. |
+| 6 | **The player declared its own `Playback` and `Timeline` types**, duplicating the generated FastAPI schemas that `AGENTS.md` requires be the only source. | Fixed: it imports the generated types. |
+| 7 | **`storage.download_object` has no heartbeat.** A multi-gigabyte original can take longer than the 120-second lease, so the sweeper would requeue a job that is still running and a second worker could claim it. | **Outstanding.** Real, and it only bites on files larger than the fixtures. See the gap below. |
+| 8 | **`thumbnail_job` decodes the full match through `_run` without heartbeating.** Same lease exposure. | **Outstanding.** Same gap. |
+| 9 | **The upload after transcode has no heartbeat**, and `status = 'ready'` is committed without re-checking the lease. | **Outstanding.** Same gap. |
+| 10 | **`capture_output=True` buffers all ffmpeg output until exit.** A hostile or pathological upload could make that buffer large. | **Outstanding.** Bounded in practice by the encode timeout, but not by memory. |
+| 11 | **The wall-clock deadline is only checked when the pipe yields a line.** A decoder that stalls while holding the pipe open is not interrupted. | **Outstanding.** |
+| 12 | **`_even` on very small sources.** Subsumed by finding 3. | Fixed with 3. |
+
 ## Known gaps
+
+**The lease-versus-long-operation gap (findings 7 to 11) is the one I would fix
+before trusting this worker with a real match.** The queue lease is 120 seconds
+and three operations in the media path — downloading the original, decoding for
+sprites, and uploading the playback object — can each exceed that on a
+multi-gigabyte file without touching `keep_going`. The consequence is not data
+loss: `jobs.succeed` and `jobs.fail` are both gated on `locked_by`, so a worker
+that lost its lease cannot commit a terminal state. The consequence is wasted
+work and duplicate transcodes. Fixing it properly means running those blocking
+calls on a worker thread and heartbeating from the caller, which is a real
+change to the media path rather than a tweak, and it wants its own tests.
+
 
 - **Firefox browser tests did not run locally.** Windows Smart App Control
   blocks Mozilla's `lgpllibs.dll` (`LoadLibrary` 4551, "An Application Control
