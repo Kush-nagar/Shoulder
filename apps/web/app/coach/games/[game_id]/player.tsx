@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PlaybackUrl, Timeline } from "../../../../lib/api";
 import {
   formatClock,
   type SpriteLayout,
@@ -20,26 +21,6 @@ import { focus, metadata, panel, secondary } from "../../ui";
  * A coach must never lose their place because a signature aged out.
  */
 
-type Playback = {
-  video_id: string;
-  url: string;
-  expires_in: number;
-  duration_ms: number;
-  width: number;
-  height: number;
-};
-
-type Timeline = {
-  expires_in: number;
-  tile_width: number;
-  tile_height: number;
-  columns: number;
-  rows: number;
-  interval_ms: number;
-  tile_count: number;
-  sheets: { sheet: number; url: string }[];
-};
-
 /** Refresh with a margin, so a seek never races the expiry. */
 const REFRESH_MARGIN_SECONDS = 120;
 
@@ -57,7 +38,7 @@ export function CoachPlayer({
   label: string;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const [playback, setPlayback] = useState<Playback | null>(null);
+  const [playback, setPlayback] = useState<PlaybackUrl | null>(null);
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [message, setMessage] = useState("");
   const [currentMs, setCurrentMs] = useState(0);
@@ -65,10 +46,16 @@ export function CoachPlayer({
   const [hover, setHover] = useState<number | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
-    const next = await readJson<Playback>(
-      `/api/videos/${videoId}/playback-url`,
-      { method: "POST" },
-    );
+    const [next, line] = await Promise.all([
+      readJson<PlaybackUrl>(`/api/videos/${videoId}/playback-url`, {
+        method: "POST",
+      }),
+      // The sheet URLs carry the same fifteen-minute expiry as the playback
+      // URL. Re-signing one without the other would leave a working video with
+      // a scrubber whose thumbnails had quietly started 403ing.
+      readJson<Timeline>(`/api/videos/${videoId}/timeline`).catch(() => null),
+    ]);
+    if (line) setTimeline(line);
     setPlayback((previous) => {
       // Preserve the playhead across a refresh: assigning a new src resets it.
       const element = video.current;
@@ -90,10 +77,6 @@ export function CoachPlayer({
     void (async () => {
       try {
         await load();
-        const line = await readJson<Timeline>(
-          `/api/videos/${videoId}/timeline`,
-        );
-        if (alive) setTimeline(line);
       } catch {
         if (alive)
           setMessage("Shoulder could not open this video. Reload the page.");
@@ -102,7 +85,7 @@ export function CoachPlayer({
     return () => {
       alive = false;
     };
-  }, [load, videoId]);
+  }, [load]);
 
   // Re-sign before the URL ages out, for as long as the screen is open.
   useEffect(() => {

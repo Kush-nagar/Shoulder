@@ -23,6 +23,19 @@ sys.path.append(str(Path(__file__).resolve().parent))
 from services import timeline
 from services.worker import media
 
+# Duration -> (interval_ms, tile_count, sheet_count), written out by hand.
+# `tests/timeline.test.mjs` pins the identical table. Comparing the function to
+# itself would pass even if the two languages diverged, which is the whole risk
+# this table exists to catch.
+SHARED_GEOMETRY = {
+    1: (2000, 1, 1),
+    1000: (2000, 1, 1),
+    40_000: (2000, 20, 1),
+    5 * 60_000: (2000, 150, 2),
+    90 * 60_000: (13_500, 400, 4),
+    4 * 3_600_000: (36_000, 400, 4),
+}
+
 REQUIRED = os.environ.get("REQUIRE_MEDIA_TESTS", "").lower() in ("1", "true")
 AVAILABLE = media.ffmpeg_available()
 
@@ -58,6 +71,14 @@ class PlaybackSizeTests(unittest.TestCase):
     def test_a_small_source_is_never_upscaled(self) -> None:
         self.assertEqual(media.playback_size(640, 360), (640, 360))
 
+    def test_a_source_just_under_the_cap_is_not_rounded_upward(self) -> None:
+        """Rounding to the nearest even number would upscale 1279x719."""
+        width, height = media.playback_size(1279, 719)
+        self.assertLessEqual(width, 1279)
+        self.assertLessEqual(height, 719)
+        self.assertEqual(width % 2, 0)
+        self.assertEqual(height % 2, 0)
+
     def test_every_dimension_is_even(self) -> None:
         """H.264 4:2:0 cannot encode an odd dimension."""
         for source in ((1919, 1079), (1081, 1921), (641, 361), (3, 5)):
@@ -82,11 +103,19 @@ class SpriteGeometryTests(unittest.TestCase):
         self.assertEqual(layout.interval_ms, timeline.MIN_INTERVAL_MS)
         self.assertEqual(layout.sheet_count, 1)
 
-    def test_geometry_is_deterministic(self) -> None:
-        for duration in (1, 1000, 40_000, 5 * 60_000, 90 * 60_000, 4 * 3600_000):
+    def test_geometry_matches_the_table_the_browser_also_pins(self) -> None:
+        """Against written-out values, not against itself.
+
+        `tests/timeline.test.mjs` asserts the same table. A self-comparison
+        would pass even if the two implementations had drifted apart, which is
+        exactly the failure that would put the wrong frame under the scrubber.
+        """
+        for duration, expected in SHARED_GEOMETRY.items():
             with self.subTest(duration=duration):
+                layout = timeline.sprite_layout(duration)
                 self.assertEqual(
-                    timeline.sprite_layout(duration), timeline.sprite_layout(duration)
+                    (layout.interval_ms, layout.tile_count, layout.sheet_count),
+                    expected,
                 )
 
     def test_a_non_positive_duration_is_refused(self) -> None:

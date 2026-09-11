@@ -816,6 +816,16 @@ def read_timeline(
         video = require_ready(require_coach(load_video(connection, video_id)))
     layout = timeline_geometry.sprite_layout(video.duration_ms)
     try:
+        # `transcode` marks a video ready on its own, and the thumbnail job is
+        # a separate queue entry that may not have run yet. Signing sheets that
+        # do not exist would hand the scrubber a row of URLs that 404 with no
+        # way to tell why, so the published index is the readiness signal.
+        if storage.head_object(storage.thumbnail_index_key(video_id)) is None:
+            raise Problem(
+                409,
+                "Shoulder is still building this match timeline.",
+                "timeline-not-ready",
+            )
         sheets = [
             SpriteSheet(
                 sheet=sheet,

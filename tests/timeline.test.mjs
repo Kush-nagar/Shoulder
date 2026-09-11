@@ -11,16 +11,18 @@ import {
 } from "../apps/web/lib/timeline.ts";
 
 /**
- * The durations `tests/test_media.py` also checks. If these two files ever
- * disagree, the scrubber shows a frame from the wrong moment.
+ * Duration -> [interval_ms, tile_count, sheet_count], written out by hand.
+ * `tests/test_media.py` pins the identical table. Comparing `spriteLayout` to
+ * itself would pass even if the two languages diverged, which is the whole
+ * risk this table exists to catch.
  */
-const SHARED_DURATIONS = [
-  1,
-  1000,
-  40_000,
-  5 * 60_000,
-  90 * 60_000,
-  4 * 3_600_000,
+const SHARED_GEOMETRY = [
+  [1, [2000, 1, 1]],
+  [1000, [2000, 1, 1]],
+  [40_000, [2000, 20, 1]],
+  [5 * 60_000, [2000, 150, 2]],
+  [90 * 60_000, [13_500, 400, 4]],
+  [4 * 3_600_000, [36_000, 400, 4]],
 ];
 
 test("a full match stays within four sheets", () => {
@@ -36,9 +38,14 @@ test("a short clip is never finer than two seconds", () => {
   assert.equal(layout.sheet_count, 1);
 });
 
-test("geometry is deterministic across the shared durations", () => {
-  for (const duration of SHARED_DURATIONS) {
-    assert.deepEqual(spriteLayout(duration), spriteLayout(duration));
+test("geometry matches the table Python also pins", () => {
+  for (const [duration, expected] of SHARED_GEOMETRY) {
+    const layout = spriteLayout(duration);
+    assert.deepEqual(
+      [layout.interval_ms, layout.tile_count, layout.sheet_count],
+      expected,
+      `duration ${duration}`,
+    );
   }
 });
 

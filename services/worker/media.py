@@ -257,7 +257,13 @@ def playback_size(width: int, height: int) -> tuple[int, int]:
 
 
 def _even(value: float) -> int:
-    return max(2, int(round(value / 2)) * 2)
+    """Round down to an even number, never up.
+
+    H.264 4:2:0 needs even dimensions, but rounding to the *nearest* even value
+    would upscale a source already close to the cap: 1279x719 would become
+    1280x720. `playback_size` promises never to upscale, so this floors.
+    """
+    return max(2, int(value // 2) * 2)
 
 
 # --- Transcode -------------------------------------------------------------
@@ -556,10 +562,17 @@ def transcode_job(job: jobs.Job, keep_going: Progress) -> None:
             transcode(source, output, media, keep_going)
             if not keep_going(0.99):
                 raise Cancelled
+            # Probe the output, not the source. The coach player sizes its
+            # frame and its scrubber from these columns, and they have to
+            # describe the object it actually loads, which is the 720p file
+            # rather than the original. Duration comes from the same probe, so
+            # a transcode that truncated the match cannot report the source's
+            # full length and leave the scrubber running past the end.
+            played = probe(output)
             storage.upload_object(key, output, PLAYBACK_CONTENT_TYPE)
 
         with jobs.transaction() as connection:
-            _finish(connection, video_id, key, media)
+            _finish(connection, video_id, key, played)
     except (MediaError, storage.StorageError):
         _fail_if_final(job, video_id)
         raise

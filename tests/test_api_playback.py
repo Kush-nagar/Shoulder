@@ -81,6 +81,25 @@ class PlaybackApiTests(DatabaseTestCase):
         self.game = self.admin_insert_game(self.team, self.coach)
         self.ready = self.admin_insert_video(self.game, self.coach, ready=True)
         self.pending = self.admin_insert_video(self.game, self.coach, ready=False)
+        # The timeline is gated on the published index, because the thumbnail
+        # job runs separately from the transcode that marks a video ready.
+        self.publish_index(self.ready)
+
+    def publish_index(self, video_id: UUID) -> None:
+        key = storage.thumbnail_index_key(video_id)
+        storage.get_client().put_object(
+            Bucket=storage.bucket(),
+            Key=key,
+            Body=b'{"interval_ms": 13500}',
+            ContentType="application/json",
+        )
+        self.addCleanup(self.discard_object, key)
+
+    def discard_object(self, key: str) -> None:
+        try:
+            storage.get_client().delete_object(Bucket=storage.bucket(), Key=key)
+        except Exception:  # noqa: BLE001 - cleanup is best effort
+            pass
 
     def add_membership(self, team_id: UUID, user_id: UUID, role: str) -> None:
         with self.admin.connect() as connection, connection.begin():
@@ -231,6 +250,26 @@ class PlaybackApiTests(DatabaseTestCase):
             path = urlparse(sheet["url"]).path
             self.assertIn(f"thumbs/{self.ready}/sprite-{sheet['sheet']}.jpg", path)
             self.assertNotIn("originals/", path)
+
+    def test_a_timeline_whose_sheets_are_not_published_yet_is_a_conflict(self) -> None:
+        """Transcode marks a video ready before the thumbnail job has run.
+
+        Signing sheets that do not exist would hand the scrubber URLs that 404
+        with no way to tell why.
+        """
+        later = self.admin_insert_video(self.game, self.coach, ready=True)
+        response = self.client_for(self.coach).get(f"/v1/videos/{later}/timeline")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["type"].rsplit("/", 1)[-1], "timeline-not-ready"
+        )
+        # Playback itself does not depend on thumbnails, so it still works.
+        self.assertEqual(
+            self.client_for(self.coach)
+            .post(f"/v1/videos/{later}/playback-url")
+            .status_code,
+            200,
+        )
 
     def test_a_timeline_for_an_unprepared_video_is_a_conflict(self) -> None:
         response = self.client_for(self.coach).get(
