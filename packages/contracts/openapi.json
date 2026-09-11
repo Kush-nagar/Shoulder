@@ -650,6 +650,46 @@
         "title": "Me",
         "type": "object"
       },
+      "PlaybackUrl": {
+        "description": "One short-lived, object-specific coach playback URL.\n\n`docs/10-security-privacy.md` caps a coach URL at fifteen minutes. The\nobject is the coach-only `playback/{video_id}/coach-720p.mp4`; no player\nendpoint ever returns it, and no request value chooses it.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "video_id": {
+            "format": "uuid",
+            "title": "Video Id",
+            "type": "string"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "video_id",
+          "url",
+          "expires_in",
+          "duration_ms",
+          "width",
+          "height"
+        ],
+        "title": "PlaybackUrl",
+        "type": "object"
+      },
       "PlayerCreate": {
         "properties": {
           "display_name": {
@@ -880,6 +920,24 @@
         "title": "SignedParts",
         "type": "object"
       },
+      "SpriteSheet": {
+        "properties": {
+          "sheet": {
+            "title": "Sheet",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheet",
+          "url"
+        ],
+        "title": "SpriteSheet",
+        "type": "object"
+      },
       "TeamBootstrap": {
         "properties": {
           "age_group": {
@@ -984,6 +1042,64 @@
           "role"
         ],
         "title": "TeamSummary",
+        "type": "object"
+      },
+      "Timeline": {
+        "description": "Scrubber thumbnails: bounded sheets and a deterministic tile geometry.",
+        "properties": {
+          "columns": {
+            "title": "Columns",
+            "type": "integer"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "interval_ms": {
+            "title": "Interval Ms",
+            "type": "integer"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "sheets": {
+            "items": {
+              "$ref": "#/components/schemas/SpriteSheet"
+            },
+            "title": "Sheets",
+            "type": "array"
+          },
+          "tile_count": {
+            "title": "Tile Count",
+            "type": "integer"
+          },
+          "tile_height": {
+            "title": "Tile Height",
+            "type": "integer"
+          },
+          "tile_width": {
+            "title": "Tile Width",
+            "type": "integer"
+          },
+          "video_id": {
+            "format": "uuid",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "video_id",
+          "expires_in",
+          "tile_width",
+          "tile_height",
+          "columns",
+          "rows",
+          "interval_ms",
+          "tile_count",
+          "sheets"
+        ],
+        "title": "Timeline",
         "type": "object"
       },
       "UploadCompleted": {
@@ -2259,6 +2375,98 @@
           }
         ],
         "summary": "Read Video"
+      }
+    },
+    "/v1/videos/{video_id}/playback-url": {
+      "post": {
+        "description": "Sign the coach-only playback object for fifteen minutes.\n\nThe key is derived from the video's UUID, never read from the request and\nnever taken from a caller-supplied value, so this endpoint cannot be\nsteered at another object. `docs/10-security-privacy.md` keeps this object\ncoach-only: no player route signs it, and the published player clips of\nTask 17 are separate objects entirely.",
+        "operationId": "create_playback_url_v1_videos__video_id__playback_url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackUrl"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Playback Url"
+      }
+    },
+    "/v1/videos/{video_id}/timeline": {
+      "get": {
+        "description": "Signed sprite sheets plus the geometry that locates a timestamp.\n\nThe geometry is recomputed from the stored duration rather than read back\nfrom the index object, so the API, the worker, and the browser cannot drift\napart: all three call the same pure function.",
+        "operationId": "read_timeline_v1_videos__video_id__timeline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timeline"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Timeline"
       }
     },
     "/v1/videos/{video_id}/upload-abort": {

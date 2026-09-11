@@ -308,6 +308,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/videos/{video_id}/playback-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Playback Url
+         * @description Sign the coach-only playback object for fifteen minutes.
+         *
+         *     The key is derived from the video's UUID, never read from the request and
+         *     never taken from a caller-supplied value, so this endpoint cannot be
+         *     steered at another object. `docs/10-security-privacy.md` keeps this object
+         *     coach-only: no player route signs it, and the published player clips of
+         *     Task 17 are separate objects entirely.
+         */
+        post: operations["create_playback_url_v1_videos__video_id__playback_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/videos/{video_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Timeline
+         * @description Signed sprite sheets plus the geometry that locates a timestamp.
+         *
+         *     The geometry is recomputed from the stored duration rather than read back
+         *     from the index object, so the API, the worker, and the browser cannot drift
+         *     apart: all three call the same pure function.
+         */
+        get: operations["read_timeline_v1_videos__video_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/videos/{video_id}/upload-abort": {
         parameters: {
             query?: never;
@@ -664,6 +714,31 @@ export interface components {
              */
             user_id: string;
         };
+        /**
+         * PlaybackUrl
+         * @description One short-lived, object-specific coach playback URL.
+         *
+         *     `docs/10-security-privacy.md` caps a coach URL at fifteen minutes. The
+         *     object is the coach-only `playback/{video_id}/coach-720p.mp4`; no player
+         *     endpoint ever returns it, and no request value chooses it.
+         */
+        PlaybackUrl: {
+            /** Duration Ms */
+            duration_ms: number;
+            /** Expires In */
+            expires_in: number;
+            /** Height */
+            height: number;
+            /** Url */
+            url: string;
+            /**
+             * Video Id
+             * Format: uuid
+             */
+            video_id: string;
+            /** Width */
+            width: number;
+        };
         /** PlayerCreate */
         PlayerCreate: {
             /** Display Name */
@@ -748,6 +823,13 @@ export interface components {
             /** Parts */
             parts: components["schemas"]["SignedPart"][];
         };
+        /** SpriteSheet */
+        SpriteSheet: {
+            /** Sheet */
+            sheet: number;
+            /** Url */
+            url: string;
+        };
         /** TeamBootstrap */
         TeamBootstrap: {
             /** Age Group */
@@ -793,6 +875,33 @@ export interface components {
              * Format: uuid
              */
             team_id: string;
+        };
+        /**
+         * Timeline
+         * @description Scrubber thumbnails: bounded sheets and a deterministic tile geometry.
+         */
+        Timeline: {
+            /** Columns */
+            columns: number;
+            /** Expires In */
+            expires_in: number;
+            /** Interval Ms */
+            interval_ms: number;
+            /** Rows */
+            rows: number;
+            /** Sheets */
+            sheets: components["schemas"]["SpriteSheet"][];
+            /** Tile Count */
+            tile_count: number;
+            /** Tile Height */
+            tile_height: number;
+            /** Tile Width */
+            tile_width: number;
+            /**
+             * Video Id
+             * Format: uuid
+             */
+            video_id: string;
         };
         /** UploadCompleted */
         UploadCompleted: {
@@ -1535,6 +1644,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VideoSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_playback_url_v1_videos__video_id__playback_url_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybackUrl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_timeline_v1_videos__video_id__timeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Timeline"];
                 };
             };
             /** @description Validation Error */
