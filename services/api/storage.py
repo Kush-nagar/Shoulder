@@ -118,6 +118,28 @@ def original_key(video_id: UUID, extension: str) -> str:
     return f"originals/{video_id}/source.{ALLOWED_MEDIA[extension][0]}"
 
 
+def playback_key(video_id: UUID) -> str:
+    """`playback/{video_id}/coach-720p.mp4` from `docs/02-architecture.md`.
+
+    Fully determined by a server-generated UUID, exactly like `original_key`.
+    Nothing a caller sends reaches this string, so a coach playback URL cannot
+    be steered at another object.
+    """
+    return f"playback/{video_id}/coach-720p.mp4"
+
+
+def sprite_key(video_id: UUID, sheet: int) -> str:
+    """`thumbs/{video_id}/sprite-{n}.jpg`. `sheet` is a bounded integer."""
+    if not 0 <= sheet <= 99:
+        raise StorageError("sprite sheet number is outside this timeline")
+    return f"thumbs/{video_id}/sprite-{sheet}.jpg"
+
+
+def thumbnail_index_key(video_id: UUID) -> str:
+    """`thumbs/{video_id}/index.json`, the durable timestamp index."""
+    return f"thumbs/{video_id}/index.json"
+
+
 def part_count(size_bytes: int) -> int:
     """Number of 32 MiB parts a file of this size needs, last part shorter."""
     return (size_bytes + PART_SIZE_BYTES - 1) // PART_SIZE_BYTES
@@ -309,6 +331,27 @@ def abort_multipart(key: str, upload_id: str) -> None:
         # coach the attempt was abandoned while it kept accruing storage.
         if error.code not in ABSENT_CODES:
             raise
+
+
+def download_object(key: str, destination: str) -> None:
+    """Fetch one object to a task-scoped path the caller owns.
+
+    The worker is the only caller: `docs/02-architecture.md` keeps video bytes
+    out of FastAPI, and nothing in the request path imports this. `destination`
+    is always built from `tempfile.mkdtemp`, never from a request.
+    """
+    _call("download_file", Bucket=bucket(), Key=key, Filename=destination)
+
+
+def upload_object(key: str, source: str, content_type: str) -> None:
+    """Store one derived object. `key` comes from this module, never a caller."""
+    _call(
+        "upload_file",
+        Bucket=bucket(),
+        Key=key,
+        Filename=source,
+        ExtraArgs={"ContentType": content_type},
+    )
 
 
 def head_object(key: str) -> int | None:

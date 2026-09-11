@@ -63,7 +63,7 @@ VIDEO_COLUMNS = """
 """
 # Operational columns the service needs and no response model contains.
 VIDEO_INTERNAL = f"""
-    SELECT {VIDEO_COLUMNS}, v.original_key, v.multipart_upload_id,
+    SELECT {VIDEO_COLUMNS}, v.original_key, v.playback_key, v.multipart_upload_id,
         private.is_video_coach(v.id) AS is_coach
     FROM app.video v WHERE v.id = :video_id
 """

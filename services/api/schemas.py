@@ -318,3 +318,38 @@ class UploadCompleted(BaseModel):
     status: VideoStatus
     upload_completed_at: datetime
     source_expires_at: datetime
+
+
+class PlaybackUrl(BaseModel):
+    """One short-lived, object-specific coach playback URL.
+
+    `docs/10-security-privacy.md` caps a coach URL at fifteen minutes. The
+    object is the coach-only `playback/{video_id}/coach-720p.mp4`; no player
+    endpoint ever returns it, and no request value chooses it.
+    """
+
+    video_id: UUID
+    url: str
+    expires_in: int
+    duration_ms: int
+    width: int
+    height: int
+
+
+class SpriteSheet(BaseModel):
+    sheet: int
+    url: str
+
+
+class Timeline(BaseModel):
+    """Scrubber thumbnails: bounded sheets and a deterministic tile geometry."""
+
+    video_id: UUID
+    expires_in: int
+    tile_width: int
+    tile_height: int
+    columns: int
+    rows: int
+    interval_ms: int
+    tile_count: int
+    sheets: list[SpriteSheet]

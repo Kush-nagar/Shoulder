@@ -37,6 +37,19 @@ class QueueError(Exception):
     """The queue could not be reached or answered."""
 
 
+class Cancelled(Exception):
+    """A handler saw `keep_going()` return False and stopped.
+
+    It carries no reason on purpose. A handler cannot tell a cancellation from
+    a shutdown or a lost lease, so `Worker.stopped_early` reads the row and
+    decides which of those actually happened.
+
+    Defined here rather than in `services/worker/main.py` so a handler module
+    can raise it without importing the module that imports the handlers.
+    `main.Cancelled` remains the same class.
+    """
+
+
 @dataclass(frozen=True)
 class Job:
     """One claimed job. `attempts` already counts this attempt."""

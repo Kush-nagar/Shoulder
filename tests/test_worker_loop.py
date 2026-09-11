@@ -36,10 +36,13 @@ class WorkerLoopTests(VideoWorld):
         self.addCleanup(jobs.get_engine.cache_clear)
         self.clear_queue()
         self.loop = Worker("loop-worker")
-        # A handler registry the test owns; production registers none in this
-        # block, and the claim query filters on exactly this set.
+        # A handler registry the test owns, emptied for the test and restored
+        # afterwards. The claim query filters on exactly this set, and the
+        # production registry (`transcode`, `thumbnail`) must survive the suite.
+        registry = patch.dict(worker_main.HANDLERS, {}, clear=True)
+        registry.start()
+        self.addCleanup(registry.stop)
         self.handlers = worker_main.HANDLERS
-        self.addCleanup(self.handlers.clear)
 
     def clear_queue(self) -> None:
         from sqlalchemy import text
