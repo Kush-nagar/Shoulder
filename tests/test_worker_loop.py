@@ -10,6 +10,7 @@ Requires migration `0005` and the URLs `scripts/check-db.ps1` provides.
 
 import os
 import sys
+import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -21,7 +22,7 @@ sys.path.append(str(Path(__file__).resolve().parent))
 
 from test_database_video import VideoWorld  # noqa: E402
 
-from services.worker import jobs  # noqa: E402
+from services.worker import jobs, media  # noqa: E402
 from services.worker import main as worker_main  # noqa: E402
 from services.worker.main import Cancelled, Worker  # noqa: E402
 
@@ -36,10 +37,13 @@ class WorkerLoopTests(VideoWorld):
         self.addCleanup(jobs.get_engine.cache_clear)
         self.clear_queue()
         self.loop = Worker("loop-worker")
-        # A handler registry the test owns; production registers none in this
-        # block, and the claim query filters on exactly this set.
+        # A handler registry the test owns, emptied for the test and restored
+        # afterwards. The claim query filters on exactly this set, and the
+        # production registry (`transcode`, `thumbnail`) must survive the suite.
+        registry = patch.dict(worker_main.HANDLERS, {}, clear=True)
+        registry.start()
+        self.addCleanup(registry.stop)
         self.handlers = worker_main.HANDLERS
-        self.addCleanup(self.handlers.clear)
 
     def clear_queue(self) -> None:
         from sqlalchemy import text
@@ -137,6 +141,63 @@ class WorkerLoopTests(VideoWorld):
         # The stored text is fixed; nothing from the exception reaches the row.
         self.assertNotIn("originals/", row.error_message)
         self.assertNotIn("s3://", row.error_message)
+
+    def test_a_long_blocking_operation_heartbeats_and_keeps_its_lease(self) -> None:
+        """A media call exceeding the 120s lease must not let it expire.
+
+        `docs/02-architecture.md`: "The worker heartbeats during ffmpeg work."
+        This drives `media._run_with_heartbeat` through the real `keep_going`
+        closure `Worker.execute` builds, against the real queue, and proves
+        two things a lease-timeout increase would not: the heartbeat actually
+        advances more than once while a blocking subprocess runs, and a second
+        worker's `claim` sees nothing available for the whole duration.
+        `HEARTBEAT_SECONDS`/`POLL_SECONDS` are patched small so this stays a
+        fast unit-speed test rather than waiting out a real lease.
+        """
+        job_id = self.enqueue()
+
+        def handler(job: jobs.Job, keep_going: Callable[[float | None], bool]) -> None:
+            # A child that blocks without writing anything, the exact shape
+            # `_run_with_heartbeat` exists to survive: a plain blocking read
+            # of its stdout would never notice the deadline or a lost lease.
+            argv = [sys.executable, "-c", "import time; time.sleep(0.6)"]
+            media._run_with_heartbeat(argv, 30, keep_going)
+
+        self.handlers["transcode"] = handler
+
+        with (
+            patch.object(jobs, "HEARTBEAT_SECONDS", 0.05),
+            patch.object(media, "POLL_SECONDS", 0.05),
+        ):
+            job = jobs.claim(self.loop.identity, ("transcode",))
+            assert job is not None
+            self.assertEqual(job.id, job_id)
+
+            heartbeats: list[Any] = []
+            stolen: list[Any] = []
+            done = threading.Event()
+
+            def watch() -> None:
+                while not done.is_set():
+                    heartbeats.append(self.job_row(job_id).heartbeat_at)
+                    stolen.append(jobs.claim("thief-worker", ("transcode",)))
+                    done.wait(0.05)
+
+            watcher = threading.Thread(target=watch)
+            watcher.start()
+            self.loop.execute(job)
+            done.set()
+            watcher.join(timeout=5)
+
+        self.assertEqual(self.job_row(job_id).status, "succeeded")
+        self.assertTrue(
+            all(claimed is None for claimed in stolen),
+            "a concurrent worker claimed a job whose lease was still heartbeating",
+        )
+        distinct = {beat for beat in heartbeats if beat is not None}
+        self.assertGreaterEqual(
+            len(distinct), 2, "the lease's heartbeat never advanced during the work"
+        )
 
     def test_a_worker_with_no_handler_claims_nothing_at_all(self) -> None:
         """The claim query filters on registered kinds, so nothing is touched."""

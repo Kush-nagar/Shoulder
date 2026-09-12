@@ -17,6 +17,8 @@ export type BulkResult = Schema["BulkResult"];
 export type Game = Schema["Game"];
 export type GamePage = Schema["GamePage"];
 export type VideoSummary = Schema["VideoSummary"];
+export type PlaybackUrl = Schema["PlaybackUrl"];
+export type Timeline = Schema["Timeline"];
 export type InviteResult = Schema["InviteResult"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */

@@ -21,13 +21,16 @@ against Git and GitHub before editing anything.
 
 ### Environment limitations on this workstation
 
-- **Firefox browser tests cannot run locally.** Windows Smart App Control is
-  enforcing (`VerifiedAndReputablePolicyState = 1`) and blocks Mozilla's
-  `lgpllibs.dll`: `LoadLibrary` returns 4551, "An Application Control policy has
-  blocked this file." A clean Playwright reinstall does not change it. Chromium
-  and WebKit pass. GitHub CI runs all three engines on Ubuntu and is green, so
-  the matrix is still verified — just not on this machine. No security policy
-  was disabled, changed, or bypassed.
+- **Firefox browser tests were blocked locally, and are not currently.** Windows
+  Smart App Control was enforcing (`VerifiedAndReputablePolicyState = 1`) and
+  blocked Mozilla's `lgpllibs.dll`: `LoadLibrary` returned 4551, "An Application
+  Control policy has blocked this file," which a clean Playwright reinstall did
+  not change. On 2026-09-12 Firefox ran and passed locally — the browser smoke
+  suite and the full `tests/player.spec.mjs` matrix — so the block is not
+  currently in effect. Nothing here changed Windows policy or the Playwright
+  install, so what lifted it is not established; left recorded rather than
+  deleted in case it returns. No security policy was disabled, changed, or
+  bypassed at any point.
 - **`Shoulder Dev` is IPv6-only** (`db.gzbwlancwxhtausyokxt.supabase.co` →
   `2600:1f10:4d85:4400::daa0`). This workstation's IPv6 path to it is
   intermittent; Alembic reached it, and minutes later TCP 5432 did not. Remote

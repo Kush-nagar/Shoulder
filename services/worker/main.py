@@ -6,10 +6,10 @@ for that kind, heartbeats while it works, and records a terminal or retryable
 outcome. `docs/02-architecture.md` puts it on its own machine with ffmpeg; the
 claim mechanics live in `services/worker/jobs.py`.
 
-Block 02 registers no production handler. Task 11 registers `transcode` and
-Task 12 registers `thumbnail`. Until then `HANDLERS` is empty, the claim query
-matches no kind, and the rows enqueued at upload completion wait in the queue
-instead of failing: an unimplemented kind must not burn a job's attempts.
+`HANDLERS` is the registry the claim query filters on: a worker never claims
+work it cannot run, so an unimplemented kind waits in the queue instead of
+failing. Tasks 11 and 12 register `transcode` and `thumbnail` from
+`services/worker/media.py`.
 """
 
 import logging
@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable
 from uuid import uuid4
 
-from services.worker import jobs
+from services.worker import jobs, media
 
 logger = logging.getLogger("shoulder.worker")
 
@@ -29,19 +29,17 @@ logger = logging.getLogger("shoulder.worker")
 # poll: it returns False when the worker should stop, either because the lease
 # was lost or because cancellation was requested.
 Handler = Callable[[jobs.Job, Callable[[float | None], bool]], None]
-HANDLERS: dict[str, Handler] = {}
+# Tasks 11 and 12 register `transcode` and `thumbnail`. A kind with no handler
+# here is never claimed, so it waits in the queue instead of burning attempts.
+HANDLERS: dict[str, Handler] = dict(media.HANDLERS)
 
 IDLE_SLEEP_SECONDS = 2.0
 SWEEP_INTERVAL_SECONDS = 30.0
 
-
-class Cancelled(Exception):
-    """A handler saw `keep_going()` return False and stopped.
-
-    It carries no reason on purpose. A handler cannot tell a cancellation from
-    a shutdown or a lost lease, so `Worker.stopped_early` reads the row and
-    decides which of those actually happened.
-    """
+# The signal a handler raises when `keep_going()` goes false. It lives in
+# `services/worker/jobs.py` so a handler module can raise it without importing
+# this one; `main.Cancelled` is unchanged.
+Cancelled = jobs.Cancelled
 
 
 def worker_id() -> str:

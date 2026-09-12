@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
+from services import timeline as timeline_geometry
 from services.api import storage
 from services.api.auth import authenticated_identity
 from services.api.db import user_transaction
@@ -37,9 +38,12 @@ from services.api.schemas import (
     Game,
     GameCreate,
     GamePage,
+    PlaybackUrl,
     SignedPart,
     SignedParts,
     SignPartsRequest,
+    SpriteSheet,
+    Timeline,
     UploadCompleted,
     UploadCreate,
     UploadedPart,
@@ -63,7 +67,7 @@ VIDEO_COLUMNS = """
 """
 # Operational columns the service needs and no response model contains.
 VIDEO_INTERNAL = f"""
-    SELECT {VIDEO_COLUMNS}, v.original_key, v.multipart_upload_id,
+    SELECT {VIDEO_COLUMNS}, v.original_key, v.playback_key, v.multipart_upload_id,
         private.is_video_coach(v.id) AS is_coach
     FROM app.video v WHERE v.id = :video_id
 """
@@ -742,3 +746,105 @@ def read_video(
     with user_transaction(user_id) as connection:
         row = require_coach(load_video(connection, video_id))
     return video_summary(row)
+
+
+def require_ready(video: Any) -> Any:
+    """A coach can only watch a video the worker has finished preparing.
+
+    `docs/05-ui.md` shows plain processing stages rather than a broken player,
+    so an unprepared video is a 409 the screen can name, not a 404 that would
+    imply the match does not exist.
+    """
+    if video.status != "ready":
+        raise Problem(
+            409,
+            "Shoulder is still preparing this video.",
+            "video-not-ready",
+        )
+    return video
+
+
+@router.post(
+    "/videos/{video_id}/playback-url",
+    response_model=PlaybackUrl,
+    dependencies=PRIVATE,
+)
+def create_playback_url(
+    video_id: UUID,
+    user_id: Annotated[str, Depends(authenticated_identity)],
+) -> PlaybackUrl:
+    """Sign the coach-only playback object for fifteen minutes.
+
+    The key is derived from the video's UUID, never read from the request and
+    never taken from a caller-supplied value, so this endpoint cannot be
+    steered at another object. `docs/10-security-privacy.md` keeps this object
+    coach-only: no player route signs it, and the published player clips of
+    Task 17 are separate objects entirely.
+    """
+    with user_transaction(user_id) as connection:
+        video = require_ready(require_coach(load_video(connection, video_id)))
+    try:
+        url = storage.sign_get(storage.playback_key(video_id), storage.GET_URL_SECONDS)
+    except storage.StorageError:
+        raise storage_unavailable() from None
+    return PlaybackUrl(
+        video_id=video_id,
+        url=url,
+        expires_in=storage.GET_URL_SECONDS,
+        duration_ms=video.duration_ms,
+        width=video.width,
+        height=video.height,
+    )
+
+
+@router.get(
+    "/videos/{video_id}/timeline",
+    response_model=Timeline,
+    dependencies=PRIVATE,
+)
+def read_timeline(
+    video_id: UUID,
+    user_id: Annotated[str, Depends(authenticated_identity)],
+) -> Timeline:
+    """Signed sprite sheets plus the geometry that locates a timestamp.
+
+    The geometry is recomputed from the stored duration rather than read back
+    from the index object, so the API, the worker, and the browser cannot drift
+    apart: all three call the same pure function.
+    """
+    with user_transaction(user_id) as connection:
+        video = require_ready(require_coach(load_video(connection, video_id)))
+    layout = timeline_geometry.sprite_layout(video.duration_ms)
+    try:
+        # `transcode` marks a video ready on its own, and the thumbnail job is
+        # a separate queue entry that may not have run yet. Signing sheets that
+        # do not exist would hand the scrubber a row of URLs that 404 with no
+        # way to tell why, so the published index is the readiness signal.
+        if storage.head_object(storage.thumbnail_index_key(video_id)) is None:
+            raise Problem(
+                409,
+                "Shoulder is still building this match timeline.",
+                "timeline-not-ready",
+            )
+        sheets = [
+            SpriteSheet(
+                sheet=sheet,
+                url=storage.sign_get(
+                    storage.sprite_key(video_id, sheet), storage.GET_URL_SECONDS
+                ),
+            )
+            for sheet in range(layout.sheet_count)
+        ]
+    except storage.StorageError:
+        raise storage_unavailable() from None
+    return Timeline(
+        video_id=video_id,
+        expires_in=storage.GET_URL_SECONDS,
+        tile_width=layout.tile_width,
+        tile_height=layout.tile_height,
+        columns=layout.columns,
+        rows=layout.rows,
+        interval_ms=layout.interval_ms,
+        tile_count=layout.tile_count,
+        sheets=sheets,
+    )

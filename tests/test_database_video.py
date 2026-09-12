@@ -520,16 +520,62 @@ class WorkerRoleTests(VideoWorld):
                     INSUFFICIENT_PRIVILEGE,
                 )
 
-    def test_the_worker_cannot_write_a_storage_key(self) -> None:
-        """Task 11 widens this grant when it has a playback object to name."""
+    def test_the_worker_cannot_retarget_the_source_object(self) -> None:
+        """`original_key` has no UPDATE grant on any runtime role, ever.
+
+        This replaces an earlier assertion that the worker could write no
+        storage key at all. That expectation was written when nothing produced
+        a playback object and it named its own successor: "Task 11 widens this
+        grant when it has a playback object to name." Migration `0006` is that
+        widening, so `playback_key` is now writable by the worker that creates
+        the object.
+
+        The property that must still hold is narrower and more important. The
+        source upload is the full match; `original_key` is the column that
+        decides which source object exists, and no runtime role may rewrite it.
+        `playback_key` is safe to grant because the API never reads a key from
+        a row when signing: `create_playback_url` derives the key from the
+        video's UUID, so a bad value in that column cannot retarget a coach URL.
+        """
         self.assertEqual(
             self.worker_refused(
-                "UPDATE app.video SET playback_key = 'playback/x/coach-720p.mp4'"
+                "UPDATE app.video SET original_key = 'originals/other/source.mp4'"
                 " WHERE id = :id",
                 id=self.video_a,
             ),
             INSUFFICIENT_PRIVILEGE,
         )
+
+    def test_the_worker_writes_only_the_columns_its_work_produces(self) -> None:
+        """The `0006` widening is bounded: probe results and playback, no more."""
+        with self.admin.connect() as connection:
+            granted = {
+                row[0]
+                for row in connection.execute(
+                    text("""
+                        SELECT column_name FROM information_schema.column_privileges
+                        WHERE table_schema = 'app' AND table_name = 'video'
+                          AND grantee = 'shoulder_worker'
+                          AND privilege_type = 'UPDATE'
+                    """)
+                ).all()
+            }
+        self.assertEqual(
+            granted,
+            {
+                "status",
+                "ready_at",
+                "playback_key",
+                "duration_ms",
+                "width",
+                "height",
+                "fps",
+                "first_terminal_failure_at",
+            },
+        )
+        # The two columns that must never be worker-writable.
+        self.assertNotIn("original_key", granted)
+        self.assertNotIn("game_id", granted)
 
     def test_the_worker_has_no_private_helper_access(self) -> None:
         self.assertEqual(

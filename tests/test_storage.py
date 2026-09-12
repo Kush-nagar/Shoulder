@@ -12,10 +12,13 @@ expired URL fails.
 
 import hashlib
 import os
+import shutil
+import tempfile
 import time
 import traceback
 import unittest
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -435,6 +438,167 @@ class StorageTests(unittest.TestCase):
         self.uploads = [entry for entry in self.uploads if entry[1] != upload_id]
         self.addCleanup(self.delete_object, key)
         return key
+
+
+@unittest.skipUnless(CONFIGURED, "object storage is not configured")
+class TransferTests(unittest.TestCase):
+    """`download_object`/`upload_object`: the worker's heartbeat-carrying I/O.
+
+    `services/worker/media.py` threads its `keep_going` lease heartbeat
+    through `report` here, so a multi-gigabyte transfer cannot hold a job's
+    lease hostage. `TRANSFER_CHUNK_BYTES` is patched small so these prove the
+    chunk/part boundary and the cancellation path without moving megabytes.
+    """
+
+    def setUp(self) -> None:
+        storage.get_client.cache_clear()
+        self.addCleanup(storage.get_client.cache_clear)
+        self.dir = Path(tempfile.mkdtemp(prefix="shoulder-transfer-test-"))
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.keys: list[str] = []
+        self.addCleanup(self.discard_keys)
+
+    def discard_keys(self) -> None:
+        for key in self.keys:
+            try:
+                storage.get_client().delete_object(Bucket=storage.bucket(), Key=key)
+            except Exception:  # noqa: BLE001 - cleanup is best effort
+                pass
+
+    def object_key(self) -> str:
+        key = f"tests/transfers/{uuid.uuid4()}.bin"
+        self.keys.append(key)
+        return key
+
+    def put_object(self, key: str, size: int) -> None:
+        storage.get_client().put_object(
+            Bucket=storage.bucket(),
+            Key=key,
+            Body=b"x" * size,
+            ContentType="application/octet-stream",
+        )
+
+    # --- download -----------------------------------------------------
+
+    def test_a_download_reports_liveness_once_per_chunk(self) -> None:
+        with patch.object(storage, "TRANSFER_CHUNK_BYTES", 1024):
+            key = self.object_key()
+            self.put_object(key, 1024 * 3 + 17)
+            calls: list[float | None] = []
+
+            def report(progress: float | None = None) -> bool:
+                calls.append(progress)
+                return True
+
+            destination = self.dir / "downloaded.bin"
+            storage.download_object(key, str(destination), report=report)
+            self.assertEqual(destination.stat().st_size, 1024 * 3 + 17)
+            # Three full chunks plus a short one: four reads, four reports.
+            self.assertEqual(len(calls), 4)
+            # A chunk count is not the job's semantic progress, so this never
+            # carries a fraction, only a liveness ping.
+            self.assertTrue(all(value is None for value in calls))
+
+    def test_a_download_needs_no_report_at_all(self) -> None:
+        key = self.object_key()
+        self.put_object(key, 4096)
+        destination = self.dir / "plain.bin"
+        storage.download_object(key, str(destination))
+        self.assertEqual(destination.stat().st_size, 4096)
+
+    def test_a_refused_continuation_aborts_the_download(self) -> None:
+        """Cancellation and shutdown both arrive as `report()` going false."""
+        with patch.object(storage, "TRANSFER_CHUNK_BYTES", 1024):
+            key = self.object_key()
+            self.put_object(key, 1024 * 4)
+            calls = {"n": 0}
+
+            def stop(progress: float | None = None) -> bool:
+                calls["n"] += 1
+                return calls["n"] < 2
+
+            destination = self.dir / "stopped.bin"
+            with self.assertRaises(storage.TransferAborted):
+                storage.download_object(key, str(destination), report=stop)
+            # The abort fires after the second chunk lands, before the fourth.
+            self.assertLess(destination.stat().st_size, 1024 * 4)
+
+    # --- upload ---------------------------------------------------------
+
+    def test_a_small_file_uploads_in_a_single_put(self) -> None:
+        with patch.object(storage, "TRANSFER_CHUNK_BYTES", 1024):
+            source = self.dir / "small.bin"
+            source.write_bytes(b"a" * 512)
+            key = self.object_key()
+            calls: list[float | None] = []
+
+            def report(progress: float | None = None) -> bool:
+                calls.append(progress)
+                return True
+
+            storage.upload_object(
+                key, str(source), "application/octet-stream", report=report
+            )
+            self.assertEqual(storage.head_object(key), 512)
+            # At or under the chunk size: one upfront liveness check, no parts.
+            self.assertEqual(calls, [None])
+
+    def test_a_large_file_uploads_as_multipart_and_the_object_matches(self) -> None:
+        """Real part sizes, not the patched-small ones the other tests use.
+
+        S3 (and MinIO) reject `CompleteMultipartUpload` when any part but the
+        last is under 5 MiB, so this exercises the real
+        `TRANSFER_CHUNK_BYTES` rather than shrinking it — the whole point of
+        the assertion below is that completion actually succeeds.
+        """
+        source = self.dir / "large.bin"
+        chunk = storage.TRANSFER_CHUNK_BYTES
+        with open(source, "wb") as handle:
+            handle.write(b"a" * chunk)
+            handle.write(b"b" * chunk)
+            handle.write(b"c" * 17)
+        size = chunk * 2 + 17
+        key = self.object_key()
+        calls: list[float | None] = []
+
+        def report(progress: float | None = None) -> bool:
+            calls.append(progress)
+            return True
+
+        storage.upload_object(
+            key, str(source), "application/octet-stream", report=report
+        )
+        self.assertEqual(storage.head_object(key), size)
+        fetched = httpx.get(storage.sign_get(key), timeout=TIMEOUT)
+        self.assertEqual(len(fetched.content), size)
+        self.assertEqual(fetched.content[:8], b"aaaaaaaa")
+        self.assertEqual(fetched.content[-8:], b"cccccccc")
+        # One report per part: two full parts and one short final part.
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(value is None for value in calls))
+
+    def test_a_refused_continuation_aborts_the_multipart_upload(self) -> None:
+        """A lost lease mid-upload must not leave storage silently paying for it."""
+        with patch.object(storage, "TRANSFER_CHUNK_BYTES", 1024):
+            source = self.dir / "cancel.bin"
+            source.write_bytes(b"a" * (1024 * 3))
+            key = self.object_key()
+            calls = {"n": 0}
+
+            def stop(progress: float | None = None) -> bool:
+                calls["n"] += 1
+                return calls["n"] < 2
+
+            with patch.object(
+                storage, "abort_multipart", wraps=storage.abort_multipart
+            ) as spy:
+                with self.assertRaises(storage.TransferAborted):
+                    storage.upload_object(
+                        key, str(source), "application/octet-stream", report=stop
+                    )
+                spy.assert_called_once()
+            # Never assembled: the object storage would otherwise keep forever.
+            self.assertIsNone(storage.head_object(key))
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience
