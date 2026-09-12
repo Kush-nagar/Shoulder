@@ -337,10 +337,15 @@ class SpriteTests(unittest.TestCase):
                 child.rmdir()
         self.dir.rmdir()
 
+    def keep_going(self, progress: float | None = None) -> bool:
+        return True
+
     def test_a_clip_produces_the_sheets_its_geometry_predicts(self) -> None:
         source = generate(self.dir / "sprite.mp4", seconds=6, size="640x360")
         layout = timeline.sprite_layout(media.probe(str(source)).duration_ms)
-        sheets = media.sprite_sheets(str(source), str(self.dir), layout)
+        sheets = media.sprite_sheets(
+            str(source), str(self.dir), layout, self.keep_going
+        )
         self.assertEqual(len(sheets), layout.sheet_count)
         for sheet in sheets:
             self.assertTrue(Path(sheet).is_file())

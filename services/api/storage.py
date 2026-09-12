@@ -12,6 +12,7 @@ caller's filename never reaches a key, a path, or a command.
 
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -78,6 +79,35 @@ class StorageError(Exception):
 # S3 codes meaning the multipart upload or object is simply not there. Anything
 # else is an outage, a refusal, or a bug, and must not be read as success.
 ABSENT_CODES = frozenset({"NoSuchUpload", "NoSuchKey", "NoSuchBucket", "404"})
+
+# `report` is the worker's `keep_going`, threaded through a transfer so a
+# multi-gigabyte object cannot hold the 120-second queue lease hostage. It
+# never carries a real fraction here — chunk counts are not the job's
+# semantic progress — so `keep_going`'s own throttle bounds how often this
+# actually writes a heartbeat.
+Report = Callable[[float | None], bool]
+
+# Chunk size for worker-side transfers (the original download, derived
+# uploads). Independent of `PART_SIZE_BYTES`, which is the browser multipart
+# part size Task 8 negotiates over presigned URLs; this one only has to give
+# `report` a chance to run between chunks, so it does not need to match.
+TRANSFER_CHUNK_BYTES = 8 * 1024 * 1024
+
+
+class TransferAborted(Exception):
+    """`report` returned False during a transfer.
+
+    Deliberately not a `StorageError`: storage refused nothing here, the
+    caller asked to stop. Keeping it a separate type means the broad
+    `except StorageError` blocks elsewhere in this module and in
+    `services/api/video.py` cannot mistake a cancellation for a storage
+    failure and, for uploads, skip the multipart abort this triggers.
+    """
+
+
+def _checked(report: Report | None) -> bool:
+    """True to keep going. No `report` means the caller wants no heartbeat."""
+    return report is None or report(None)
 
 
 @dataclass(frozen=True)
@@ -333,25 +363,102 @@ def abort_multipart(key: str, upload_id: str) -> None:
             raise
 
 
-def download_object(key: str, destination: str) -> None:
-    """Fetch one object to a task-scoped path the caller owns.
+def download_object(key: str, destination: str, report: Report | None = None) -> None:
+    """Fetch one object to a task-scoped path the caller owns, in chunks.
 
     The worker is the only caller: `docs/02-architecture.md` keeps video bytes
     out of FastAPI, and nothing in the request path imports this. `destination`
     is always built from `tempfile.mkdtemp`, never from a request.
+
+    Streamed rather than handed to boto3's managed transfer so `report` runs
+    between chunks: an accepted original can be up to `MAX_UPLOAD_BYTES`,
+    comfortably longer than one queue lease to transfer, and a single blocking
+    call would give the worker no chance to heartbeat or notice cancellation
+    until the whole file arrived.
     """
-    _call("download_file", Bucket=bucket(), Key=key, Filename=destination)
+    response = _call("get_object", Bucket=bucket(), Key=key)
+    body = response["Body"]
+    try:
+        with open(destination, "wb") as handle:
+            while True:
+                try:
+                    chunk = body.read(TRANSFER_CHUNK_BYTES)
+                except (ClientError, BotoCoreError) as error:
+                    code = error_code(error)
+                    logger.warning("storage download failed: %s", code)
+                    raise StorageError("storage download failed", code) from None
+                if not chunk:
+                    break
+                handle.write(chunk)
+                if not _checked(report):
+                    raise TransferAborted("download cancelled")
+    finally:
+        body.close()
 
 
-def upload_object(key: str, source: str, content_type: str) -> None:
-    """Store one derived object. `key` comes from this module, never a caller."""
-    _call(
-        "upload_file",
-        Bucket=bucket(),
-        Key=key,
-        Filename=source,
-        ExtraArgs={"ContentType": content_type},
-    )
+def upload_object(
+    key: str, source: str, content_type: str, report: Report | None = None
+) -> None:
+    """Store one derived object. `key` comes from this module, never a caller.
+
+    A file at or under `TRANSFER_CHUNK_BYTES` goes up in one `put_object`,
+    which is already fast enough at that size not to need a mid-transfer
+    heartbeat. A larger one — the coach playback file can be several hundred
+    megabytes to a few gigabytes — uses a worker-managed multipart upload, the
+    same primitives the browser's resumable upload uses, so `report` runs
+    between parts and a lost lease aborts the upload rather than finishing it
+    unheard.
+    """
+    size = os.path.getsize(source)
+    if size <= TRANSFER_CHUNK_BYTES:
+        if not _checked(report):
+            raise TransferAborted("upload cancelled")
+        with open(source, "rb") as handle:
+            _call(
+                "put_object",
+                Bucket=bucket(),
+                Key=key,
+                Body=handle,
+                ContentType=content_type,
+            )
+        return
+
+    upload_id = create_multipart(key, content_type)
+    parts: list[StoredPart] = []
+    try:
+        with open(source, "rb") as handle:
+            part_number = 1
+            while True:
+                chunk = handle.read(TRANSFER_CHUNK_BYTES)
+                if not chunk:
+                    break
+                response = _call(
+                    "upload_part",
+                    Bucket=bucket(),
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumber=part_number,
+                    Body=chunk,
+                )
+                parts.append(
+                    StoredPart(
+                        part_number=part_number,
+                        etag=str(response["ETag"]).strip('"'),
+                        size_bytes=len(chunk),
+                    )
+                )
+                part_number += 1
+                if not _checked(report):
+                    raise TransferAborted("upload cancelled")
+        complete_multipart(key, upload_id, parts)
+    except Exception:
+        # Best effort: an aborted upload that fails to abort is still cleaned
+        # up by the abandoned-upload sweep in `docs/10-security-privacy.md`.
+        try:
+            abort_multipart(key, upload_id)
+        except StorageError:
+            pass
+        raise
 
 
 def head_object(key: str) -> int | None:

@@ -27,9 +27,11 @@ Safety rules this module exists to keep (`docs/10-security-privacy.md`):
 import json
 import logging
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -78,6 +80,10 @@ PROBE_TIMEOUT_SECONDS = 60
 MIN_ENCODE_TIMEOUT_SECONDS = 900
 ENCODE_TIMEOUT_FACTOR = 6
 ENCODE_THREADS = "2"
+# `docs/02-architecture.md`: "The worker heartbeats during ffmpeg work." A tool
+# that stalls without writing a line must still be checked this often, so a
+# dead or hung process cannot hold the job's lease past its heartbeat window.
+POLL_SECONDS = 5.0
 
 # --- Sprite output. The geometry itself lives in `services/timeline.py`,
 # because the API has to describe the same layout without rendering it.
@@ -122,13 +128,19 @@ def ffmpeg_available() -> bool:
 
 
 def _run(argv: list[str], timeout: int) -> str:
-    """One tool invocation: no shell, no stdin, bounded time, captured output."""
+    """One tool invocation: no shell, no stdin, bounded time, captured output.
+
+    Only stdout is captured (ffprobe's small JSON report); stderr is discarded
+    rather than buffered, so a tool that writes a large or unbounded amount of
+    diagnostic text there cannot grow this process's memory.
+    """
     try:
         finished = subprocess.run(  # noqa: S603 - fixed argv, shell=False
             argv,
             shell=False,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             timeout=timeout,
             check=False,
@@ -331,37 +343,111 @@ def transcode(source: str, destination: str, media: Probe, report: Progress) -> 
     _encode(argv, media.duration_ms, report)
 
 
+def _out_time_fraction(line: str, duration_ms: int) -> float | None:
+    """One `-progress pipe:1` line to a bounded fraction, or None if it is not
+
+    the `out_time_us` line. No ffmpeg text is stored, logged, or forwarded;
+    only this one bounded number ever reaches `report`.
+    """
+    if not line.startswith("out_time_us="):
+        return None
+    done = _rational(line.split("=", 1)[1].strip()) / 1000.0
+    return min(1.0, max(0.0, done / duration_ms)) if duration_ms else 0.0
+
+
 def _encode(argv: list[str], duration_ms: int, report: Progress) -> None:
     """Run ffmpeg, forwarding sanitized progress and honouring cancellation."""
     timeout = max(
         MIN_ENCODE_TIMEOUT_SECONDS, duration_ms // 1000 * ENCODE_TIMEOUT_FACTOR
     )
+    _run_with_heartbeat(
+        argv,
+        timeout,
+        report,
+        parse_progress=lambda line: _out_time_fraction(line, duration_ms),
+    )
+
+
+def _run_with_heartbeat(
+    argv: list[str],
+    timeout: int,
+    report: Progress,
+    parse_progress: Callable[[str], float | None] | None = None,
+) -> None:
+    """Run one tool, polling so a heartbeat and the deadline both run even if
+
+    the tool blocks without writing anything. `docs/02-architecture.md`: "The
+    worker heartbeats during ffmpeg work." A plain `for line in process.stdout`
+    blocks until a line arrives, so a stalled tool would silently hold the
+    lease; reading through a background thread and a queue with a bounded
+    `get` timeout means this loop always wakes up at least every
+    `POLL_SECONDS` to call `report` and check the deadline.
+
+    `parse_progress`, given for the transcode's `-progress pipe:1` output,
+    turns one stdout line into a fraction; every line still triggers a
+    liveness `report(None)` when it is not a progress line, matching what a
+    line-at-a-time reader always did. Without it (sprite generation has no
+    machine-readable progress), stdout is discarded and only the poll
+    interval reports liveness.
+    """
     deadline = time.monotonic() + timeout
     try:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, shell=False
             argv,
             shell=False,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if parse_progress else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             text=True,
         )
     except OSError:
         raise MediaError("The video tools are not available on this worker.") from None
-    try:
+
+    lines: queue.Queue[str | None] | None = None
+    reader: threading.Thread | None = None
+    if parse_progress is not None:
         assert process.stdout is not None
-        for line in process.stdout:
-            # Only `out_time_us` is read, and only as a bounded fraction. No
-            # ffmpeg text is stored, logged, or forwarded.
-            if line.startswith("out_time_us="):
-                done = _rational(line.split("=", 1)[1].strip()) / 1000.0
-                fraction = (
-                    min(1.0, max(0.0, done / duration_ms)) if duration_ms else 0.0
-                )
-                if not report(round(fraction, 3)):
-                    raise _Stopped
-            elif not report(None):
-                raise _Stopped
+        stdout = process.stdout
+        lines = queue.Queue()
+        pending = lines
+
+        def _read() -> None:
+            try:
+                for raw_line in stdout:
+                    pending.put(raw_line)
+            finally:
+                pending.put(None)  # end-of-stream sentinel
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+
+    try:
+        while True:
+            if lines is not None:
+                try:
+                    line = lines.get(timeout=POLL_SECONDS)
+                except queue.Empty:
+                    if not report(None):
+                        raise _Stopped
+                    line = ""
+                if line is None:
+                    break
+                if line:
+                    fraction = parse_progress(line) if parse_progress else None
+                    ok = (
+                        report(round(fraction, 3))
+                        if fraction is not None
+                        else report(None)
+                    )
+                    if not ok:
+                        raise _Stopped
+            else:
+                try:
+                    process.wait(timeout=POLL_SECONDS)
+                    break
+                except subprocess.TimeoutExpired:
+                    if not report(None):
+                        raise _Stopped
             if time.monotonic() > deadline:
                 raise MediaError("Preparing this video took too long.")
     except _Stopped:
@@ -373,8 +459,10 @@ def _encode(argv: list[str], duration_ms: int, report: Progress) -> None:
     finally:
         if process.stdout is not None:
             process.stdout.close()
+        if reader is not None:
+            reader.join(timeout=30)
     if process.wait() != 0:
-        logger.warning("ffmpeg exited %s", process.returncode)
+        logger.warning("%s exited %s", Path(argv[0]).name, process.returncode)
         raise MediaError("Shoulder could not prepare this video.")
 
 
@@ -393,7 +481,9 @@ def _terminate(process: "subprocess.Popen[str]") -> None:
 # --- Sprite timeline -------------------------------------------------------
 
 
-def sprite_sheets(source: str, directory: str, layout: SpriteLayout) -> list[Path]:
+def sprite_sheets(
+    source: str, directory: str, layout: SpriteLayout, report: Progress
+) -> list[Path]:
     """Render the sheets. Every tile is letterboxed into the same fixed box."""
     pattern = str(Path(directory) / "sprite-%d.jpg")
     argv = [
@@ -433,7 +523,9 @@ def sprite_sheets(source: str, directory: str, layout: SpriteLayout) -> list[Pat
         "image2",
         pattern,
     ]
-    _run(argv, max(MIN_ENCODE_TIMEOUT_SECONDS, PROBE_TIMEOUT_SECONDS))
+    _run_with_heartbeat(
+        argv, max(MIN_ENCODE_TIMEOUT_SECONDS, PROBE_TIMEOUT_SECONDS), report
+    )
     sheets = sorted(
         (path for path in Path(directory).glob("sprite-*.jpg")),
         key=lambda path: int(path.stem.rsplit("-", 1)[1]),
@@ -555,7 +647,10 @@ def transcode_job(job: jobs.Job, keep_going: Progress) -> None:
         with _workspace() as directory:
             source = str(Path(directory) / "source")
             output = str(Path(directory) / "coach-720p.mp4")
-            storage.download_object(source_key, source)
+            try:
+                storage.download_object(source_key, source, report=keep_going)
+            except storage.TransferAborted:
+                raise Cancelled from None
             if not keep_going(0.0):
                 raise Cancelled
             media = probe(source)
@@ -569,7 +664,18 @@ def transcode_job(job: jobs.Job, keep_going: Progress) -> None:
             # a transcode that truncated the match cannot report the source's
             # full length and leave the scrubber running past the end.
             played = probe(output)
-            storage.upload_object(key, output, PLAYBACK_CONTENT_TYPE)
+            try:
+                storage.upload_object(
+                    key, output, PLAYBACK_CONTENT_TYPE, report=keep_going
+                )
+            except storage.TransferAborted:
+                raise Cancelled from None
+            # The upload can outlast several heartbeat intervals; check the
+            # lease is still ours and the job is not cancelled before writing
+            # the `ready` row, so a job that lost its lease mid-upload cannot
+            # finalize a video another attempt is also working on.
+            if not keep_going(1.0):
+                raise Cancelled
 
         with jobs.transaction() as connection:
             _finish(connection, video_id, key, played)
@@ -606,27 +712,37 @@ def thumbnail_job(job: jobs.Job, keep_going: Progress) -> None:
 
         with _workspace() as directory:
             source = str(Path(directory) / "source")
-            storage.download_object(source_key, source)
+            try:
+                storage.download_object(source_key, source, report=keep_going)
+            except storage.TransferAborted:
+                raise Cancelled from None
             if not keep_going(0.0):
                 raise Cancelled
             media = probe(source)
             layout = sprite_layout(media.duration_ms)
-            sheets = sprite_sheets(source, directory, layout)
+            sheets = sprite_sheets(source, directory, layout, keep_going)
             if not keep_going(0.8):
                 raise Cancelled
-            for number, sheet in enumerate(sheets):
-                storage.upload_object(
-                    storage.sprite_key(video_id, number),
-                    str(sheet),
-                    SPRITE_CONTENT_TYPE,
+            try:
+                for number, sheet in enumerate(sheets):
+                    storage.upload_object(
+                        storage.sprite_key(video_id, number),
+                        str(sheet),
+                        SPRITE_CONTENT_TYPE,
+                        report=keep_going,
+                    )
+                index = Path(directory) / "index.json"
+                index.write_text(
+                    json.dumps(index_document(layout, len(sheets))), encoding="utf-8"
                 )
-            index = Path(directory) / "index.json"
-            index.write_text(
-                json.dumps(index_document(layout, len(sheets))), encoding="utf-8"
-            )
-            storage.upload_object(
-                storage.thumbnail_index_key(video_id), str(index), INDEX_CONTENT_TYPE
-            )
+                storage.upload_object(
+                    storage.thumbnail_index_key(video_id),
+                    str(index),
+                    INDEX_CONTENT_TYPE,
+                    report=keep_going,
+                )
+            except storage.TransferAborted:
+                raise Cancelled from None
     except (MediaError, storage.StorageError):
         # A missing timeline does not make a video unwatchable, so this never
         # marks the video failed; the job row carries the failure.
