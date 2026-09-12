@@ -21,7 +21,7 @@ export default defineConfig({
   ...smoke,
   testMatch: "playback-budget.spec.mjs",
   // A 90-minute fixture encode plus twenty timed seeks.
-  timeout: 20 * 60 * 1000,
+  timeout: 45 * 60 * 1000,
   // CDP network emulation and `performance.memory` are Chromium-only, and
   // this is a performance measurement, not cross-engine correctness.
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],

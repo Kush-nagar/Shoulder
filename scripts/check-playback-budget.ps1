@@ -45,7 +45,7 @@ try {
     if ($LASTEXITCODE) { throw 'Playback budget production build failed' }
     & node node_modules/@playwright/test/cli.js test --config playwright.playback-budget.config.mjs
     if ($LASTEXITCODE) {
-        throw 'Playback budget measurement failed its own asserted budgets -- expected as of the Project 03 verification record for the first-frame budget at full 90-minute length; see that record and the PLAYBACK_BUDGET_RESULT line above before treating this as a new regression.'
+        throw 'Playback budget measurement failed its asserted budgets. These pass on the recorded profile, so treat this as a regression: compare the PLAYBACK_BUDGET_RESULT line above against the measurements in docs/projects/project-03-media-playback-verification.md, and check the startup index first.'
     }
     & ./scripts/infra.ps1 health
     Write-Host 'PASS: 90-minute coach playback first-frame and seek budgets measured. See test output for the PLAYBACK_BUDGET_RESULT line to copy into the verification record.'

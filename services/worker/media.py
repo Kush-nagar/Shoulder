@@ -64,6 +64,37 @@ logger = logging.getLogger("shoulder.worker.media")
 TARGET_SHORT_EDGE = 720
 TARGET_LONG_EDGE = 1280
 KEYFRAME_SECONDS = 2
+
+# --- Startup cost. A browser cannot show frame one of a progressive MP4 until
+# it has read the whole `moov` index, and `moov` grows with the sample count,
+# not the bitrate: `stsz`, `stco`, `stsc`, and `ctts` all carry per-sample or
+# per-chunk entries. Measured on a 90-minute 720p30 match, the naive settings
+# index to about 5.7 MB, which spends most of the 2.5-second first-frame budget
+# in `docs/02-architecture.md` before a single frame is decoded.
+#
+# Two settings below halve that, and both are measured in
+# `tests/test_media.py::StartupIndexTests`:
+#
+# - No B-frames. B-frames need a `ctts` composition-offset entry per sample
+#   (~1.1 MB at 90 minutes). Dropping them also removes reorder latency from
+#   every scrub, which is what this player does constantly, and costs about 4%
+#   bitrate at the same CRF.
+# - 32 kHz audio. AAC frames are always 1024 samples, so the frame count -- and
+#   with it `stsz`/`stco`/`stsc` -- follows the sample rate. 32 kHz is also the
+#   rate whose 31.25 frames per second beats cleanly against 30 fps video, so
+#   the muxer's chunk pattern becomes periodic and `stsc` collapses from ~1.7 MB
+#   to ~0.14 MB. Neither 44.1 kHz (no collapse) nor 22.05 kHz (fewer samples but
+#   no collapse) does better, and 32 kHz keeps 16 kHz of audio bandwidth, well
+#   above what field audio and coach speech occupy.
+#
+# Together: about 2.8 MB at 90 minutes. A fragmented layout
+# (`+frag_keyframe+empty_moov+global_sidx`) would cut the startup index to
+# roughly 55 KB regardless of duration, but was measured and rejected: WebKit
+# then seeks only to fragment boundaries, so a one-second arrow-key step lands
+# on the previous keyframe instead. Sub-keyframe seek accuracy matters more here
+# than the remaining megabytes.
+NO_B_FRAMES = "0"
+AUDIO_SAMPLE_RATE = "32000"
 VIDEO_CRF = "23"
 VIDEO_PRESET = "veryfast"
 AUDIO_BITRATE = "128k"
@@ -292,7 +323,20 @@ def transcode(source: str, destination: str, media: Probe, report: Progress) -> 
     """
     width, height = playback_size(media.width, media.height)
     audio = (
-        ["-map", "0:a:0?", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2"]
+        [
+            "-map",
+            "0:a:0?",
+            "-c:a",
+            "aac",
+            "-b:a",
+            AUDIO_BITRATE,
+            "-ac",
+            "2",
+            # Sample rate drives the AAC frame count, and the frame count drives
+            # the startup index. See the startup-cost note above.
+            "-ar",
+            AUDIO_SAMPLE_RATE,
+        ]
         if media.has_audio
         else ["-an"]
     )
@@ -323,6 +367,10 @@ def transcode(source: str, destination: str, media: Probe, report: Progress) -> 
         VIDEO_CRF,
         "-profile:v",
         "high",
+        # No `ctts` table, and no reorder latency on a scrub. See the
+        # startup-cost note above.
+        "-bf",
+        NO_B_FRAMES,
         "-pix_fmt",
         "yuv420p",
         "-vf",

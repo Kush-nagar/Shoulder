@@ -360,6 +360,100 @@ class SpriteTests(unittest.TestCase):
         self.assertEqual(document["rows"], layout.rows)
 
 
+@unittest.skipUnless(AVAILABLE, "pinned ffmpeg and ffprobe are not available")
+class StartupIndexTests(unittest.TestCase):
+    """The startup index is a performance contract, so it is asserted.
+
+    A browser cannot show frame one of a progressive MP4 until it has read the
+    whole `moov` index, and `moov` grows with the sample count. That makes the
+    first-frame budget in `docs/02-architecture.md` (< 2.5 s) a property of the
+    encoder settings, not of the network alone: at 90 minutes the naive
+    settings index to about 5.7 MB, which is most of the budget before a frame
+    is decoded. `tests/playback-budget.spec.mjs` measures the real thing in a
+    real browser; this pins the encoder property cheaply, so a settings change
+    that quietly doubles startup cost fails here first.
+    """
+
+    # Enough of the budget to leave room for the first GOP, the request, and
+    # the handshake, at the profile `tests/playback-budget.spec.mjs` asserts.
+    MAX_INDEX_BYTES_AT_90_MINUTES = 3_500_000
+    FULL_MATCH_SECONDS = 90 * 60
+
+    def setUp(self) -> None:
+        self.dir = Path(tempfile.mkdtemp(prefix="shoulder-startup-"))
+        self.addCleanup(self._clean)
+
+    def _clean(self) -> None:
+        for child in self.dir.glob("*"):
+            child.unlink(missing_ok=True)
+        self.dir.rmdir()
+
+    def keep_going(self, progress: float | None = None) -> bool:
+        return True
+
+    def transcoded(self, seconds: int) -> tuple[Path, media.Probe]:
+        source = generate(self.dir / "startup-source.mp4", seconds=seconds)
+        destination = self.dir / "startup-playback.mp4"
+        media.transcode(
+            str(source), str(destination), media.probe(str(source)), self.keep_going
+        )
+        return destination, media.probe(str(destination))
+
+    def test_the_startup_index_stays_within_the_first_frame_budget(self) -> None:
+        """Measured on a short clip and projected to a full match.
+
+        The index tables scale with the sample count, so bytes-per-second
+        measured here projects linearly onto the 90-minute case the budget is
+        written about.
+        """
+        seconds = 20
+        destination, probed = self.transcoded(seconds)
+        index = _moov_size(destination)
+        measured = probed.duration_ms / 1000
+        projected = index / measured * self.FULL_MATCH_SECONDS
+        self.assertLess(
+            projected,
+            self.MAX_INDEX_BYTES_AT_90_MINUTES,
+            f"startup index is {index:,} bytes for {measured:.1f}s, which projects "
+            f"to {projected / 1e6:.2f} MB for a 90-minute match; the first frame "
+            "cannot arrive inside its budget behind an index that large",
+        )
+
+    def test_no_composition_offset_table_is_written(self) -> None:
+        """`ctts` is per-sample, so B-frames cost startup as well as latency."""
+        destination, _ = self.transcoded(6)
+        self.assertNotIn(
+            b"ctts",
+            destination.read_bytes(),
+            "a ctts table means B-frames came back, which adds a per-sample "
+            "entry to the startup index and reorder latency to every scrub",
+        )
+
+    def test_the_index_still_comes_first(self) -> None:
+        """Without fast start the index sits after the media, so nothing plays."""
+        destination, _ = self.transcoded(6)
+        self.assertEqual(_moov_first(destination), "faststart")
+
+
+def _moov_size(path: Path) -> int:
+    """Bytes of `moov`, the index a browser reads before its first frame."""
+    data = path.read_bytes()
+    offset = 0
+    while offset + 8 <= len(data):
+        size = int.from_bytes(data[offset : offset + 4], "big")
+        kind = data[offset + 4 : offset + 8]
+        if size == 1:
+            size = int.from_bytes(data[offset + 8 : offset + 16], "big")
+        elif size == 0:
+            size = len(data) - offset
+        if size < 8:
+            break
+        if kind == b"moov":
+            return size
+        offset += size
+    raise AssertionError("no moov box found")
+
+
 def _moov_first(path: Path) -> str:
     """Report whether `moov` precedes `mdat`, which is what fast start means."""
     head = path.read_bytes()[:6_000_000]
