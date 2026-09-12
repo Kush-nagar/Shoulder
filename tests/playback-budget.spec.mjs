@@ -24,6 +24,19 @@ import { expect, test } from "@playwright/test";
  * reference profile (comparable to WebPageTest's "Cable"/"Broadband"
  * presets); the exact numbers are recorded here and in the verification
  * record rather than left implicit.
+ *
+ * KNOWN, DOCUMENTED, NON-BLOCKING FAILURE as of the Project 03 verification
+ * record: the first-frame assertion currently fails at this profile (and
+ * still fails, by a smaller margin, at 25 Mbps down). Chromium's `<video>`
+ * issues roughly twenty concurrent, wide-open `Range: bytes=X-` requests
+ * across a 90-minute progressive MP4; under a throttled connection those
+ * compete for bandwidth and delay the small amount of data actually needed
+ * to reach `readyState >= 2`. Unthrottled, first frame is ~0.65s. This is
+ * `ADR 0001`'s single-progressive-MP4 choice meeting a real limit at full
+ * match length, not a bug in this repository's code — see the verification
+ * record for the full measurement set and disposition. Left asserting
+ * (not weakened or skipped) so a real fix shows up as this test turning
+ * green, not as a silently rotted number.
  */
 
 const api = "http://127.0.0.1:8000";
