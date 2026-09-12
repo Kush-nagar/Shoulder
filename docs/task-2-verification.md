@@ -44,6 +44,12 @@ digests are in `infra/compose.yaml`. Startup resolves only locked images, tags
 them for the CLI, and checks the running Supabase image IDs against the lock.
 No new npm or Python application dependency was added.
 
+Amended 2026-09-12 (Block 03): both MinIO references now name MinIO's own
+`quay.io` registry instead of Docker Hub, because anonymous Docker Hub pulls of
+these images began failing from shared CI egress. The releases and digests above
+are unchanged -- `quay.io` serves the identical manifest lists -- so this changed
+where the bytes come from, not which bytes.
+
 Docker installer URL, checksum, and exact installed tool versions are also
 recorded in `STATUS.md`. Supabase's archive SHA256 is verified before extraction.
 Public registry manifest requests established MinIO digests; Docker's first
