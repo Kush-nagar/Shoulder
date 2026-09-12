@@ -5,7 +5,8 @@ Evidence index for the project block covering **Task 11**, **Task 12**, and
 
 - Base `main`: `5f55cb3a4435bed0361bed9ed78bc547180013a8`
 - Branch: `project-03-media-playback`
-- Verified: 2026-09-10
+- Verified: 2026-09-10; re-verified 2026-09-11 after the lease/heartbeat fix,
+  Task 13 Playwright coverage, and the full-length playback-budget measurement
 - Local stack: Supabase CLI 2.116.0, PostgreSQL 17.6, MinIO
   `RELEASE.2025-09-07T16-13-09Z`, ffmpeg 8.1.2
 
@@ -42,10 +43,13 @@ browser's own `<video>` element.
 | **T12** bounded dimensions, deterministic layout | `services/timeline.py` | `SpriteGeometryTests` and `tests/timeline.test.mjs`, both against an explicit shared table | passed |
 | **T12** done: not hundreds of images | `MAX_SHEETS = 4` | a 90-minute match is 4 objects; asserted at the API layer too | passed |
 | **T13** player wrapper | `player.tsx` | typecheck, lint, production build | passed |
-| **T13** signed-URL refresh preserving time | `player.tsx` refresh effect | playhead and play state restored across re-sign | implemented |
-| **T13** transport, scrubber, marker layer | `player.tsx` | keyboard map from `docs/05-ui.md` | implemented |
+| **T13** signed-URL refresh preserving time | `player.tsx` refresh effect | `tests/player.spec.mjs`: real browser, real 900s expiry exercised via Playwright's clock API, playhead and play state asserted after the swap | passed |
+| **T13** failed refresh shows a recovery path | `player.tsx` catch → `setMessage` | `tests/player.spec.mjs`: refresh forced to fail, "Reload the page" message asserted | passed |
+| **T13** keyboard transport | `player.tsx` key map | `tests/player.spec.mjs`: space/arrows/j/k/l drive a real `<video>` element | passed |
+| **T13** scrubber and thumbnail preview | `player.tsx` scrubber + hover preview | `tests/player.spec.mjs`: real seek via the range input, real sprite tile shown on hover | passed |
 | **T13** timeline math | `apps/web/lib/timeline.ts` | `tests/timeline.test.mjs`, 10 tests | passed |
-| **T13** accessible control names, no layout shift | labelled controls, `aria-valuetext`, fixed 16:9 box | lint and build | passed |
+| **T13** accessible control names, no layout shift | labelled controls, `aria-valuetext`, fixed 16:9 box | lint, build, and `getByRole`/`getByLabel` throughout `player.spec.mjs` | passed |
+| **T11** full-length playback budgets | `player.tsx`, `services/api/storage.py` sign_get | `tests/playback-budget.spec.mjs`: real 90-minute fixture, CDP-throttled Chromium | **measured; first frame does not meet budget at full length — see Known gaps** |
 
 ## API surface added
 
@@ -118,18 +122,31 @@ test time into a temporary directory and deleted afterwards, per
 
 | Check | Result |
 |---|---|
-| `ruff format`, `ruff check`, `mypy` | passed, 29 source files |
-| Python suite, database + storage + media | **328 tests, 1 skip** (the opt-in 2 GB proof) |
+| `ruff format`, `ruff check`, `mypy` | passed, 30 source files |
+| Python suite, database + storage + media | **337 tests, 1 skip** (the opt-in 2 GB proof) |
 | Node unit tests | **36 tests**, including 10 new timeline tests |
 | Generated contract drift | in sync after regeneration |
 | TypeScript typecheck and production build | passed |
-| Browser smoke | chromium and webkit passed |
+| Browser smoke (`smoke.spec.mjs`) | chromium, firefox, and webkit all passed |
+| `tests/player.spec.mjs` (Task 13) | **12/12 passed**: chromium, firefox, and webkit, all four scenarios |
+| `tests/playback-budget.spec.mjs` | measured; first-frame budget not met at full 90-minute length — see Known gaps |
 | Migrations up/down/up | `0005` → `0006` → `0005` → `0006` clean |
+| `pnpm audit`, `pip-audit` | no known vulnerabilities |
+
+Firefox passed locally this run on chromium, firefox, and webkit alike,
+including the full `player.spec.mjs` matrix — the Smart App Control block on
+Mozilla's `lgpllibs.dll` recorded earlier in this project and in `STATUS.md`
+did not reproduce. Left as previously documented rather than declared fixed:
+nothing here changed Windows policy or Playwright's install, so the cause of
+the earlier block (and of this run's difference) is not established.
 
 ## Automated review on PR #13
 
-GitHub Copilot and Cursor Bugbot reviewed commit `8b70fe6`. Twelve findings;
-six fixed in `78c889f`, six outstanding and described below rather than closed.
+GitHub Copilot and Cursor Bugbot reviewed commit `8b70fe6`. Twelve findings.
+Six were fixed in `78c889f`. The remaining six (7–12) were re-verified against
+current `HEAD` rather than trusted on GitHub's `isOutdated` flag alone — one
+(12) reads as outdated because the surrounding code moved, but the underlying
+issue was never actually fixed until now; all six are fixed as of `5b188f5`.
 
 | # | Finding | Disposition |
 |---|---|---|
@@ -139,47 +156,80 @@ six fixed in `78c889f`, six outstanding and described below rather than closed.
 | 4 | **The timeline signed sheets without checking they existed.** Transcode marks a video `ready` on its own and the thumbnail job is a separate queue entry, so the scrubber could receive URLs that 404 with no way to tell why. | Fixed: the published index object is the readiness signal, returning `409 timeline-not-ready`. Playback does not depend on thumbnails and still works. Test added for both halves. |
 | 5 | **Sprite URLs expired without refresh.** They carry the same fifteen-minute expiry as the playback URL but were fetched once, so a long review kept working video beside silently failing thumbnails. | Fixed: both are re-signed on the same tick. |
 | 6 | **The player declared its own `Playback` and `Timeline` types**, duplicating the generated FastAPI schemas that `AGENTS.md` requires be the only source. | Fixed: it imports the generated types. |
-| 7 | **`storage.download_object` has no heartbeat.** A multi-gigabyte original can take longer than the 120-second lease, so the sweeper would requeue a job that is still running and a second worker could claim it. | **Outstanding.** Real, and it only bites on files larger than the fixtures. See the gap below. |
-| 8 | **`thumbnail_job` decodes the full match through `_run` without heartbeating.** Same lease exposure. | **Outstanding.** Same gap. |
-| 9 | **The upload after transcode has no heartbeat**, and `status = 'ready'` is committed without re-checking the lease. | **Outstanding.** Same gap. |
-| 10 | **`capture_output=True` buffers all ffmpeg output until exit.** A hostile or pathological upload could make that buffer large. | **Outstanding.** Bounded in practice by the encode timeout, but not by memory. |
-| 11 | **The wall-clock deadline is only checked when the pipe yields a line.** A decoder that stalls while holding the pipe open is not interrupted. | **Outstanding.** |
+| 7 | **`storage.download_object` has no heartbeat.** A multi-gigabyte original can take longer than the 120-second lease, so the sweeper would requeue a job that is still running and a second worker could claim it. | Fixed in `5b188f5`: `download_object`/`upload_object` stream in `TRANSFER_CHUNK_BYTES` chunks, calling `keep_going` between them; a refused continuation raises `TransferAborted` and aborts any in-progress multipart upload. `tests/test_storage.py::TransferTests` covers liveness reporting and cancellation. |
+| 8 | **`thumbnail_job` decodes the full match through `_run` without heartbeating.** Same lease exposure. | Fixed in `5b188f5`: `sprite_sheets` takes `report` and runs through `_run_with_heartbeat`. |
+| 9 | **The upload after transcode has no heartbeat**, and `status = 'ready'` is committed without re-checking the lease. | Fixed in `5b188f5`: the upload heartbeats, and `transcode_job` re-checks `keep_going` after it, before the `_finish` transaction. |
+| 10 | **`capture_output=True` buffers all ffmpeg output until exit.** A hostile or pathological upload could make that buffer large. | Fixed in `5b188f5`: `_run` now discards stderr (`subprocess.DEVNULL`) and captures only ffprobe's small stdout JSON. |
+| 11 | **The wall-clock deadline is only checked when the pipe yields a line.** A decoder that stalls while holding the pipe open is not interrupted. | Fixed in `5b188f5`: `_run_with_heartbeat` reads through a background thread and a bounded-timeout queue, so the deadline and `report` both run at least every `POLL_SECONDS` regardless of tool output. |
 | 12 | **`_even` on very small sources.** Subsumed by finding 3. | Fixed with 3. |
+
+`tests/test_worker_loop.py::test_a_long_blocking_operation_heartbeats_and_keeps_its_lease`
+proves the mechanism end-to-end against the real queue: a real blocking child
+process spanning several heartbeat intervals keeps `heartbeat_at` advancing,
+and a concurrent `claim()` sees nothing available for the whole duration.
 
 ## Known gaps
 
-**The lease-versus-long-operation gap (findings 7 to 11) is the one I would fix
-before trusting this worker with a real match.** The queue lease is 120 seconds
-and three operations in the media path — downloading the original, decoding for
-sprites, and uploading the playback object — can each exceed that on a
-multi-gigabyte file without touching `keep_going`. The consequence is not data
-loss: `jobs.succeed` and `jobs.fail` are both gated on `locked_by`, so a worker
-that lost its lease cannot commit a terminal state. The consequence is wasted
-work and duplicate transcodes. Fixing it properly means running those blocking
-calls on a worker thread and heartbeating from the caller, which is a real
-change to the media path rather than a tweak, and it wants its own tests.
+**The lease-versus-long-operation gap (findings 7 to 11) is fixed** —
+see the automated-review table above and `tests/test_worker_loop.py`'s
+end-to-end heartbeat proof. What follows are the gaps still open.
 
+### The full-length first-frame budget is not met (measured, not assumed)
 
-- **Firefox browser tests did not run locally.** Windows Smart App Control
-  blocks Mozilla's `lgpllibs.dll` (`LoadLibrary` 4551, "An Application Control
-  policy has blocked this file"); a clean Playwright reinstall does not change
-  it. No Playwright config was altered and no security policy was disabled.
-  GitHub CI runs all three engines on Ubuntu.
-- **No Playwright suite for the player yet.** Task 13's transport and scrubber
-  are covered by unit tests for the geometry and by typecheck, lint, and build,
-  but not yet by a browser test driving the real element. This is the largest
-  outstanding item in the block and is named here rather than implied.
-- **Playback budgets are not yet measured.** `docs/02-architecture.md` sets
-  first frame < 2.5 s and random seek < 1.5 s p75. Those need a full-length
-  fixture through the real worker and R2; the block's transcode path is proved
-  correct but not yet proved fast. ADR 0001 requires measurements before any
-  HLS discussion, and none is proposed.
+`docs/11-testing-quality.md` requires measuring a full 90-minute 720p output
+on normal broadband: first frame, random seek p75, bytes transferred, browser
+memory, failure/retry. `tests/playback-budget.spec.mjs` does this against a
+real 90-minute, 1280×720, fast-start H.264/AAC fixture (the same profile
+`media.transcode` produces) published to real local object storage, with
+Chromium's network throttled via CDP.
+
+| Profile | First frame | Budget (< 2.5 s) | Random seek p75 | Budget (< 1.5 s) |
+|---|---:|:---:|---:|:---:|
+| Unthrottled (loopback) | 0.65 s | pass | 20 ms | pass |
+| 25 Mbps / 5 Mbps / 20 ms | 2.61 s | **fail** (by ~0.11 s) | 116 ms | pass |
+| 10 Mbps / 3 Mbps / 40 ms (asserted profile) | 5.47 s | **fail** | 187 ms | pass |
+
+Root cause, confirmed by inspecting the actual requests: Chromium's `<video>`
+element opens roughly twenty concurrent, wide-open `Range: bytes=X-` requests
+(each asking for everything from some offset to end-of-file) across a
+90-minute progressive file. Unthrottled, the abundant local bandwidth hides
+this; throttled, those requests compete for the pipe and delay the small
+amount of data actually needed to reach `readyState >= 2`. Bytes transferred
+for "first frame" is consequently the whole 135 MB file's declared
+`Content-Length` sum across those range responses, not bytes actually
+consumed — a real characteristic of this request pattern, not a measurement
+bug (confirmed by an unthrottled control run and a second run at 25 Mbps).
+
+This is `ADR 0001`'s single-progressive-MP4 choice meeting a real limit at
+full match length, not a defect in the code added this block: the same
+transcode profile, the same signing, the same `<video>` element that pass
+comfortably at ordinary review-length clips genuinely cannot avoid this
+request pattern within HTTP Range semantics alone. `random seek p75` passes
+comfortably at every profile tested, including full length.
+
+**Disposition (owner decision, 2026-09-11): document and merge.** Per
+`docs/11-testing-quality.md` ("if the architecture misses its budgets, write
+an ADR before adding HLS"), a proper fix is either an ADR proposing a change
+(smarter preload/range hints, or, if warranted, a different delivery
+mechanism) or an accepted, explicitly-scoped exception — neither is
+undertaken in this block. The assertion in `tests/playback-budget.spec.mjs`
+is left in place rather than weakened or skipped, so a future fix shows up as
+this test turning green rather than as a silently rotted number.
+
+### Other open items
+
+- **The worker end-to-end path is not yet exercised against MinIO through the
+  real `transcode_job`/`thumbnail_job` handlers.** The heartbeat mechanism is
+  proved end-to-end (`test_a_long_blocking_operation_heartbeats_and_keeps_its_lease`,
+  using a real blocking child process through the real queue) and each unit
+  (`storage.download_object`/`upload_object`, `media.sprite_sheets`,
+  `media.transcode`) is proved against real storage and real ffmpeg
+  separately, but no single test claims a job from the queue and runs the
+  full handler against a real source object end to end. Worth adding before
+  trusting a first real match upload; not attempted here to keep this block's
+  scope to what was asked.
 - **`Shoulder Dev` has not received `0006`.** The host is IPv6-only and this
   workstation's path to it is intermittent.
-- **The worker end-to-end path is not yet exercised against MinIO.** The
-  transcode and thumbnail handlers are registered and unit-tested; a job claimed
-  from the queue that reads a real source object and writes a real playback
-  object is not yet covered.
 
 ## Deliberate deferrals
 
