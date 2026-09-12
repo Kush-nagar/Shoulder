@@ -183,6 +183,7 @@ function psql(sql) {
       "postgres",
       "-d",
       "postgres",
+      "-q",
       "-v",
       "ON_ERROR_STOP=1",
       "-Atc",
@@ -306,8 +307,16 @@ test("the scrubber seeks and previews the sprite timeline on hover", async ({
   );
 
   const box = await scrubber.boundingBox();
-  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
-  const preview = page.locator('[aria-hidden="true"].border-line');
+  // `.hover()` rather than a raw `page.mouse.move`: it waits for the element
+  // to be actionable and positions relative to it, so the event reliably
+  // reaches the input itself rather than whatever else is at that viewport
+  // coordinate.
+  await scrubber.hover({ position: { x: box.width * 0.6, y: box.height / 2 } });
+  // Scoped to the player section: the coach shell's own nav tooltips share
+  // both `aria-hidden="true"` and the `border-line` class.
+  const preview = page
+    .locator("section:has(#scrubber)")
+    .locator('[aria-hidden="true"].border-line');
   await expect(preview).toBeVisible();
   const style = await preview.getAttribute("style");
   expect(style).toContain(`thumbs/${videoId}/sprite-`);
@@ -327,7 +336,6 @@ test("the signed URL refreshes before it expires and keeps the playhead", async 
   const { gameId } = await readyGame(page, context, request);
   await page.clock.install();
   const video = await openPlayer(page, gameId);
-  const firstSrc = await video.getAttribute("src");
 
   await video.evaluate((element) => {
     element.currentTime = 4;
@@ -348,7 +356,11 @@ test("the signed URL refreshes before it expires and keeps the playhead", async 
   await page.clock.fastForward("13:05");
 
   await expect.poll(() => refreshed).toBe(true);
-  await expect.poll(() => video.getAttribute("src")).not.toBe(firstSrc);
+  // Not a same-URL check: two signatures minted within the same wall-clock
+  // second are byte-identical (`X-Amz-Date` is second-granular), so a
+  // coincidental match would be a false failure rather than evidence the
+  // refresh didn't happen. The restored playhead/play-state below only exist
+  // because `load()`'s `setPlayback` updater actually ran.
   await expect.poll(() => currentTime(video)).toBeCloseTo(4, 0);
   await expect
     .poll(() => video.evaluate((element) => element.paused))
@@ -367,17 +379,20 @@ test("a failed refresh tells the coach to reload rather than silently stopping",
     element.currentTime = 2;
   });
 
-  let refreshes = 0;
-  await page.route("**/api/videos/*/playback-url", (route) => {
-    refreshes += 1;
-    return refreshes === 1
-      ? route.continue()
-      : route.fulfill({ status: 500, body: "" });
-  });
+  // The route is only installed after the initial load already succeeded,
+  // so the one call it ever intercepts is the scheduled refresh itself.
+  await page.route("**/api/videos/*/playback-url", (route) =>
+    route.fulfill({ status: 500, body: "" }),
+  );
 
   await page.clock.fastForward("13:05");
 
-  await expect(page.getByRole("alert")).toContainText(
-    "Playback expired. Reload the page to continue.",
-  );
+  // Scoped to the player section: Next's own route announcer also carries
+  // role="alert", unscoped would be a strict-mode violation once this one
+  // renders too.
+  await expect(
+    page
+      .locator('section[aria-labelledby="player-heading"]')
+      .getByRole("alert"),
+  ).toContainText("Playback expired. Reload the page to continue.");
 });

@@ -544,26 +544,38 @@ class TransferTests(unittest.TestCase):
             self.assertEqual(calls, [None])
 
     def test_a_large_file_uploads_as_multipart_and_the_object_matches(self) -> None:
-        with patch.object(storage, "TRANSFER_CHUNK_BYTES", 1024):
-            source = self.dir / "large.bin"
-            body = (b"a" * 1024) + (b"b" * 1024) + (b"c" * 17)
-            source.write_bytes(body)
-            key = self.object_key()
-            calls: list[float | None] = []
+        """Real part sizes, not the patched-small ones the other tests use.
 
-            def report(progress: float | None = None) -> bool:
-                calls.append(progress)
-                return True
+        S3 (and MinIO) reject `CompleteMultipartUpload` when any part but the
+        last is under 5 MiB, so this exercises the real
+        `TRANSFER_CHUNK_BYTES` rather than shrinking it — the whole point of
+        the assertion below is that completion actually succeeds.
+        """
+        source = self.dir / "large.bin"
+        chunk = storage.TRANSFER_CHUNK_BYTES
+        with open(source, "wb") as handle:
+            handle.write(b"a" * chunk)
+            handle.write(b"b" * chunk)
+            handle.write(b"c" * 17)
+        size = chunk * 2 + 17
+        key = self.object_key()
+        calls: list[float | None] = []
 
-            storage.upload_object(
-                key, str(source), "application/octet-stream", report=report
-            )
-            self.assertEqual(storage.head_object(key), len(body))
-            fetched = httpx.get(storage.sign_get(key), timeout=TIMEOUT)
-            self.assertEqual(fetched.content, body)
-            # One report per part: two full parts and one short final part.
-            self.assertEqual(len(calls), 3)
-            self.assertTrue(all(value is None for value in calls))
+        def report(progress: float | None = None) -> bool:
+            calls.append(progress)
+            return True
+
+        storage.upload_object(
+            key, str(source), "application/octet-stream", report=report
+        )
+        self.assertEqual(storage.head_object(key), size)
+        fetched = httpx.get(storage.sign_get(key), timeout=TIMEOUT)
+        self.assertEqual(len(fetched.content), size)
+        self.assertEqual(fetched.content[:8], b"aaaaaaaa")
+        self.assertEqual(fetched.content[-8:], b"cccccccc")
+        # One report per part: two full parts and one short final part.
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(value is None for value in calls))
 
     def test_a_refused_continuation_aborts_the_multipart_upload(self) -> None:
         """A lost lease mid-upload must not leave storage silently paying for it."""

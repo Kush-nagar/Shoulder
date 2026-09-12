@@ -45,7 +45,13 @@ function Test-Health {
 }
 if ($Action -eq 'reset' -and !$DiscardLocalData) { throw 'Reset erases only Shoulder local database/object volumes. Pass -DiscardLocalData explicitly.' }
 if (!(Test-Path $supabase) -or !(Test-Path .env.local)) { throw 'Run .\scripts\bootstrap-infra.ps1 first.' }
-if ((& $supabase --version) -ne '2.116.0') { throw 'Expected Supabase CLI 2.116.0' }
+# Newer CLI builds also print an update-nag line alongside the version, in
+# either order (the update check races the version print), so this matches
+# the version's own shape rather than assuming a line position.
+$supabaseVersion = (& $supabase --version) -match '^\d+\.\d+\.\d+$'
+if ($supabaseVersion.Count -ne 1 -or $supabaseVersion[0] -ne '2.116.0') {
+    throw 'Expected Supabase CLI 2.116.0'
+}
 Invoke-Infra docker @('info', '--format', '{{.ServerVersion}}')
 switch ($Action) {
     'start' {

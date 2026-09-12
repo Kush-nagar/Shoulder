@@ -185,6 +185,7 @@ function psql(sql) {
       "postgres",
       "-d",
       "postgres",
+      "-q",
       "-v",
       "ON_ERROR_STOP=1",
       "-Atc",
