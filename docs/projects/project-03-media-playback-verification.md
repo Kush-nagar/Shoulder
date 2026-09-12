@@ -5,10 +5,12 @@ Evidence index for the project block covering **Task 11**, **Task 12**, and
 
 - Base `main`: `5f55cb3a4435bed0361bed9ed78bc547180013a8`
 - Branch: `project-03-media-playback`
-- Verified: 2026-09-10; re-verified 2026-09-11 after the lease/heartbeat fix,
-  Task 13 Playwright coverage, and the full-length playback-budget measurement
+- Verified: 2026-09-10; re-verified 2026-09-11 after the lease/heartbeat fix and
+  Task 13 Playwright coverage; re-verified 2026-09-12 after the playback-startup
+  fix and the object-storage image-source change, which is when the full-length
+  budgets were first measured as passing
 - Local stack: Supabase CLI 2.116.0, PostgreSQL 17.6, MinIO
-  `RELEASE.2025-09-07T16-13-09Z`, ffmpeg 8.1.2
+  `RELEASE.2025-09-07T16-13-09Z` (from `quay.io`; see below), ffmpeg 8.1.2
 
 ## How this block was built
 
@@ -221,7 +223,8 @@ Cause: a browser cannot decode frame one of a progressive MP4 until it has read
 the whole `moov` index, and `moov` grows with the **sample count**, not the
 bitrate. Measured by parsing the box layout of production output, a 90-minute
 720p30 match indexed to **5.67 MB**, dominated by four per-sample/per-chunk
-tables: `stsc` 1.64 MB, `stsz` 1.53 MB, `stco` 1.26 MB, `ctts` 1.07 MB. At
+tables, each about 4 bytes per entry: `stsc` ~1.7 MB, `stsz` ~1.6 MB, `stco` ~1.3 MB,
+`ctts` ~1.0 MB. At
 10 Mbit/s that index alone is 4.6 s — the measured 5.47 s, before a frame is
 decoded. Nothing about the network, the signed URL, the range-request handling,
 the player's `preload`, or the test throttling was at fault; the container
@@ -238,7 +241,7 @@ Two production changes in `media.transcode`, each measured:
   audio frame count — and `stsz`/`stco`/`stsc` with it — follows the sample
   rate. 32 kHz is additionally the rate whose 31.25 frames/s beats cleanly
   against 30 fps video, making the muxer's chunk pattern periodic so `stsc`
-  collapses from 1.64 MB to 0.14 MB. Swept empirically: 44.1 kHz 4.60 MB,
+  collapses from ~1.7 MB to ~0.15 MB. Swept empirically: 44.1 kHz 4.60 MB,
   32 kHz **2.82 MB**, 24 kHz 3.05 MB, 22.05 kHz 3.18 MB. 32 kHz retains 16 kHz
   of audio bandwidth, comfortably above field audio and coach speech.
 

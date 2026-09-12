@@ -76,14 +76,14 @@ KEYFRAME_SECONDS = 2
 # `tests/test_media.py::StartupIndexTests`:
 #
 # - No B-frames. B-frames need a `ctts` composition-offset entry per sample
-#   (~1.1 MB at 90 minutes). Dropping them also removes reorder latency from
+#   (~1.0 MB at 90 minutes). Dropping them also removes reorder latency from
 #   every scrub, which is what this player does constantly, and costs about 4%
 #   bitrate at the same CRF.
 # - 32 kHz audio. AAC frames are always 1024 samples, so the frame count -- and
 #   with it `stsz`/`stco`/`stsc` -- follows the sample rate. 32 kHz is also the
 #   rate whose 31.25 frames per second beats cleanly against 30 fps video, so
 #   the muxer's chunk pattern becomes periodic and `stsc` collapses from ~1.7 MB
-#   to ~0.14 MB. Neither 44.1 kHz (no collapse) nor 22.05 kHz (fewer samples but
+#   to ~0.15 MB. Neither 44.1 kHz (no collapse) nor 22.05 kHz (fewer samples but
 #   no collapse) does better, and 32 kHz keeps 16 kHz of audio bandwidth, well
 #   above what field audio and coach speech occupy.
 #
