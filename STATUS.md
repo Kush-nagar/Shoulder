@@ -9,15 +9,15 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `5f55cb3a4435bed0361bed9ed78bc547180013a8` |
-| Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11) |
-| Current block | **Block 03 — Media processing and coach playback** (Tasks 11, 12, 13); in progress |
-| Current worker / branch | one implementation worker on `project-03-media-playback`, branched from `5f55cb3` |
-| Open PRs | none yet for Block 03; the worker opens one when its verification passes |
-| Database revision | `0005_video_ingest` locally and on `Shoulder Dev` |
-| Last full verification | 2026-09-10 on `465b894`: repository quality gate green except the Firefox engine (see environment limitations); 286 Python tests; Block 02 gates green on `5f69f9e` |
+| Last verified `main` | `dab524f9c75c3e8dfac430422f717e57ef61985f` |
+| Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11–13, PR #13, `dab524f`) |
+| Current block | none active; Block 03 is merged |
+| Current worker / branch | none active |
+| Open PRs | this status sync only |
+| Database revision | `0006_media_playback` locally; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | 2026-09-12 on `dab524f`: PR #13 CI green on its final HEAD (`af2d782`), all three browser engines passing locally including Firefox, 340 Python tests, 36 Node tests, migration `0006` up/down/up, and the full-length playback budgets measured as passing |
 | Blockers | none that require a human |
-| Next action | Await the Block 03 worker's report, verify its claims independently, then shepherd its PR through CI and review. If the worker is gone, inspect `project-03-media-playback` on GitHub and resume from whatever it committed. Its first job was pinned `ffmpeg`/`ffprobe` tooling and a generated golden fixture, neither of which existed at `5f55cb3` |
+| Next action | **`AGENTOPS_BOOTSTRAP`.** Do not start Block 04. |
 
 ### Environment limitations on this workstation
 
@@ -44,7 +44,9 @@ against Git and GitHub before editing anything.
 
 ## Current state
 
-- Current phase: Phase B — Video. Phase A (Tasks 1–7) is complete and merged.
+- Current phase: Phase B — Video; Tasks 8–13 are complete and merged, so Phase B
+  is finished. Phase A (Tasks 1–7) is complete and merged. The next action is
+  `AGENTOPS_BOOTSTRAP`, not Task 14.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
 - Checkout: `D:\Shoulder`, branch `main`; one writer.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
@@ -72,6 +74,30 @@ against Git and GitHub before editing anything.
   the migration; the gap and its retry procedure are recorded in the verification
   record. The private R2 bucket and its CORS list still need an owner-selected
   production origin before any deployment.
+- Project Block 3 — Media processing and coach playback (Tasks 11, 12, 13):
+  **complete**, merged as PR #13 into `main` at `dab524f`. Evidence:
+  `docs/projects/project-03-media-playback-verification.md`. Migration
+  `0006_media_playback` widens the `shoulder_worker` column grant to the probe
+  and playback columns only. Notable outcomes:
+  - The worker now heartbeats through long media work: chunked storage transfers
+    and a polling ffmpeg runner, so a multi-gigabyte transcode cannot lose its
+    lease to the sweeper and be run twice.
+  - Task 11's full-length budget is met and measured, not assumed: first frame
+    1.45 s against 2.5 s and random seek p75 0.29 s against 1.5 s, on a real
+    90-minute production-transcoded fixture at 25/5 Mbit/s, 20 ms. Getting there
+    needed a real fix — the startup `moov` index was 5.67 MB at 90 minutes and is
+    now 2.79 MB (`-bf 0`, `-ar 32000`). At 10 Mbit/s startup is still over budget
+    (2.87 s) and that is recorded rather than claimed; closing it would mean an
+    ADR 0001 revisit, since ~2.8 MB is near this container's floor.
+  - Task 13 has real browser coverage: keyboard transport, signed-URL refresh
+    with playhead preservation, the failed-refresh recovery path, and the sprite
+    timeline, all passing on Chromium, Firefox, and WebKit.
+  - Both MinIO images now come from MinIO's own `quay.io` registry at the same
+    releases and digests, because anonymous Docker Hub pulls started failing from
+    CI. See the verification record.
+  - Still open, recorded there: no single test drives a queued job through the
+    real `transcode_job`/`thumbnail_job` handlers end to end against object
+    storage, and `Shoulder Dev` has not received `0006`.
 - The block was requested as "Task 9 durable job table, Task 10 ffmpeg → HLS". That
   contradicts `docs/06-tasks.md` (Task 9 is the resumable upload UI, Task 10 is the
   durable queue, transcode is Task 11) and HLS is forbidden by `AGENTS.md` rule 8 and
