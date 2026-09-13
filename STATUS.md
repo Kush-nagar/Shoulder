@@ -17,7 +17,8 @@ against Git and GitHub before editing anything.
 | Database revision | `0006_media_playback` locally; `Shoulder Dev` is still on `0005_video_ingest` |
 | Last full verification | 2026-09-12 on `dab524f`: PR #13 CI green on its final HEAD (`af2d782`), all three browser engines passing locally including Firefox, 340 Python tests, 36 Node tests, migration `0006` up/down/up, and the full-length playback budgets measured as passing |
 | Blockers | none that require a human |
-| Next action | **`AGENTOPS_BOOTSTRAP` is implemented and awaiting review.** Autonomy is disabled (`AUTONOMY_ENABLED=false`); the coordinator dry-runs to Task 14 but dispatches nothing. Do not start Block 04 by hand. |
+| Bootstrap blocker | **Owner credentials and account connections.** Everything automatable is done; see "Autonomous build system" below for the exact four items. |
+| Next action | **`AGENTOPS_BOOTSTRAP` is implemented and awaiting owner setup.** Autonomy is disabled (`AUTONOMY_ENABLED=false`); the coordinator dry-runs to Task 14 but dispatches nothing. Do not start Block 04 by hand. |
 
 ### Environment limitations on this workstation
 
@@ -71,6 +72,18 @@ against Git and GitHub before editing anything.
 - Kill switch: `gh variable set AUTONOMY_ENABLED --body false`. No commit needed.
 - Phase D and later remain unreachable: `allow_phase_d_and_later` is false and
   Task 23 carries the gate flag, so `AGENTS.md` rule 5 is enforced in code.
+- **Remaining owner-required setup, and nothing else blocks readiness:**
+  1. `gh secret set CLAUDE_CODE_OAUTH_TOKEN` (value from `claude setup-token`).
+  2. `gh secret set OPENROUTER_API_KEY`.
+  3. Install the Claude GitHub App on this repository.
+  4. Connect this repository in Codex cloud and turn on Code review at
+     `chatgpt.com/codex/settings/code-review`.
+  All four are browser or secure-terminal actions that only the account owner
+  can perform. No `OPENAI_API_KEY` is required.
+- After those land, the remaining automated steps are: OpenRouter model
+  qualification, a real `@codex` round trip to set `lane_qualified` on
+  `codex_cloud`, cloud smoke tests per lane, the cloud coordinator dry run,
+  merge, and the readiness report.
 - Coordinator dry run selects **Task 14 — Manual clip marking** (block-04,
   prerequisites 7 and 13 satisfied), classified `mixed`/`COMPLEX`.
 - Independent review ran twice on PR #16 and found twenty-five real defects
