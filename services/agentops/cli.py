@@ -429,6 +429,12 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
     if state.task_budget_exceeded(ctx.policy, ctx.budget, task.id):
         problems.append("per-task budget is already exhausted")
 
+    # Eligibility was computed and then only reported. A manual dispatch could
+    # therefore re-run a task that is already complete, or start a second
+    # writer on one that is already leased.
+    if not candidate.eligible:
+        problems.append(f"task is not eligible: {'; '.join(candidate.reasons)}")
+
     if not state.autonomy_enabled(ctx.policy):
         problems.append("AUTONOMY_ENABLED is false")
 

@@ -255,10 +255,11 @@ jobs:
             --lane "$LANE" --usd "$cost" --task "$TASK_ID"
 
       - name: Record a provider failure
-        # Without this the failover states in routing.py are never entered:
-        # the next coordinator run sees the secret present and chooses the
-        # same lane again.
-        if: failure()
+        # Only when the provider's own harness failed. `failure()` alone fires
+        # after any earlier step too, so a registry outage during dependency
+        # install or a bad brief would blame the provider and take a healthy
+        # lane out of the pool.
+        if: failure() && (steps.claude.outcome == 'failure' || steps.openrouter.outcome == 'failure')
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -326,6 +327,34 @@ jobs:
             --title "Task $TASK_ID: autonomous implementation" \
             --body "$body" \
             || echo 'a pull request already exists for this branch'
+
+      - name: Carry spend and the pull request back to the ledger
+        # Both were written on the task branch. A retry starts from a fresh
+        # default-branch checkout, so spend recorded here would not count
+        # against the per-task ceiling, and a lease with no pull request looks
+        # finished to the watchdog the moment this run ends.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          number="$(gh pr view "$BRANCH" --json number --jq '.number' 2>/dev/null || true)"
+          if [ -n "$number" ]; then
+            uv run --locked python -m services.agentops.cli attach               --task "$TASK_ID" --pull-request "$number" || true
+          fi
+          git stash push --include-untracked -- ops/state || true
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH"
+          git stash pop || true
+          uv run --locked python -m services.agentops.cli validate || exit 0
+          git add ops/state
+          if ! git diff --cached --quiet; then
+            git commit -m "Record spend and the pull request for task ${TASK_ID}"
+            git pull --rebase --autostash origin "$DEFAULT_BRANCH"
+            uv run --locked python -m services.agentops.cli validate || exit 0
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
 
       - name: Report to the activity feed
         if: always()

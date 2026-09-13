@@ -620,14 +620,20 @@ class TestThirdReviewFindings(unittest.TestCase):
             run.return_value = mock.Mock(returncode=0, stdout='{"state":"MERGED"}')
             self.assertTrue(watchdog.owner_finished({"pull_request": 42}))
 
-    def test_an_unreadable_pull_request_does_not_wedge_recovery(self) -> None:
+    def test_an_unreadable_pull_request_holds_the_lease(self) -> None:
+        """Fail closed: an outage must not hand a live branch to a second writer."""
         from unittest import mock
 
         from services.agentops import watchdog
 
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="")
-            self.assertTrue(watchdog.owner_finished({"pull_request": 42}))
+            self.assertFalse(
+                watchdog.owner_finished(
+                    {"pull_request": 42, "heartbeat_at": state.now()},
+                    policy=policy(),
+                )
+            )
 
     def test_the_usage_check_acts_on_what_it_finds(self) -> None:
         """Reporting an overrun and doing nothing leaves the lane eligible."""
@@ -637,3 +643,39 @@ class TestThirdReviewFindings(unittest.TestCase):
         usage = source.split("def cmd_usage", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("BUDGET_EXHAUSTED", usage)
         self.assertIn("record_spend", usage)
+
+
+class TestFifthReviewFindings(unittest.TestCase):
+    """Regressions for the fifth review round."""
+
+    def test_a_provider_is_blamed_only_when_its_harness_failed(self) -> None:
+        """`failure()` alone fires after any earlier step.
+
+        A registry outage during dependency install would otherwise take a
+        healthy provider lane out of the pool.
+        """
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("steps.claude.outcome == 'failure'", text)
+        self.assertIn("steps.openrouter.outcome == 'failure'", text)
+
+    def test_spend_and_the_pull_request_reach_the_ledger(self) -> None:
+        """Both were written on the task branch and never carried back."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("Carry spend and the pull request back to the ledger", text)
+        self.assertIn("--pull-request", text)
+
+    def test_an_ineligible_task_is_refused(self) -> None:
+        """Eligibility was computed and then only reported."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        verify = source.split("def cmd_verify_assignment", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("candidate.eligible", verify)
+        self.assertIn("task is not eligible", verify)
+
+    def test_liveness_fails_closed(self) -> None:
+        from services.agentops import watchdog
+
+        source = Path(watchdog.__file__).read_text(encoding="utf-8")
+        self.assertIn("Fails closed", source)
+        self.assertGreater(watchdog.UNRESOLVED_GRACE_MULTIPLE, 1)

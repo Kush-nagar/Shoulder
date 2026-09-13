@@ -468,15 +468,52 @@ class TestSecondReviewFindings(unittest.TestCase):
             run.return_value = mock.Mock(returncode=0, stdout='{"status":"completed"}')
             self.assertTrue(watchdog.owner_finished({"worker_run_id": "123"}))
 
-    def test_an_unanswerable_run_query_does_not_wedge_recovery(self) -> None:
+    def test_an_unanswerable_liveness_query_holds_the_lease(self) -> None:
+        """Fail closed.
+
+        An API outage or rate limit must not let the sweep take a branch from a
+        worker that is still running: two writers on one branch is worse than
+        recovery arriving late.
+        """
         from unittest import mock
 
         from services.agentops import watchdog
 
+        # Nothing attached means nothing could still be running.
         self.assertTrue(watchdog.owner_finished({}))
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="")
-            self.assertTrue(watchdog.owner_finished({"worker_run_id": "123"}))
+            self.assertFalse(
+                watchdog.owner_finished(
+                    {"worker_run_id": "123", "heartbeat_at": ago(60)},
+                    policy=self.policy,
+                )
+            )
+
+    def test_a_long_unanswerable_lease_is_eventually_released(self) -> None:
+        """Holding forever is its own failure.
+
+        A lease pointing at a run that no longer exists would never be
+        answerable, so after a long multiple of the grace window it is let go.
+        """
+        from unittest import mock
+
+        from services.agentops import watchdog
+
+        settings = self.policy["lease"]
+        window = (
+            settings["heartbeat_seconds"]
+            * settings["stale_after_missed_heartbeats"]
+            * watchdog.UNRESOLVED_GRACE_MULTIPLE
+        )
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            self.assertTrue(
+                watchdog.owner_finished(
+                    {"worker_run_id": "123", "heartbeat_at": ago(window + 600)},
+                    policy=self.policy,
+                )
+            )
 
     def test_attempts_are_actually_bounded(self) -> None:
         """The policy promised a retry ceiling; nothing enforced it."""

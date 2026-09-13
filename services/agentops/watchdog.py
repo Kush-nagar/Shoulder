@@ -20,56 +20,98 @@ from . import coordinator, leases, notify, state
 RUNNING_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 
 
-def owner_finished(lease: dict[str, Any], *, repo: str | None = None) -> bool:
-    """Whether the workflow run holding this lease has really stopped.
+# How far past expiry a lease may sit before an unanswerable liveness question
+# stops protecting it. Long enough that an API outage cannot cause a takeover,
+# short enough that a lease pointing at a deleted run does not wedge forever.
+UNRESOLVED_GRACE_MULTIPLE = 8
 
-    Recovering a lease on a timestamp alone would let the sweep take a branch
-    away from a worker that is simply slow. When the lease records its run,
-    ask GitHub. When it does not, or the query fails, fall back to the
-    timestamps -- an unanswerable question should not wedge recovery forever.
+
+def owner_finished(
+    lease: dict[str, Any],
+    *,
+    repo: str | None = None,
+    policy: dict[str, Any] | None = None,
+) -> bool:
+    """Whether whatever holds this lease has really stopped.
+
+    Fails closed. If the question cannot be answered -- an API outage, a rate
+    limit, a bad token -- this reports "still running", because reclaiming a
+    lease whose worker is alive puts a second writer on its branch, and that is
+    worse than recovery being late.
+
+    The exception is a lease that has been unanswerable for a long time, which
+    would otherwise wedge forever; see UNRESOLVED_GRACE_MULTIPLE.
     """
     # The worker's own run, when one was recorded. `run_id` is the
     # coordinator's, and that ends in seconds regardless of what the worker is
     # doing, so falling back to it would prove nothing.
     run_id = lease.get("worker_run_id")
-    if not run_id:
-        pull_request = lease.get("pull_request")
-        if pull_request is not None:
-            # Codex Cloud has no workflow run to inspect, so the pull request
-            # is the evidence. An open one means the work may still be in
-            # flight; reclaiming it would put a second writer on the branch.
-            return _pull_request_finished(int(pull_request), repo=repo)
+    pull_request = lease.get("pull_request")
+
+    if run_id:
+        answer = _run_finished(str(run_id), repo=repo)
+    elif pull_request is not None:
+        # Codex Cloud has no workflow run to inspect, so the pull request is
+        # the evidence. An open one means the work may still be in flight.
+        answer = _pull_request_finished(int(pull_request), repo=repo)
+    else:
+        # Nothing was ever attached, so there is nothing that could still be
+        # running on this lease's behalf.
         return True
-    command = ["gh", "run", "view", str(run_id), "--json", "status"]
+
+    if answer is not None:
+        return answer
+    # Unanswerable. Hold the lease unless it has been unanswerable so long that
+    # protecting it has become the bigger problem.
+    return _long_unresolved(lease, policy)
+
+
+def _long_unresolved(lease: dict[str, Any], policy: dict[str, Any] | None) -> bool:
+    if policy is None:
+        return False
+    settings = policy["lease"]
+    window = (
+        int(settings["heartbeat_seconds"])
+        * int(settings["stale_after_missed_heartbeats"])
+        * UNRESOLVED_GRACE_MULTIPLE
+    )
+    last = lease.get("heartbeat_at") or lease.get("acquired_at")
+    if not last:
+        return True
+    try:
+        seen = datetime.fromisoformat(str(last))
+    except ValueError:
+        return True
+    return (datetime.now(UTC) - seen).total_seconds() > window
+
+
+def _run_finished(run_id: str, *, repo: str | None = None) -> bool | None:
+    """True finished, False running, None unanswerable."""
+    command = ["gh", "run", "view", run_id, "--json", "status"]
     if repo:
         command += ["--repo", repo]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        return True
+        return None
     try:
         status = str(json.loads(result.stdout or "{}").get("status", ""))
     except json.JSONDecodeError:
-        return True
+        return None
     return status not in RUNNING_STATUSES
 
 
-def _pull_request_finished(number: int, *, repo: str | None = None) -> bool:
-    """Whether a delegated pull request has stopped being worked on.
-
-    Open means possibly still in flight. Closed or merged means finished. A
-    question that cannot be answered must not wedge recovery forever, so an
-    unreadable pull request counts as finished.
-    """
-    command = ["gh", "pr", "view", str(number), "--json", "state,updatedAt"]
+def _pull_request_finished(number: int, *, repo: str | None = None) -> bool | None:
+    """True finished, False still open, None unanswerable."""
+    command = ["gh", "pr", "view", str(number), "--json", "state"]
     if repo:
         command += ["--repo", repo]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        return True
+        return None
     try:
         payload = json.loads(result.stdout or "{}")
     except json.JSONDecodeError:
-        return True
+        return None
     return str(payload.get("state", "")).upper() != "OPEN"
 
 
@@ -89,7 +131,7 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         # Timestamps say the owner looks gone; the run itself says whether it
         # is. Taking a branch from a worker that is still running is the one
         # thing this sweep must never do.
-        if not owner_finished(lease, repo=repo):
+        if not owner_finished(lease, repo=repo, policy=ctx.policy):
             continue
         lease["state"] = "abandoned"
         lease["abandoned_at"] = state.now()
