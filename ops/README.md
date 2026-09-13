@@ -14,7 +14,7 @@ Architecture and the reasoning behind it: [ADR 0019](../decisions/0019-autonomou
 | `ops/state/tasks.json` | Active task leases and checkpoints |
 | `ops/state/budget.json` | Recorded API spend |
 | `services/agentops/` | The orchestrator itself |
-| `.github/workflows/agentops-*.yml` | Coordinator, worker, watchdog |
+| `.github/workflows/agentops-*.yml` | Coordinator, worker, reviewer, watchdog |
 
 Do not edit the orchestrator to change routing. Change `ops/policy.json`.
 
@@ -48,6 +48,10 @@ python -m services.agentops.watchdog        # recovery sweep
 promotes a lane only when that lane's secret is actually present in the
 environment. The coordinator runs it before planning, so adding a secret is
 enough — no state file needs editing by hand.
+
+`reviewer` prints the independent reviewer for a task, chosen from a different
+provider family than the writer. `agentops-review.yml` runs it on every pull
+request from a branch this system created.
 
 `verify-assignment` is the worker's own check. Dispatch inputs are
 caller-controlled, so before doing any work the worker re-derives the policy
@@ -102,13 +106,19 @@ does not spend API money.
 
 ```
 merge to main
-  -> coordinator: refresh catalogue, evaluate backlog, classify, route, lease
+  -> coordinator: reconcile merged work, refresh catalogue, probe health,
+                  evaluate backlog, classify, route, lease
   -> worker: one branch, implement, run ./scripts/check.ps1, open a PR
-  -> independent reviewer from a different provider family
+  -> reviewer: router-selected, different provider family, read-only
   -> CI
   -> merge
   -> coordinator again
 ```
+
+Reconciliation is what closes the loop. A task is complete when the branch its
+lease names has become an ancestor of `main`, which is true exactly when the
+pull request merged. The coordinator then marks the task done in
+`progress.json`, releases the lease, and looks for the next eligible task.
 
 Continuation is event-driven. The hourly watchdog exists only to recover a
 crashed worker, an expired lease, an elapsed provider cooldown, or a lost

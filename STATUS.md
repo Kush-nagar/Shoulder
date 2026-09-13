@@ -65,8 +65,16 @@ against Git and GitHub before editing anything.
   Task 23 carries the gate flag, so `AGENTS.md` rule 5 is enforced in code.
 - Coordinator dry run selects **Task 14 — Manual clip marking** (block-04,
   prerequisites 7 and 13 satisfied), classified `mixed`/`COMPLEX`.
-- Independent review (Copilot, PR #16) found eleven real defects, all repaired
-  in `2dc4957`. Three were severe: the coordinator's own state commit
+- Independent review ran twice on PR #16 and found twenty-five real defects
+  across both rounds, all repaired. The second round mattered most: nothing
+  marked a task complete or released its lease after a merge, so the loop never
+  advanced; the worker job never received `AUTONOMY_ENABLED` and would have
+  refused every run; a lease went stale after fifteen minutes while a harness
+  step can run ninety, so the watchdog would have abandoned live workers; and
+  branch validation permitted `main` on a job that force-pushes. Reconciliation,
+  run-status proof before reclaiming a lease, and a real reviewer workflow were
+  added in `ae8afee`.
+- The first round found eleven defects, repaired in `2dc4957`. Three were severe: the coordinator's own state commit
   retriggered it in an unbounded loop; the coordinator and watchdog raced on
   `ops/state` pushes; and the worker trusted caller-controlled dispatch inputs,
   so a hand-dispatched run could have paired frontend work with a forbidden
