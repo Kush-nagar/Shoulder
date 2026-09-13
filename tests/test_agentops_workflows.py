@@ -794,7 +794,7 @@ class TestSquashMergeCompletion(unittest.TestCase):
 
         source = Path(reconcile.__file__).read_text(encoding="utf-8")
         self.assertIn("branch_is_merged(root, str(branch))", source)
-        self.assertIn("pull_request_merged(str(branch), repo=repo)", source)
+        self.assertIn("pull_request_merged(str(branch), repo=repo", source)
 
     def test_completion_records_which_signal_proved_it(self) -> None:
         from services.agentops import reconcile
@@ -802,3 +802,20 @@ class TestSquashMergeCompletion(unittest.TestCase):
         source = Path(reconcile.__file__).read_text(encoding="utf-8")
         self.assertIn("squash or rebase merged", source)
         self.assertIn("ancestor of main", source)
+
+    def test_only_a_merge_into_main_completes_a_task(self) -> None:
+        """A branch retargeted to staging and merged there has not landed.
+
+        Counting it would mark the task complete and release dependent work
+        that is still waiting on code main has never seen.
+        """
+        from unittest import mock
+
+        from services.agentops import reconcile
+
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="[]")
+            reconcile.pull_request_merged("block-04-t14", base="main")
+            command = run.call_args[0][0]
+        self.assertIn("--base", command)
+        self.assertIn("main", command)

@@ -21,8 +21,14 @@ from typing import Any
 from . import coordinator, leases, notify, state
 
 
-def pull_request_merged(branch: str, *, repo: str | None = None) -> bool | None:
-    """Whether the pull request for this branch was merged.
+def pull_request_merged(
+    branch: str, *, repo: str | None = None, base: str = "main"
+) -> bool | None:
+    """Whether the pull request for this branch was merged into `base`.
+
+    The base matters. A task branch retargeted to a staging branch and merged
+    there has not landed on main, and counting it would mark the task complete
+    and release dependent work that is still waiting on code main has not seen.
 
     Ancestry alone misses the common case: a squash or rebase merge rewrites
     the commits, so the branch tip is not an ancestor of main even though the
@@ -37,6 +43,8 @@ def pull_request_merged(branch: str, *, repo: str | None = None) -> bool | None:
         "list",
         "--head",
         branch,
+        "--base",
+        base,
         "--state",
         "merged",
         "--json",
@@ -94,9 +102,9 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         # squash or rebase merge only as a merged pull request.
         merged = branch_is_merged(root, str(branch))
         how = "branch is an ancestor of main"
-        if not merged and pull_request_merged(str(branch), repo=repo):
+        if not merged and pull_request_merged(str(branch), repo=repo, base="main"):
             merged = True
-            how = "pull request was squash or rebase merged"
+            how = "pull request was squash or rebase merged into main"
         if not merged:
             continue
 
