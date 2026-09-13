@@ -97,7 +97,8 @@
       "needs_reasoning": false,
       "max_input_usd_per_mtok": 1.5,
       "effort": "low",
-      "$comment": "Ceiling admits the cheap tier of every family (Haiku-class, nano-class, flash-class) and excludes mid and frontier tiers."
+      "$comment": "Ceiling admits the cheap tier of every family (Haiku-class, nano-class, flash-class) and excludes mid and frontier tiers.",
+      "prefer": "cheapest"
     },
     "ROUTINE_CODING": {
       "min_context": 150000,
@@ -105,7 +106,8 @@
       "needs_vision": false,
       "needs_reasoning": true,
       "max_input_usd_per_mtok": 2.0,
-      "effort": "medium"
+      "effort": "medium",
+      "prefer": "cheapest"
     },
     "STRONG_CODING": {
       "min_context": 200000,
@@ -113,7 +115,9 @@
       "needs_vision": false,
       "needs_reasoning": true,
       "max_input_usd_per_mtok": 8.0,
-      "effort": "high"
+      "effort": "high",
+      "prefer": "strongest",
+      "$comment": "Above this class the ceiling caps waste and `prefer` picks the strongest model under it. Cheapest-first would send a task classified as strong to the cheap tier, which is the whole ladder collapsing into one rung."
     },
     "FRONTIER_REASONING": {
       "min_context": 200000,
@@ -121,7 +125,8 @@
       "needs_vision": false,
       "needs_reasoning": true,
       "max_input_usd_per_mtok": 30.0,
-      "effort": "high"
+      "effort": "high",
+      "prefer": "strongest"
     },
     "VISUAL_FRONTEND": {
       "min_context": 200000,
@@ -129,7 +134,8 @@
       "needs_vision": true,
       "needs_reasoning": true,
       "max_input_usd_per_mtok": 30.0,
-      "effort": "high"
+      "effort": "high",
+      "prefer": "strongest"
     },
     "LONG_HORIZON_AGENT": {
       "min_context": 400000,
@@ -137,7 +143,8 @@
       "needs_vision": false,
       "needs_reasoning": true,
       "max_input_usd_per_mtok": 30.0,
-      "effort": "high"
+      "effort": "high",
+      "prefer": "strongest"
     }
   },
   "classification_to_class": {
@@ -163,7 +170,12 @@
       "EXTREME": "LONG_HORIZON_AGENT"
     }
   },
-  "effort_ladder": ["low", "medium", "high", "xhigh"],
+  "effort_ladder": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
   "escalation": {
     "max_implementation_attempts": 3,
     "max_effort_escalations": 2,
@@ -187,7 +199,9 @@
     "$comment": "Ceilings for metered lanes only. Subscription lanes (Claude, Codex Cloud) spend an included allowance rather than API money and are never blocked by a dollar ceiling. Raising a ceiling is a deliberate human edit."
   },
   "qualification": {
-    "required_states": ["QUALIFIED"],
+    "required_states": [
+      "QUALIFIED"
+    ],
     "$comment": "A newly discovered model is CANDIDATE until it passes the synthetic suite, then QUALIFIED, or QUARANTINED on failure. Promotion happens only at a task boundary, never mid-task.",
     "requalify_after_days": 30
   },

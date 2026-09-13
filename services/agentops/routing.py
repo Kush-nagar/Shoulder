@@ -172,11 +172,25 @@ def eligible_models(
         if model.input_usd_per_mtok > spec["max_input_usd_per_mtok"]:
             continue
         out.append(model)
-    # Cheapest first, on every lane. A subscription allowance is finite too,
+    # Within a class, cheapest first: a subscription allowance is finite too,
     # and a stronger model drains a five-hour window faster, so "there is no
     # cost to optimise" is false even where no invoice arrives.
+    #
+    # But cheapest-first is only right once the bar is cleared, and for the
+    # upper classes the class spec cannot state the bar: it can require context,
+    # tools, vision and reasoning, none of which separate a cheap model from a
+    # frontier one. Left to cheapest-first, every class above ROUTINE resolves
+    # to the same cheap tier and the ladder collapses into one rung. So those
+    # classes ask for the strongest model under their ceiling instead, price
+    # being the only capability proxy here that does not hard-code model names.
+    direction = -1.0 if spec.get("prefer") == "strongest" else 1.0
     return sorted(
-        out, key=lambda m: (m.input_usd_per_mtok, m.output_usd_per_mtok, m.id)
+        out,
+        key=lambda m: (
+            direction * m.input_usd_per_mtok,
+            direction * m.output_usd_per_mtok,
+            m.id,
+        ),
     )
 
 

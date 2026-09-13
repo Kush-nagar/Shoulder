@@ -1131,3 +1131,47 @@ class TestAdvisoryModelReporting(unittest.TestCase):
         )
         self.assertLessEqual(cheap.input_usd_per_mtok, strong.input_usd_per_mtok)
         self.assertEqual(trivial.capability_class, "CHEAP_MECHANICAL")
+
+
+class TestCapabilityLadder(unittest.TestCase):
+    """The class ladder must actually select different models."""
+
+    def _pool(self) -> list[catalog.Model]:
+        return [
+            model("anthropic/claude-haiku-4.5", "claude_subscription", price_in=1.0),
+            model("anthropic/claude-sonnet-5", "claude_subscription", price_in=2.0),
+        ]
+
+    def test_a_routine_task_takes_the_cheaper_model(self) -> None:
+        pool = self._pool()
+        chosen = routing.select(
+            inputs(
+                policy=configured_policy(),
+                models=pool,
+                qualification=qualification(pool),
+            ),
+            classification("backend", "ROUTINE"),
+        )
+        self.assertEqual(chosen.model, "anthropic/claude-haiku-4.5")
+
+    def test_a_strong_task_does_not_fall_to_the_cheap_tier(self) -> None:
+        """A class spec can require context, tools, vision and reasoning, none
+        of which separate a cheap model from a frontier one. Cheapest-first
+        alone therefore resolved every class above ROUTINE to the same cheap
+        model, collapsing the whole ladder into one rung."""
+        pool = self._pool()
+        chosen = routing.select(
+            inputs(
+                policy=configured_policy(),
+                models=pool,
+                qualification=qualification(pool),
+            ),
+            classification("backend", "COMPLEX"),
+        )
+        self.assertEqual(chosen.capability_class, "STRONG_CODING")
+        self.assertEqual(chosen.model, "anthropic/claude-sonnet-5")
+
+    def test_every_class_states_its_preference(self) -> None:
+        """A missing knob silently means cheapest, which is the defect."""
+        for name, spec in policy()["capability_classes"].items():
+            self.assertIn(spec.get("prefer"), ("cheapest", "strongest"), name)
