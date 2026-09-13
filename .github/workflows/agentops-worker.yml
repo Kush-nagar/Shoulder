@@ -189,7 +189,14 @@ jobs:
         run: |
           set -euo pipefail
           rm -f brief.md
-          if git diff --quiet HEAD -- . ':!ops/state'; then
+          # A harness may commit its own work, so an uncommitted-changes check
+          # alone would report "no change" for a run that did plenty. Look at
+          # both the working tree and what the branch has gained over main.
+          uncommitted=1
+          git diff --quiet HEAD -- . ':!ops/state' && uncommitted=0
+          committed=1
+          git diff --quiet "origin/main...HEAD" -- . ':!ops/state' && committed=0
+          if [ "$uncommitted" = '0' ] && [ "$committed" = '0' ]; then
             echo 'The worker produced no change.' >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

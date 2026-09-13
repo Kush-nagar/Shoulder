@@ -359,3 +359,17 @@ class TestDryRunEvidence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorkerChangeDetection(unittest.TestCase):
+    """A harness that commits its own work must not read as 'no change'."""
+
+    def test_both_committed_and_uncommitted_work_count(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("origin/main...HEAD", text)
+        self.assertIn("git diff --quiet HEAD --", text)
+
+    def test_state_files_are_excluded_from_the_change_check(self) -> None:
+        """A ledger write is not the worker having done the task."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("':!ops/state'", text)
