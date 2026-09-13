@@ -759,3 +759,46 @@ class TestEighthReviewFindings(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         self.assertIn("GITHUB_RUN_ATTEMPT", text)
         self.assertNotIn('--once-key "run-${GITHUB_RUN_ID}"', text)
+
+
+class TestSquashMergeCompletion(unittest.TestCase):
+    """A squash-merged task must still be recognised as done.
+
+    Squash and rebase merges rewrite the commits, so the branch tip is not an
+    ancestor of main even though the work landed. Ancestry alone would leave
+    the task outstanding and the coordinator would re-dispatch it forever.
+    """
+
+    def test_a_merged_pull_request_counts(self) -> None:
+        from unittest import mock
+
+        from services.agentops import reconcile
+
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout='[{"number": 7}]')
+            self.assertTrue(reconcile.pull_request_merged("block-04-t14"))
+            run.return_value = mock.Mock(returncode=0, stdout="[]")
+            self.assertFalse(reconcile.pull_request_merged("block-04-t14"))
+
+    def test_an_unanswerable_query_is_not_a_merge(self) -> None:
+        from unittest import mock
+
+        from services.agentops import reconcile
+
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            self.assertIsNone(reconcile.pull_request_merged("block-04-t14"))
+
+    def test_reconcile_consults_both_signals(self) -> None:
+        from services.agentops import reconcile
+
+        source = Path(reconcile.__file__).read_text(encoding="utf-8")
+        self.assertIn("branch_is_merged(root, str(branch))", source)
+        self.assertIn("pull_request_merged(str(branch), repo=repo)", source)
+
+    def test_completion_records_which_signal_proved_it(self) -> None:
+        from services.agentops import reconcile
+
+        source = Path(reconcile.__file__).read_text(encoding="utf-8")
+        self.assertIn("squash or rebase merged", source)
+        self.assertIn("ancestor of main", source)
