@@ -119,7 +119,16 @@ class TestWorkflowPermissions(unittest.TestCase):
         """It proves lanes work; it must not be able to land anything."""
         text = read(WORKFLOW_DIR / "agentops-verify.yml")
         self.assertNotIn("pull-requests: write", text)
-        self.assertNotIn("actions: write", text)
+        # `actions: write` would let it dispatch other workflows. The guard job
+        # mentions the permission only in prose, so check the declarations.
+        for line in text.splitlines():
+            self.assertNotEqual(line.strip(), "actions: write")
+
+    def test_verify_refuses_a_dispatch_from_another_ref(self) -> None:
+        """Pinning the checkout does not pin the workflow definition."""
+        text = read(WORKFLOW_DIR / "agentops-verify.yml")
+        self.assertIn("refusing a verification dispatch from", text)
+        self.assertIn("needs: guard", text)
 
     def test_verify_never_enables_autonomy(self) -> None:
         text = read(WORKFLOW_DIR / "agentops-verify.yml")
@@ -566,7 +575,8 @@ class TestCodexReviewFindings(unittest.TestCase):
 
         source = Path(cli.__file__).read_text(encoding="utf-8")
         health = source.split("def cmd_health", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('"COOLDOWN", "AUTH_FAILED", "DEGRADED"', health)
+        for preserved in ("COOLDOWN", "AUTH_FAILED", "DEGRADED", "BUDGET_EXHAUSTED"):
+            self.assertIn(f'"{preserved}"', health, preserved)
 
     def test_the_worker_attaches_its_own_run_to_the_lease(self) -> None:
         text = read(WORKFLOW_DIR / "agentops-worker.yml")

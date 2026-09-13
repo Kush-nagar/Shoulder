@@ -166,6 +166,16 @@ jobs:
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli validate
+          # Delegation leaves this checkout on the new task branch. Committing
+          # here and pushing HEAD to main would put that branch's starter
+          # commit on main, and reconcile would then read the branch as merged
+          # and mark the task complete before any work existed. Carry only the
+          # state files back onto main.
+          git stash push --include-untracked -- ops/state || true
+          git fetch origin main
+          git checkout -B agentops-state-handoff origin/main
+          git stash pop || true
+          uv run --locked python -m services.agentops.cli validate
           git add ops/state
           if git diff --cached --quiet; then
             echo 'no hand-off state to record'

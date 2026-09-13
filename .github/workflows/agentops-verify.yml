@@ -23,6 +23,14 @@ on:
         description: 'How many candidate models to qualify (costs a few cents)'
         type: string
         default: '4'
+  # Also on a merge that changes the control plane, which needs no ref choice
+  # at all and is the safer of the two paths.
+  push:
+    branches: [main]
+    paths:
+      - 'ops/policy.json'
+      - 'services/agentops/**'
+      - '.github/workflows/agentops-*.yml'
 concurrency:
   group: agentops-verify-${{ github.ref }}
   cancel-in-progress: true
@@ -30,7 +38,31 @@ concurrency:
 permissions: {}
 
 jobs:
+  guard:
+    # `gh workflow run --ref` chooses which branch's *workflow file* runs, so
+    # pinning the checkout is not enough on its own: a branch could rewrite
+    # these steps. This refuses a dispatch from anywhere but the default
+    # branch, which stops the accidental case outright.
+    #
+    # It does not stop a determined one: replacing this file requires push
+    # access, and anyone with that could change the default branch anyway. The
+    # containment that matters is elsewhere -- an autonomous worker's token
+    # has no `actions: write`, so a compromised worker cannot dispatch this
+    # workflow at all.
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "$DEFAULT_BRANCH" ]; then
+            echo "refusing a verification dispatch from $REF;"               "this workflow holds every provider credential and runs only"               "from $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+
   verify:
+    needs: guard
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

@@ -151,13 +151,41 @@ jobs:
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli attach             --task "$TASK_ID" --run-id "$GITHUB_RUN_ID"
+          # Push it: an attachment that lives only in this runner cannot tell
+          # the watchdog that this worker is alive, and a job queued past the
+          # grace window would have its branch reclaimed.
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          git stash push --include-untracked -- ops/state || true
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B agentops-attach "origin/$DEFAULT_BRANCH"
+          git stash pop || true
+          uv run --locked python -m services.agentops.cli validate
+          git add ops/state
+          if ! git diff --cached --quiet; then
+            git commit -m "Attach worker run ${GITHUB_RUN_ID} to task ${TASK_ID}"
+            git pull --rebase --autostash origin "$DEFAULT_BRANCH"
+            uv run --locked python -m services.agentops.cli validate
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
 
-      - name: Create the task branch
+      - name: Check out the task branch
         run: |
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
-          git checkout -B "$BRANCH"
+          # Resume an existing branch rather than resetting it. `-B` with no
+          # start point resets to the current HEAD, so on a recovery attempt
+          # this would throw away the previous worker's pushed commits and the
+          # later force-push would make that permanent.
+          if git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+            echo "resumed the existing branch $BRANCH"
+          else
+            git checkout -B "$BRANCH"
+            echo "started a new branch $BRANCH"
+          fi
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

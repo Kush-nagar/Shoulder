@@ -628,3 +628,92 @@ class TestEndToEndFailover(unittest.TestCase):
         built = self.plan_for(15)
         self.assertIsNone(built.writer)
         self.assertIn("BLOCKED_PROVIDER", built.blocked_reason or "")
+
+
+class TestFourthReviewFindings(unittest.TestCase):
+    """Regressions for the fourth review round."""
+
+    def setUp(self) -> None:
+        self.policy = policy()
+        self.tasks: dict[str, Any] = {"leases": {}}
+
+    def test_acquire_refuses_a_stale_lease_whose_owner_still_runs(self) -> None:
+        """Timestamps are not proof.
+
+        A worker queued longer than the grace window looks stale while being
+        entirely alive, and reassigning it puts a second writer on its branch.
+        Only the watchdog asked; acquisition did not.
+        """
+        from agentops_fixtures import make_stale
+
+        leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=14,
+            owner="worker-a",
+            branch="block-04-t14",
+            assignment=assignment(),
+        )
+        make_stale(self.tasks["leases"]["14"], self.policy)
+
+        with self.assertRaises(leases.LeaseConflict) as raised:
+            leases.acquire(
+                self.tasks,
+                self.policy,
+                task_id=14,
+                owner="worker-b",
+                branch="block-04-t14",
+                assignment=assignment(),
+                owner_finished=lambda _lease: False,
+            )
+        self.assertIn("still running", str(raised.exception))
+
+    def test_acquire_proceeds_once_the_owner_has_stopped(self) -> None:
+        from agentops_fixtures import make_stale
+
+        leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=14,
+            owner="worker-a",
+            branch="block-04-t14",
+            assignment=assignment(),
+        )
+        make_stale(self.tasks["leases"]["14"], self.policy)
+        lease = leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=14,
+            owner="worker-b",
+            branch="block-04-t14",
+            assignment=assignment(),
+            owner_finished=lambda _lease: True,
+        )
+        self.assertEqual(lease["owner"], "worker-b")
+
+    def test_a_worker_resumes_a_pushed_branch_rather_than_resetting_it(
+        self,
+    ) -> None:
+        """`-B` with no start point would discard the previous attempt's work,
+        and the later force-push would make that permanent."""
+        from agentops_fixtures import REPO_ROOT as root
+
+        text = (root / ".github/workflows/agentops-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('git checkout -B "$BRANCH" "origin/$BRANCH"', text)
+        self.assertIn("git ls-remote --exit-code origin", text)
+
+    def test_the_hand_off_commit_does_not_ride_the_task_branch(self) -> None:
+        """Delegation leaves the checkout on the task branch.
+
+        Pushing HEAD to main from there would put the branch's starter commit
+        on main, and reconcile would read the task as already merged.
+        """
+        from agentops_fixtures import REPO_ROOT as root
+
+        text = (root / ".github/workflows/agentops-coordinator.yml").read_text(
+            encoding="utf-8"
+        )
+        handoff = text.split("Commit what the hand-off recorded", 1)[1]
+        self.assertIn("git checkout -B agentops-state-handoff origin/main", handoff)

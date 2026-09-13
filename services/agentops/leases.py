@@ -8,6 +8,7 @@ stopped heartbeating.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -83,8 +84,15 @@ def acquire(
     branch: str,
     assignment: dict[str, Any],
     run_id: str | None = None,
+    owner_finished: Callable[[dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
-    """Take an exclusive lease, or raise LeaseConflict."""
+    """Take an exclusive lease, or raise LeaseConflict.
+
+    `owner_finished` proves the previous holder really stopped. Timestamps
+    alone are not proof: a worker queued longer than the grace window looks
+    stale while being entirely alive, and reassigning it puts a second writer
+    on its branch. Callers that can ask the platform should pass this.
+    """
     leases = tasks.setdefault("leases", {})
     key = str(task_id)
     existing = leases.get(key)
@@ -95,6 +103,11 @@ def acquire(
                 f"task {task_id} is held by {existing.get('owner')} "
                 f"(state {existing.get('state')}, "
                 f"heartbeat {existing.get('heartbeat_at')})"
+            )
+        if owner_finished is not None and not owner_finished(existing):
+            raise LeaseConflict(
+                f"task {task_id} looks stale but its owner "
+                f"{existing.get('owner')} is still running"
             )
         # Recovering a stale lease is a recorded event, not a silent takeover.
         history = existing.setdefault("recovered_from", [])

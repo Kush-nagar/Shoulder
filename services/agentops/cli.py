@@ -20,7 +20,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import catalog, classify, coordinator, leases, notify, qualify, routing, state
+from . import (
+    catalog,
+    classify,
+    coordinator,
+    leases,
+    notify,
+    qualify,
+    routing,
+    state,
+    watchdog,
+)
 
 
 def _root(args: argparse.Namespace) -> Path:
@@ -161,7 +171,12 @@ def cmd_health(args: argparse.Namespace) -> int:
             # probe. Presence of a credential is not evidence that the provider
             # is working, and overwriting the failure would erase the very
             # signal that makes failover happen.
-            if health.get(lane_name) in ("COOLDOWN", "AUTH_FAILED", "DEGRADED"):
+            if health.get(lane_name) in (
+                "COOLDOWN",
+                "AUTH_FAILED",
+                "DEGRADED",
+                "BUDGET_EXHAUSTED",
+            ):
                 continue
 
             secret = lane.get("secret")
@@ -650,6 +665,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             branch=built.branch,
             assignment=built.writer.as_dict(),
             run_id=args.run_id,
+            owner_finished=lambda lease: watchdog.owner_finished(lease, repo=args.repo),
         )
     except leases.LeaseConflict as conflict:
         return _emit({"dispatched": False, "reason": str(conflict)})
@@ -737,6 +753,7 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch = sub.add_parser("dispatch", help="assign the next task to a worker")
     dispatch.add_argument("--owner", default="coordinator")
     dispatch.add_argument("--run-id", dest="run_id")
+    dispatch.add_argument("--repo")
     dispatch.set_defaults(func=cmd_dispatch)
 
     verify = sub.add_parser(
