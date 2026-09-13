@@ -170,6 +170,7 @@ def attach_worker(
     task_id: int,
     *,
     run_id: str | None = None,
+    run_attempt: str | None = None,
     pull_request: int | None = None,
 ) -> dict[str, Any]:
     """Record what is really doing the work, once it exists.
@@ -183,7 +184,12 @@ def attach_worker(
     if lease is None:
         raise LeaseConflict(f"no lease for task {task_id}")
     if run_id:
+        # The bare id, because that is what `gh run view` takes. The attempt is
+        # recorded beside it rather than folded in: GitHub keeps the id across
+        # a re-run, so the attempt is what tells two runs apart.
         lease["worker_run_id"] = run_id
+    if run_attempt:
+        lease["worker_run_attempt"] = str(run_attempt)
     if pull_request is not None:
         lease["pull_request"] = pull_request
     lease["heartbeat_at"] = now()

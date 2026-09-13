@@ -20,6 +20,23 @@ against Git and GitHub before editing anything.
 | Bootstrap blocker | **Owner credentials and account connections.** Everything automatable is done; see "Autonomous build system" below for the exact four items. |
 | Next action | **`AGENTOPS_BOOTSTRAP` is implemented and awaiting owner setup.** Autonomy is disabled (`AUTONOMY_ENABLED=false`); the coordinator dry-runs to Task 14 but dispatches nothing. Do not start Block 04 by hand. |
 
+
+The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
+
+<!-- agentops:progress:begin -->
+
+### Autonomous progress
+
+- Updated: 2026-09-12T00:00:00+00:00
+- Completed tasks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+- Completed blocks: [1, 2, 3]
+- Next eligible task: Task 14 - Manual clip marking
+
+Maintained by `services/agentops/reconcile.py`. Edit around this
+block, not inside it.
+
+<!-- agentops:progress:end -->
+
 ### Environment limitations on this workstation
 
 - **Firefox browser tests were blocked locally, and are not currently.** Windows
@@ -117,20 +134,6 @@ against Git and GitHub before editing anything.
   `pyproject.toml` pins 0.12.10. `scripts/check.ps1` uses the vendored
   `.tools/uv.exe`, which is 0.12.10, so the gate itself is unaffected; only an
   ad-hoc `uv` invocation from PATH fails.
-
-<!-- agentops:progress:begin -->
-
-### Autonomous progress
-
-- Updated: 2026-09-12T00:00:00+00:00
-- Completed tasks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-- Completed blocks: [1, 2, 3]
-- Next eligible task: Task 14 - Manual clip marking
-
-Maintained by `services/agentops/reconcile.py`. Edit around this
-block, not inside it.
-
-<!-- agentops:progress:end -->
 
 ## Current state
 

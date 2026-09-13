@@ -27,6 +27,7 @@ from . import (
     leases,
     notify,
     qualify,
+    reconcile,
     routing,
     state,
     watchdog,
@@ -421,9 +422,19 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         # The run id alone is stable across a re-run of the same workflow, so
         # a replay would match it. The attempt is what distinguishes them.
         attached = held.get("worker_run_id")
+        attached_attempt = held.get("worker_run_attempt")
         if attached and args.run_id and str(attached) != str(args.run_id):
             problems.append(
                 f"the lease is held by worker run {attached}, not {args.run_id}"
+            )
+        elif (
+            attached_attempt
+            and args.run_attempt
+            and str(attached_attempt) != str(args.run_attempt)
+        ):
+            problems.append(
+                f"the lease is held by attempt {attached_attempt} of that run, "
+                f"not attempt {args.run_attempt}"
             )
         if args.branch and held.get("branch") and held["branch"] != args.branch:
             problems.append(
@@ -633,7 +644,11 @@ def cmd_attach(args: argparse.Namespace) -> int:
     tasks = state.read_json(paths.tasks, {"leases": {}})
     try:
         lease = leases.attach_worker(
-            tasks, args.task, run_id=args.run_id, pull_request=args.pull_request
+            tasks,
+            args.task,
+            run_id=args.run_id,
+            run_attempt=args.run_attempt,
+            pull_request=args.pull_request,
         )
     except leases.LeaseConflict as conflict:
         _emit({"ok": False, "reason": str(conflict)})
@@ -644,6 +659,7 @@ def cmd_attach(args: argparse.Namespace) -> int:
             "ok": True,
             "task": args.task,
             "worker_run_id": lease.get("worker_run_id"),
+            "worker_run_attempt": lease.get("worker_run_attempt"),
             "pull_request": lease.get("pull_request"),
         }
     )
@@ -735,10 +751,26 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         # Bounded retries: stop rather than reacquiring the task forever.
         leases.release(ctx.tasks, candidate.task.id, "blocked")
         state.write_json(ctx.paths.tasks, ctx.tasks)
+
+        # Blocking changes what the next eligible task is, and STATUS.md is the
+        # file a human and every worker read. Leaving it naming a task nothing
+        # will pick up would be worse than not writing it at all.
+        fresh = coordinator.load_context(root)
+        following = coordinator.next_eligible(fresh)
+        refreshed = reconcile.update_status_file(
+            root,
+            fresh.progress,
+            (
+                f"Task {following.task.id} - {following.task.title}"
+                if following
+                else "none eligible"
+            ),
+        )
         return _emit(
             {
                 "dispatched": False,
                 "reason": f"BLOCKED_AUTOMATION: {exhausted}",
+                "status_file_updated": refreshed,
             }
         )
 
@@ -827,6 +859,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--model", required=True)
     verify.add_argument("--branch")
     verify.add_argument("--run-id", dest="run_id")
+    verify.add_argument("--run-attempt", dest="run_attempt")
     verify.set_defaults(func=cmd_verify_assignment)
 
     reviewer = sub.add_parser(
@@ -866,6 +899,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attach.add_argument("--task", type=int, required=True)
     attach.add_argument("--run-id", dest="run_id")
+    attach.add_argument("--run-attempt", dest="run_attempt")
     attach.add_argument("--pull-request", dest="pull_request", type=int)
     attach.set_defaults(func=cmd_attach)
 

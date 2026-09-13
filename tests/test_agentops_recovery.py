@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from agentops_fixtures import REPO_ROOT, make_stale, policy
 
@@ -994,11 +996,145 @@ class TestTenthReviewFindings(unittest.TestCase):
             self.assertNotEqual(following.task.id, blocked_id)
 
     def test_the_worker_identity_includes_the_attempt(self) -> None:
-        """GITHUB_RUN_ID is unchanged on a re-run; only the attempt increments."""
+        """GITHUB_RUN_ID is unchanged on a re-run; only the attempt increments.
+
+        The two travel as separate flags. Concatenating them was the round-14
+        defect: the combined value reached `gh run view`, which takes a bare
+        run id, so every liveness query failed and fail-closed froze the lease.
+        """
         from agentops_fixtures import REPO_ROOT as root
 
         text = (root / ".github/workflows/agentops-worker.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn('--run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', text)
-        self.assertNotIn('--run-id "$GITHUB_RUN_ID"', text)
+        self.assertIn('--run-id "$GITHUB_RUN_ID"', text)
+        self.assertIn('--run-attempt "$GITHUB_RUN_ATTEMPT"', text)
+        self.assertNotIn("${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", text)
+
+
+class TestFourteenthReviewFindings(unittest.TestCase):
+    """Regressions for the fourteenth review round."""
+
+    def setUp(self) -> None:
+        self.policy = policy()
+
+    def test_the_attempt_is_stored_beside_the_run_id_not_inside_it(self) -> None:
+        """`gh run view` takes a bare run id.
+
+        Folding the attempt into the same field made every liveness query fail,
+        and because that query fails closed the lease could never be recovered.
+        """
+        tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            tasks,
+            self.policy,
+            task_id=14,
+            owner="run-1",
+            branch="block-04-t14",
+            assignment=assignment(),
+        )
+        lease = leases.attach_worker(
+            tasks, 14, run_id="123", run_attempt="2", pull_request=None
+        )
+        self.assertEqual(lease["worker_run_id"], "123")
+        self.assertEqual(lease["worker_run_attempt"], "2")
+
+        # And the watchdog asks about the bare id.
+        from services.agentops import watchdog
+
+        seen: list[list[str]] = []
+
+        class Result:
+            returncode = 0
+            stdout = '{"status": "completed"}'
+
+        def fake_run(command: list[str], **_: Any) -> Result:
+            seen.append(command)
+            return Result()
+
+        with mock.patch("services.agentops.watchdog.subprocess.run", fake_run):
+            watchdog.owner_finished(lease, repo="o/r", policy=self.policy)
+        self.assertIn(
+            ["gh", "run", "view", "123", "--json", "status", "--repo", "o/r"], seen
+        )
+
+    def test_the_managed_block_lives_inside_the_supervisor_checkpoint(self) -> None:
+        """Seeded below the whole checkpoint, the managed block and the human
+        table become two adjacent answers to the same question, and a worker
+        reading top-down acts on the stale one."""
+        from agentops_fixtures import REPO_ROOT as root
+
+        from services.agentops import reconcile
+
+        text = (root / "STATUS.md").read_text(encoding="utf-8")
+        start = text.index("## Supervisor checkpoint")
+        marker = text.index(reconcile.STATUS_BEGIN)
+        self.assertGreater(marker, start)
+        following = text.find(chr(10) + "## ", start + 1)
+        self.assertTrue(
+            following == -1 or marker < following,
+            "the managed block drifted out of the checkpoint section",
+        )
+
+    def test_blocking_a_task_refreshes_the_human_checkpoint(self) -> None:
+        """Only merges used to rewrite STATUS.md, so after a task exhausted its
+        attempts the checkpoint kept naming it as the next action forever."""
+        import shutil
+        import tempfile
+
+        from agentops_fixtures import REPO_ROOT as source
+
+        from services.agentops import cli, reconcile
+
+        tmp = tempfile.mkdtemp()
+        root = Path(tmp)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(source / relative, root / relative)
+        shutil.copy(source / "STATUS.md", root / "STATUS.md")
+
+        ctx = coordinator.load_context(root)
+        ctx.policy["autonomy"]["enabled"] = True
+        state.write_json(ctx.paths.policy, ctx.policy)
+        # The repository variable overrides the file, and it is false here.
+        patched = mock.patch.dict(os.environ, {"AUTONOMY_ENABLED": "true"})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+        candidate = coordinator.next_eligible(ctx)
+        assert candidate is not None
+        limit = int(ctx.policy["escalation"]["max_implementation_attempts"])
+        ctx.tasks.setdefault("leases", {})[str(candidate.task.id)] = {
+            "task_id": candidate.task.id,
+            "state": "implementing",
+            "branch": "block-04-t14",
+            "owner": "worker-gone",
+            "attempts": limit,
+            "expires_at": ago(9999),
+            "heartbeat_at": ago(9999),
+        }
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+
+        before = (root / "STATUS.md").read_text(encoding="utf-8")
+        code = cli.main(
+            ["--root", str(root), "dispatch", "--owner", "run-2", "--run-id", "2"]
+        )
+        self.assertEqual(code, 0)
+
+        after = (root / "STATUS.md").read_text(encoding="utf-8")
+        self.assertNotEqual(before, after)
+        self.assertIn(reconcile.STATUS_BEGIN, after)
+        self.assertEqual(
+            str(candidate.task.id),
+            str(
+                coordinator.load_context(root).tasks["leases"][str(candidate.task.id)][
+                    "task_id"
+                ]
+            ),
+        )
+        self.assertEqual(
+            coordinator.load_context(root).tasks["leases"][str(candidate.task.id)][
+                "state"
+            ],
+            "blocked",
+        )
