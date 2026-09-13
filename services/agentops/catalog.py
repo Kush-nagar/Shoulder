@@ -147,6 +147,9 @@ def merge_qualification(
             state = "QUARANTINED"
             record["quarantine_reason"] = "deprecated by provider"
         record.update(model.as_dict())
+        # The provider is listing it again, so clear any earlier absence;
+        # otherwise models_from_state would skip it forever.
+        record.pop("absent", None)
         record["qualification"] = state
         record["first_seen"] = record.get("first_seen") or now
         record["last_seen"] = now

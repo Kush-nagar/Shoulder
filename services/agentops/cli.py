@@ -185,6 +185,42 @@ def cmd_spend(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_reviewer(args: argparse.Namespace) -> int:
+    """Emit the independent reviewer assignment for a task.
+
+    The reviewer comes from a different provider family than the writer, so
+    the writer is never the only judge of its own work.
+    """
+    root = _root(args)
+    ctx = coordinator.load_context(root)
+    task = ctx.backlog.tasks.get(args.task)
+    if task is None:
+        _emit({"ok": False, "reason": f"task {args.task} is not canonical"})
+        return 1
+
+    classification = classify.classify(task)
+    inputs = ctx.routing_inputs()
+    try:
+        writer = routing.select(inputs, classification)
+        reviewer = routing.select_reviewer(inputs, classification, writer)
+    except routing.RoutingBlocked as blocked:
+        _emit({"ok": False, "reason": blocked.reason, "rejections": blocked.rejections})
+        return 1
+
+    _emit(
+        {
+            "ok": True,
+            "task": task.id,
+            "writer_lane": writer.lane,
+            "lane": reviewer.lane,
+            "model": reviewer.harness_model,
+            "effort": reviewer.effort,
+            "capability_class": reviewer.capability_class,
+        }
+    )
+    return 0
+
+
 def cmd_verify_assignment(args: argparse.Namespace) -> int:
     """Re-derive the policy decision for a task and compare it to the dispatch.
 
@@ -305,9 +341,20 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             owner=args.owner,
             branch=built.branch,
             assignment=built.writer.as_dict(),
+            run_id=args.run_id,
         )
     except leases.LeaseConflict as conflict:
         return _emit({"dispatched": False, "reason": str(conflict)})
+    except leases.AttemptsExhausted as exhausted:
+        # Bounded retries: stop rather than reacquiring the task forever.
+        leases.release(ctx.tasks, candidate.task.id, "blocked")
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+        return _emit(
+            {
+                "dispatched": False,
+                "reason": f"BLOCKED_AUTOMATION: {exhausted}",
+            }
+        )
 
     state.write_json(ctx.paths.tasks, ctx.tasks)
     payload = built.as_dict()
@@ -321,11 +368,13 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
 def cmd_notify(args: argparse.Namespace) -> int:
     root = _root(args)
     policy = state.load_policy(state.Paths(root))
-    title = policy["notifications"]["issue_title"]
-    issue = args.issue or notify.find_issue(title, repo=args.repo)
+    # Create the feed if this repository has none. Looking it up and giving up
+    # meant a fresh repository silently dropped every event.
+    issue = args.issue or notify.ensure_feed(policy, repo=args.repo)
     if issue is None:
+        title = policy["notifications"]["issue_title"]
         return _emit(
-            {"ok": False, "reason": f"activity feed issue {title!r} not found"}
+            {"ok": False, "reason": f"could not find or create issue {title!r}"}
         )
     ok = notify.post(
         issue,
@@ -374,6 +423,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     dispatch = sub.add_parser("dispatch", help="assign the next task to a worker")
     dispatch.add_argument("--owner", default="coordinator")
+    dispatch.add_argument("--run-id", dest="run_id")
     dispatch.set_defaults(func=cmd_dispatch)
 
     verify = sub.add_parser(
@@ -384,6 +434,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--lane", required=True)
     verify.add_argument("--model", required=True)
     verify.set_defaults(func=cmd_verify_assignment)
+
+    reviewer = sub.add_parser(
+        "reviewer", help="print the independent reviewer assignment for a task"
+    )
+    reviewer.add_argument("--task", type=int, required=True)
+    reviewer.set_defaults(func=cmd_reviewer)
 
     spend = sub.add_parser("spend", help="record API spend for a lane")
     spend.add_argument("--lane", required=True)

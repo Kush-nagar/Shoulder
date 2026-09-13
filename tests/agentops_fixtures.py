@@ -116,3 +116,22 @@ def qualification(
     models: list[catalog.Model], state: str = "QUALIFIED"
 ) -> dict[str, str]:
     return {m.id: state for m in models}
+
+
+def make_stale(lease: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    """Age a lease past the point where it may be reclaimed.
+
+    Staleness needs both conditions: the nominal expiry has passed and nothing
+    has heartbeated since. Ageing only the heartbeat leaves a live worker's
+    lease intact, which is the behaviour that protects a long harness run.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    grace = int(settings["lease"]["heartbeat_seconds"]) * int(
+        settings["lease"]["stale_after_missed_heartbeats"]
+    )
+    past = datetime.now(UTC) - timedelta(seconds=grace + 120)
+    lease["expires_at"] = past.isoformat(timespec="seconds")
+    lease["heartbeat_at"] = past.isoformat(timespec="seconds")
+    lease["acquired_at"] = past.isoformat(timespec="seconds")
+    return lease

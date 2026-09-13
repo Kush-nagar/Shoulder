@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from agentops_fixtures import REPO_ROOT, policy
+from agentops_fixtures import REPO_ROOT, make_stale, policy
 
 from services.agentops import brief, coordinator, leases, state, watchdog
 
@@ -24,7 +24,7 @@ def read(path: Path) -> str:
 
 
 class TestWorkflowsExist(unittest.TestCase):
-    def test_the_three_control_plane_workflows_are_present(self) -> None:
+    def test_the_control_plane_workflows_are_present(self) -> None:
         names = {p.name for p in AGENTOPS_WORKFLOWS}
         self.assertEqual(
             names,
@@ -32,6 +32,7 @@ class TestWorkflowsExist(unittest.TestCase):
                 "agentops-coordinator.yml",
                 "agentops-worker.yml",
                 "agentops-watchdog.yml",
+                "agentops-review.yml",
             },
         )
 
@@ -240,7 +241,6 @@ class TestWatchdog(unittest.TestCase):
         self.assertFalse(watchdog.sweep(REPO_ROOT)["idle"])
 
     def test_stale_lease_is_abandoned_and_its_checkpoint_kept(self) -> None:
-        from datetime import UTC, datetime, timedelta
 
         settings = policy()
         tasks: dict[str, Any] = {"leases": {}}
@@ -260,13 +260,7 @@ class TestWatchdog(unittest.TestCase):
             commit="abc1234",
             remaining=["marking UI"],
         )
-        window = (
-            settings["lease"]["heartbeat_seconds"]
-            * settings["lease"]["stale_after_missed_heartbeats"]
-        )
-        tasks["leases"]["14"]["heartbeat_at"] = (
-            datetime.now(UTC) - timedelta(seconds=window + 60)
-        ).isoformat(timespec="seconds")
+        make_stale(tasks["leases"]["14"], settings)
 
         self.assertTrue(leases.is_stale(tasks["leases"]["14"], settings))
         self.assertEqual(leases.active_leases(tasks, settings), [])
@@ -388,3 +382,63 @@ class TestSpendRecording(unittest.TestCase):
         """openai/codex-action reports no usage, so nothing is invented."""
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         self.assertIn("inputs.lane != 'codex_api'", text)
+
+
+class TestReviewWorkflow(unittest.TestCase):
+    """34. The writer is never the only judge of its own work."""
+
+    def setUp(self) -> None:
+        self.text = read(WORKFLOW_DIR / "agentops-review.yml")
+
+    def test_the_reviewer_is_actually_run(self) -> None:
+        """The assignment used to be logged and never executed."""
+        self.assertIn("cli reviewer --task", self.text)
+        for lane in ("claude_subscription", "openrouter", "codex_api"):
+            self.assertIn(f"steps.pick.outputs.lane == '{lane}'", self.text)
+
+    def test_review_only_touches_branches_this_system_made(self) -> None:
+        self.assertIn("startsWith(github.head_ref, 'block-')", self.text)
+
+    def test_the_reviewer_cannot_write_repository_contents(self) -> None:
+        self.assertIn("contents: read", self.text)
+        self.assertNotIn("contents: write", self.text)
+
+    def test_the_codex_reviewer_is_read_only(self) -> None:
+        self.assertIn("safety-strategy: read-only", self.text)
+
+
+class TestLoopCompletion(unittest.TestCase):
+    """Without reconciliation the system dispatches work but never finishes it."""
+
+    def test_the_coordinator_reconciles_merged_work(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
+        self.assertIn("services.agentops.reconcile", text)
+
+    def test_reconcile_reads_merge_state_from_git(self) -> None:
+        from services.agentops import reconcile
+
+        # An unmerged, non-existent branch is not complete.
+        self.assertFalse(reconcile.branch_is_merged(REPO_ROOT, "no-such-branch"))
+
+    def test_a_merged_ancestor_counts_as_merged(self) -> None:
+        from services.agentops import reconcile
+
+        # HEAD's own history is by definition contained in HEAD.
+        self.assertTrue(reconcile.branch_is_merged(REPO_ROOT, "HEAD", base="HEAD"))
+
+    def test_the_worker_records_a_provider_failure(self) -> None:
+        """Failover states are useless if nothing ever enters them."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("Record a provider failure", text)
+        self.assertIn("--status DEGRADED", text)
+
+    def test_the_worker_job_receives_the_kill_switch(self) -> None:
+        """Scoped to the guard job alone, every worker would refuse."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        work = text.split("  work:", 1)[1]
+        self.assertIn("AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}", work)
+
+    def test_the_worker_refuses_reserved_branches(self) -> None:
+        """The job force-pushes what it is given, so main must be rejected."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("main|master|HEAD|refs/*|*/HEAD", text)

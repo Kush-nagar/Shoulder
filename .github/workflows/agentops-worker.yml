@@ -78,6 +78,10 @@ jobs:
       actions: read
     env:
       NEXT_TELEMETRY_DISABLED: '1'
+      # The guard reads this too, but its scope is that job only. Without it
+      # here, verify-assignment loads the committed `enabled: false` and
+      # refuses every worker.
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
       TASK_ID: ${{ inputs.task_id }}
       LANE: ${{ inputs.lane }}
       MODEL: ${{ inputs.model }}
@@ -97,6 +101,17 @@ jobs:
           case "$BRANCH" in
             ''|-*|*[!A-Za-z0-9._/-]*)
               echo 'branch name contains something unsafe' >&2; exit 1 ;;
+          esac
+          # This job force-pushes the branch it is given. A reserved name would
+          # mean writing straight to a protected branch instead of a task one.
+          case "$BRANCH" in
+            main|master|HEAD|refs/*|*/HEAD)
+              echo "refusing to work on the reserved branch $BRANCH" >&2
+              exit 1 ;;
+          esac
+          case "$BRANCH" in
+            block-*|task-*) ;;
+            *) echo "branch must be a task branch, got $BRANCH" >&2; exit 1 ;;
           esac
           case "$MODEL" in
             ''|-*|*[!A-Za-z0-9._/:-]*)
@@ -203,6 +218,16 @@ jobs:
           fi
           uv run --locked python -m services.agentops.cli spend \
             --lane "$LANE" --usd "$cost" --task "$TASK_ID"
+
+      - name: Record a provider failure
+        # Without this the failover states in routing.py are never entered:
+        # the next coordinator run sees the secret present and chooses the
+        # same lane again.
+        if: failure()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          uv run --locked python -m services.agentops.cli health             --lane "$LANE" --status DEGRADED             --reason "worker run ${GITHUB_RUN_ID} failed"
 
       - name: Run the repository quality gate
         id: gate

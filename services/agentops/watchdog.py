@@ -10,11 +10,38 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from . import coordinator, leases, notify, state
+
+RUNNING_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
+
+
+def owner_finished(lease: dict[str, Any], *, repo: str | None = None) -> bool:
+    """Whether the workflow run holding this lease has really stopped.
+
+    Recovering a lease on a timestamp alone would let the sweep take a branch
+    away from a worker that is simply slow. When the lease records its run,
+    ask GitHub. When it does not, or the query fails, fall back to the
+    timestamps -- an unanswerable question should not wedge recovery forever.
+    """
+    run_id = lease.get("run_id")
+    if not run_id:
+        return True
+    command = ["gh", "run", "view", str(run_id), "--json", "status"]
+    if repo:
+        command += ["--repo", repo]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return True
+    try:
+        status = str(json.loads(result.stdout or "{}").get("status", ""))
+    except json.JSONDecodeError:
+        return True
+    return status not in RUNNING_STATUSES
 
 
 def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
@@ -29,6 +56,11 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         if lease.get("state") not in leases.ACTIVE_STATES:
             continue
         if not leases.is_stale(lease, ctx.policy):
+            continue
+        # Timestamps say the owner looks gone; the run itself says whether it
+        # is. Taking a branch from a worker that is still running is the one
+        # thing this sweep must never do.
+        if not owner_finished(lease, repo=repo):
             continue
         lease["state"] = "abandoned"
         lease["abandoned_at"] = state.now()
@@ -83,7 +115,7 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     }
 
     if repo and (recovered or returned):
-        issue = notify.find_issue(ctx.policy["notifications"]["issue_title"], repo=repo)
+        issue = notify.ensure_feed(ctx.policy, repo=repo)
         if issue is not None:
             notify.post(
                 issue,

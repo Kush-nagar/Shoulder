@@ -105,6 +105,26 @@ def ensure_issue(title: str, body: str, *, repo: str | None = None) -> int | Non
     return int(match.group(1)) if match else find_issue(title, repo=repo)
 
 
+FEED_BODY = """Durable milestone feed for the autonomous build system.
+
+The coordinator, workers, and watchdog post here: task starts, checkpoints,
+verification results, pull requests, reviews, CI state changes, provider
+switches, merges, blockers, and budget warnings. Shell commands, tool calls,
+file reads, and raw logs stay out by design.
+
+Watch this issue to receive notifications through normal GitHub channels.
+"""
+
+
+def ensure_feed(policy: dict[str, Any], *, repo: str | None = None) -> int | None:
+    """The feed issue, created if this repository does not have one yet.
+
+    Callers used to look the issue up and give up when it was missing, which
+    meant a fresh repository silently dropped every event.
+    """
+    return ensure_issue(policy["notifications"]["issue_title"], FEED_BODY, repo=repo)
+
+
 def post(
     issue: int,
     kind: str,

@@ -21,6 +21,10 @@ class LeaseConflict(Exception):
     """Another worker already holds a live lease on this task."""
 
 
+class AttemptsExhausted(Exception):
+    """This task has used its implementation attempts and must be escalated."""
+
+
 def _parse(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -31,24 +35,33 @@ def _parse(value: str | None) -> datetime | None:
 
 
 def is_stale(lease: dict[str, Any], policy: dict[str, Any]) -> bool:
-    """A lease is stale once its owner has missed enough heartbeats.
+    """Whether a lease may be taken from its owner.
 
-    Expiry alone is not enough: a worker that is still heartbeating past its
-    nominal expiry is alive and must not have its branch taken away.
+    A worker cannot heartbeat while a harness is running: the implementation
+    step is one Actions step that can last the whole job. Treating a missed
+    heartbeat alone as death would abandon a live 90-minute worker after 15
+    minutes and let a second writer onto its branch, which is the exact
+    failure the lease exists to prevent.
+
+    So a lease is stale only once BOTH are true: its nominal expiry, which
+    matches the worker job timeout, has passed, and nothing has heartbeated
+    since. The watchdog additionally proves the owner is really gone by
+    checking its workflow run before reclaiming; see watchdog.owner_finished.
     """
     settings = policy["lease"]
     beat = int(settings["heartbeat_seconds"])
     allowed = int(settings["stale_after_missed_heartbeats"])
-    deadline = timedelta(seconds=beat * allowed)
+    grace = timedelta(seconds=beat * allowed)
+    now_utc = datetime.now(UTC)
 
     last = _parse(lease.get("heartbeat_at")) or _parse(lease.get("acquired_at"))
     if last is None:
         return True
-    if datetime.now(UTC) - last > deadline:
-        return True
 
     expires = _parse(lease.get("expires_at"))
-    return bool(expires and datetime.now(UTC) > expires + deadline)
+    if expires is None:
+        return now_utc - last > grace
+    return now_utc > expires + grace and now_utc - last > grace
 
 
 def active_leases(
@@ -69,6 +82,7 @@ def acquire(
     owner: str,
     branch: str,
     assignment: dict[str, Any],
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """Take an exclusive lease, or raise LeaseConflict."""
     leases = tasks.setdefault("leases", {})
@@ -91,6 +105,13 @@ def acquire(
                 "last_heartbeat": existing.get("heartbeat_at"),
                 "recovered_at": now(),
             }
+        )
+
+    attempts = int((existing or {}).get("attempts", 0))
+    max_attempts = int(policy["escalation"]["max_implementation_attempts"])
+    if attempts >= max_attempts:
+        raise AttemptsExhausted(
+            f"task {task_id} has used {attempts} of {max_attempts} attempts"
         )
 
     limit = int(policy["autonomy"]["max_parallel_writers"])
@@ -123,6 +144,7 @@ def acquire(
             ),
             "heartbeat_at": acquired.isoformat(timespec="seconds"),
             "attempts": int(lease.get("attempts", 0)) + 1,
+            "run_id": run_id,
             "checkpoint": lease.get("checkpoint"),
         }
     )

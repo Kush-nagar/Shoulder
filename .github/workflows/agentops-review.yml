@@ -1,0 +1,129 @@
+name: AgentOps Review
+
+# Independent review of a worker's pull request.
+#
+# The writer must not be the only judge of its own work, so the reviewer is
+# chosen from a different provider family than the one that wrote the branch.
+# Without this workflow the reviewer assignment was only ever logged: it could
+# block dispatch but never actually look at a diff.
+#
+# This triggers on `pull_request`, never on the target-context variant: these
+# branches live in this repository, so the trusted checkout is the right one
+# and fork code never runs with these secrets.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+concurrency:
+  group: agentops-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # Only branches this system produced. An ordinary human pull request is
+    # reviewed by whatever the repository already uses.
+    if: startsWith(github.head_ref, 'block-') || startsWith(github.head_ref, 'task-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    env:
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+      HEAD_REF: ${{ github.head_ref }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Choose the reviewer
+        id: pick
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          # The branch encodes its task: block-04-t14-... or task-14-...
+          task="$(printf '%s' "$HEAD_REF" | sed -n 's/.*[-]t\?\([0-9][0-9]*\)-.*/\1/p')"
+          if [ -z "$task" ]; then
+            echo 'could not read a task number from the branch' >&2
+            exit 1
+          fi
+          uv run --locked python -m services.agentops.cli health --probe > /dev/null
+          uv run --locked python -m services.agentops.cli reviewer --task "$task" \
+            > reviewer.json
+          cat reviewer.json >> "$GITHUB_STEP_SUMMARY"
+          echo "task=$task" >> "$GITHUB_OUTPUT"
+          echo "lane=$(jq -r '.lane // empty' reviewer.json)" >> "$GITHUB_OUTPUT"
+          echo "model=$(jq -r '.model // empty' reviewer.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Review with Claude
+        if: steps.pick.outputs.lane == 'claude_subscription'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: >-
+            --model ${{ steps.pick.outputs.model }}
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+
+      - name: Review with an OpenRouter model
+        if: steps.pick.outputs.lane == 'openrouter'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: >-
+            --model ${{ steps.pick.outputs.model }}
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+
+      - name: Review with Codex
+        if: steps.pick.outputs.lane == 'codex_api'
+        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ steps.pick.outputs.model }}
+          permission-profile: ':read-only'
+          safety-strategy: read-only
+          prompt: >-
+            Review the diff of this branch against main. Report only concrete,
+            actionable defects: correctness, security, privacy, row-level
+            security, migration safety, concurrency, error handling, test
+            adequacy, and any change outside the task's stated scope. Do not
+            praise and do not restate the diff.
+
+      - name: Report the review to the activity feed
+        if: always()
+        env:
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          LANE: ${{ steps.pick.outputs.lane }}
+          TASK: ${{ steps.pick.outputs.task }}
+        run: |
+          set -uo pipefail
+          uv run --locked python -m services.agentops.cli notify review_start \
+            "Task ${TASK} reviewed on PR #${PR}" \
+            --details "$(jq -nc --arg lane "$LANE" --arg pr "$PR" \
+              '{reviewer_lane: $lane, pull_request: $pr}')" \
+            --repo "$REPO" || echo 'activity feed unavailable'

@@ -67,6 +67,15 @@ jobs:
         continue-on-error: true
         run: uv run --locked python -m services.agentops.cli discover
 
+      - name: Reconcile merged work
+        # Closes the loop. A merged task branch is what marks a task complete
+        # and releases its lease; without this the coordinator would keep
+        # seeing the same task outstanding and held, and never advance.
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.reconcile --repo "$REPO"             > reconcile.json
+          cat reconcile.json >> "$GITHUB_STEP_SUMMARY"
+
       - name: Probe provider health
         # Lanes are seeded UNAVAILABLE. This is what lifts one once its secret
         # exists, so routing has something to choose from.
@@ -100,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli dispatch \
-            --owner "run-${RUN_ID}" > dispatch.json
+            --owner "run-${RUN_ID}" --run-id "${RUN_ID}" > dispatch.json
           cat dispatch.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit the state ledger

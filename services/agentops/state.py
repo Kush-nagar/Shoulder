@@ -9,6 +9,7 @@ in prose.
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -189,7 +190,16 @@ def budget_blocked(policy: dict[str, Any], budget: dict[str, Any]) -> frozenset[
 def record_spend(
     budget: dict[str, Any], lane: str, usd: float, *, task_id: int | None = None
 ) -> dict[str, Any]:
-    """Add spend to the daily, monthly, and per-task buckets."""
+    """Add spend to the daily, monthly, and per-task buckets.
+
+    A provider-reported cost is untrusted input. A negative, NaN, or infinite
+    amount would lower a running total or make every ceiling comparison false,
+    which turns budget enforcement off rather than tripping it.
+    """
+    amount = float(usd)
+    if not math.isfinite(amount) or amount < 0:
+        raise ValueError(f"refusing to record a spend of {usd!r}")
+    usd = amount
     day, month = _period_keys()
     spend = budget.setdefault("spend", {})
     for bucket, key in (("daily", day), ("monthly", month)):

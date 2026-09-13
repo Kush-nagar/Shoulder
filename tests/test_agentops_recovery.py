@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from agentops_fixtures import REPO_ROOT, policy
+from agentops_fixtures import REPO_ROOT, make_stale, policy
 
 from services.agentops import coordinator, leases, state
 
@@ -109,20 +109,11 @@ class TestHeartbeatAndStaleness(unittest.TestCase):
         self.assertFalse(leases.is_stale(lease, self.policy))
 
     def test_a_silent_worker_becomes_stale(self) -> None:
-        settings = self.policy["lease"]
-        missed = (
-            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
-        )
-        lease = self.tasks["leases"]["14"]
-        lease["heartbeat_at"] = ago(missed + 60)
+        lease = make_stale(self.tasks["leases"]["14"], self.policy)
         self.assertTrue(leases.is_stale(lease, self.policy))
 
     def test_stale_lease_is_recovered_and_the_takeover_is_recorded(self) -> None:
-        settings = self.policy["lease"]
-        missed = (
-            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
-        )
-        self.tasks["leases"]["14"]["heartbeat_at"] = ago(missed + 60)
+        make_stale(self.tasks["leases"]["14"], self.policy)
         recovered = leases.acquire(
             self.tasks,
             self.policy,
@@ -136,11 +127,7 @@ class TestHeartbeatAndStaleness(unittest.TestCase):
         self.assertEqual(recovered["recovered_from"][0]["owner"], "worker-a")
 
     def test_active_leases_exclude_stale_ones(self) -> None:
-        settings = self.policy["lease"]
-        missed = (
-            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
-        )
-        self.tasks["leases"]["14"]["heartbeat_at"] = ago(missed + 60)
+        make_stale(self.tasks["leases"]["14"], self.policy)
         self.assertEqual(leases.active_leases(self.tasks, self.policy), [])
 
     def test_a_lease_with_no_timestamps_is_stale(self) -> None:
@@ -190,11 +177,7 @@ class TestCheckpointRecovery(unittest.TestCase):
             complete=["migration 0007"],
             remaining=["marking UI"],
         )
-        settings = self.policy["lease"]
-        missed = (
-            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
-        )
-        self.tasks["leases"]["14"]["heartbeat_at"] = ago(missed + 60)
+        make_stale(self.tasks["leases"]["14"], self.policy)
 
         successor = leases.acquire(
             self.tasks,
@@ -225,12 +208,8 @@ class TestCheckpointRecovery(unittest.TestCase):
             self.assertLessEqual(limits[key], 5)
 
     def test_attempt_count_survives_recovery(self) -> None:
-        settings = self.policy["lease"]
-        missed = (
-            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
-        )
         for expected in (2, 3):
-            self.tasks["leases"]["14"]["heartbeat_at"] = ago(missed + 60)
+            make_stale(self.tasks["leases"]["14"], self.policy)
             lease = leases.acquire(
                 self.tasks,
                 self.policy,
@@ -354,3 +333,118 @@ class TestSeededStateShape(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSecondReviewFindings(unittest.TestCase):
+    """Regressions for the defects the second review round found."""
+
+    def setUp(self) -> None:
+        self.policy = policy()
+        self.tasks: dict[str, Any] = {"leases": {}}
+
+    def test_a_long_running_worker_is_not_declared_stale(self) -> None:
+        """A harness step can run for the whole job and cannot heartbeat.
+
+        Treating a missed heartbeat alone as death would hand a live worker's
+        branch to a second writer after 15 minutes.
+        """
+        lease = leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=14,
+            owner="worker-a",
+            branch="block-04-t14",
+            assignment=assignment(),
+        )
+        # Sixty minutes of silence, still inside the ninety-minute lease.
+        lease["heartbeat_at"] = ago(3600)
+        self.assertFalse(leases.is_stale(lease, self.policy))
+        self.assertEqual(len(leases.active_leases(self.tasks, self.policy)), 1)
+
+    def test_a_lease_goes_stale_after_expiry_plus_grace(self) -> None:
+        lease = leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=14,
+            owner="worker-a",
+            branch="block-04-t14",
+            assignment=assignment(),
+        )
+        duration = int(self.policy["lease"]["duration_seconds"])
+        grace = (
+            self.policy["lease"]["heartbeat_seconds"]
+            * self.policy["lease"]["stale_after_missed_heartbeats"]
+        )
+        lease["acquired_at"] = ago(duration + grace + 120)
+        lease["heartbeat_at"] = ago(duration + grace + 120)
+        lease["expires_at"] = ago(grace + 120)
+        self.assertTrue(leases.is_stale(lease, self.policy))
+
+    def test_the_lease_records_which_run_owns_it(self) -> None:
+        """The watchdog proves the owner is gone rather than assuming."""
+        lease = leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=14,
+            owner="run-123",
+            branch="block-04-t14",
+            assignment=assignment(),
+            run_id="123",
+        )
+        self.assertEqual(lease["run_id"], "123")
+
+    def test_a_still_running_owner_is_never_reclaimed(self) -> None:
+        from unittest import mock
+
+        from services.agentops import watchdog
+
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(
+                returncode=0, stdout='{"status":"in_progress"}'
+            )
+            self.assertFalse(watchdog.owner_finished({"run_id": "123"}))
+            run.return_value = mock.Mock(returncode=0, stdout='{"status":"completed"}')
+            self.assertTrue(watchdog.owner_finished({"run_id": "123"}))
+
+    def test_an_unanswerable_run_query_does_not_wedge_recovery(self) -> None:
+        from unittest import mock
+
+        from services.agentops import watchdog
+
+        self.assertTrue(watchdog.owner_finished({}))
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            self.assertTrue(watchdog.owner_finished({"run_id": "123"}))
+
+    def test_attempts_are_actually_bounded(self) -> None:
+        """The policy promised a retry ceiling; nothing enforced it."""
+        limit = int(self.policy["escalation"]["max_implementation_attempts"])
+        for _ in range(limit):
+            leases.acquire(
+                self.tasks,
+                self.policy,
+                task_id=14,
+                owner="worker",
+                branch="block-04-t14",
+                assignment=assignment(),
+            )
+            leases.release(self.tasks, 14, "abandoned")
+        with self.assertRaises(leases.AttemptsExhausted):
+            leases.acquire(
+                self.tasks,
+                self.policy,
+                task_id=14,
+                owner="worker",
+                branch="block-04-t14",
+                assignment=assignment(),
+            )
+
+    def test_spend_rejects_values_that_would_disable_the_ceiling(self) -> None:
+        for bad in (-1.0, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(bad):
+                with self.assertRaises(ValueError):
+                    state.record_spend({}, "openrouter", bad, task_id=14)
+
+    def test_spend_accepts_an_ordinary_amount(self) -> None:
+        budget = state.record_spend({}, "openrouter", 0.25, task_id=14)
+        self.assertEqual(state.task_spend(budget, 14), 0.25)
