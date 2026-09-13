@@ -3,14 +3,14 @@
   "spend": {
     "daily": {
       "2026-09-13": {
-        "openrouter": 0.00082
+        "openrouter": 0.001313
       }
     },
     "monthly": {
       "2026-09": {
-        "openrouter": 0.00082
+        "openrouter": 0.001313
       }
     }
   },
-  "updated_at": "2026-09-13T15:25:37+00:00"
+  "updated_at": "2026-09-13T15:27:14+00:00"
 }
