@@ -25,8 +25,9 @@
       "branch": "block-04-t14-manual-clip-marking",
       "checkpoint": null,
       "expires_at": "2026-09-14T00:15:35+00:00",
-      "heartbeat_at": "2026-09-13T22:45:35+00:00",
+      "heartbeat_at": "2026-09-13T22:49:46+00:00",
       "owner": "run-34787720379",
+      "pull_request": 21,
       "run_id": "34787720379",
       "state": "assigned",
       "task_id": 14
