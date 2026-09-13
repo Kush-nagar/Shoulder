@@ -1,0 +1,228 @@
+{
+  "$comment": "Routing, budget, and safety policy for the Shoulder autonomous build system. Model IDs are NOT listed here on purpose: lanes declare capability requirements and services/agentops/catalog.py picks the cheapest live model that meets them. Edit this file to change behaviour; do not edit the orchestrator.",
+  "version": 1,
+  "autonomy": {
+    "enabled": false,
+    "$comment_enabled": "Master kill switch. The repository variable AUTONOMY_ENABLED overrides this at run time so autonomy can be stopped without a commit.",
+    "max_parallel_writers": 1,
+    "allow_phase_d_and_later": false,
+    "$comment_phase_d": "AGENTS.md rule 5 and the mandatory real-use gate forbid starting Task 23+ automatically. A human must clear the gate."
+  },
+  "lanes": {
+    "claude_subscription": {
+      "provider": "anthropic",
+      "harness": "claude-code-action",
+      "billing": "subscription",
+      "secret": "CLAUDE_CODE_OAUTH_TOKEN",
+      "may_write_frontend": false,
+      "$comment": "AGENTS-level project policy: Claude is never the frontend implementation writer.",
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 1,
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "Anthropic commercial terms: prompts are not used for training.",
+      "enabled": true,
+      "model_enforced": true,
+      "catalog_namespace": "anthropic",
+      "privacy_enforcement": "contractual"
+    },
+    "openrouter": {
+      "provider": "openrouter",
+      "harness": "claude-code-action",
+      "billing": "api",
+      "secret": "OPENROUTER_API_KEY",
+      "base_url": "https://openrouter.ai/api",
+      "may_write_frontend": false,
+      "$comment": "DeepSeek and other OpenRouter models are not permitted to write Shoulder frontend code under current project policy.",
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 3,
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "Zero data retention and denied training are configured on the OpenRouter account, not per request. The qualification client sets provider.zdr and provider.data_collection itself, but the coding harness does not send those fields, so a per-request claim would be false for real work.",
+      "enabled": true,
+      "model_enforced": true,
+      "catalog_namespace": "*",
+      "$comment_namespace": "The fallback lane: any namespace no enabled lane claims routes here.",
+      "privacy_enforcement": "account",
+      "requires_privacy_confirmation": true,
+      "$comment_privacy": "Because enforcement is account-level and this repository cannot read that setting, the lane stays ineligible until the account owner confirms it with `cli confirm-privacy --lane openrouter`. Failing closed is the point: Shoulder handles minors' data."
+    },
+    "codex_cloud": {
+      "provider": "openai",
+      "harness": "codex-cloud-github",
+      "mechanism": "github-mention",
+      "billing": "subscription",
+      "secret": null,
+      "enabled": true,
+      "may_write_frontend": true,
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 2,
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "ChatGPT Business/Enterprise and consumer plan terms: Codex cloud work is not used for training by default.",
+      "model_enforced": false,
+      "usage_window_seconds": 18000,
+      "$comment": "Subscription-backed Codex Cloud, reached through the Codex GitHub integration. The coordinator opens a task branch and pull request and comments '@codex <instruction>'; Codex Cloud does the work in OpenAI's sandbox and pushes back to the branch. No API key and no local machine. A mention cannot select a model or reasoning effort, so the tier this router chooses is advisory for this lane and the account's configured Codex model actually executes: model_enforced is false.",
+      "$comment_window": "usage_window_seconds is the 5-hour rolling allowance window Codex meters against. It is the cooldown applied when the lane looks exhausted.",
+      "catalog_namespace": "openai",
+      "privacy_enforcement": "contractual"
+    },
+    "codex_api": {
+      "provider": "openai",
+      "harness": "codex-action",
+      "billing": "api",
+      "secret": "OPENAI_API_KEY",
+      "may_write_frontend": true,
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 4,
+      "$comment": "Optional pay-per-use OpenAI API lane, disabled. openai/codex-action authenticates with an API key only and cannot spend the ChatGPT subscription allowance, so it is NOT the subscription-backed worker. Enable this only as a deliberate decision to add API billing.",
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "OpenAI API platform terms: API data is not used for training by default.",
+      "enabled": false,
+      "model_enforced": true,
+      "catalog_namespace": "openai",
+      "privacy_enforcement": "contractual"
+    }
+  },
+  "capability_classes": {
+    "CHEAP_MECHANICAL": {
+      "min_context": 100000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": false,
+      "max_input_usd_per_mtok": 1.5,
+      "effort": "low",
+      "$comment": "Ceiling admits the cheap tier of every family (Haiku-class, nano-class, flash-class) and excludes mid and frontier tiers.",
+      "prefer": "cheapest"
+    },
+    "ROUTINE_CODING": {
+      "min_context": 150000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 2.0,
+      "effort": "medium",
+      "prefer": "cheapest"
+    },
+    "STRONG_CODING": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 8.0,
+      "effort": "high",
+      "prefer": "strongest",
+      "$comment": "Above this class the ceiling caps waste and `prefer` picks the strongest model under it. Cheapest-first would send a task classified as strong to the cheap tier, which is the whole ladder collapsing into one rung."
+    },
+    "FRONTIER_REASONING": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 30.0,
+      "effort": "high",
+      "prefer": "strongest"
+    },
+    "VISUAL_FRONTEND": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": true,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 30.0,
+      "effort": "high",
+      "prefer": "strongest"
+    },
+    "LONG_HORIZON_AGENT": {
+      "min_context": 400000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 30.0,
+      "effort": "high",
+      "prefer": "strongest"
+    }
+  },
+  "classification_to_class": {
+    "backend": {
+      "TRIVIAL": "CHEAP_MECHANICAL",
+      "ROUTINE": "ROUTINE_CODING",
+      "COMPLEX": "STRONG_CODING",
+      "CRITICAL": "FRONTIER_REASONING",
+      "EXTREME": "LONG_HORIZON_AGENT"
+    },
+    "frontend": {
+      "TRIVIAL": "CHEAP_MECHANICAL",
+      "ROUTINE": "ROUTINE_CODING",
+      "COMPLEX": "STRONG_CODING",
+      "CRITICAL": "VISUAL_FRONTEND",
+      "EXTREME": "VISUAL_FRONTEND"
+    },
+    "mixed": {
+      "TRIVIAL": "ROUTINE_CODING",
+      "ROUTINE": "ROUTINE_CODING",
+      "COMPLEX": "STRONG_CODING",
+      "CRITICAL": "FRONTIER_REASONING",
+      "EXTREME": "LONG_HORIZON_AGENT"
+    }
+  },
+  "effort_ladder": ["low", "medium", "high", "xhigh"],
+  "escalation": {
+    "max_implementation_attempts": 3,
+    "max_effort_escalations": 2,
+    "max_model_escalations": 2,
+    "max_provider_escalations": 2,
+    "max_ci_repair_cycles": 3,
+    "max_review_repair_cycles": 3,
+    "max_failed_cloud_runs": 3
+  },
+  "privacy": {
+    "require_zero_data_retention": true,
+    "deny_data_collection": true,
+    "$comment": "Shoulder handles minors' data. Coding agents receive source, synthetic fixtures, and sanitised logs only -- never production footage, reflections, rows, or secrets. OpenRouter requests set provider.zdr and provider.data_collection accordingly; an endpoint that cannot satisfy these is ineligible at any price."
+  },
+  "budget": {
+    "openrouter_daily_usd": 5.0,
+    "openrouter_monthly_usd": 40.0,
+    "openai_daily_usd": 5.0,
+    "openai_monthly_usd": 40.0,
+    "per_task_usd": 3.0,
+    "$comment": "Ceilings for metered lanes only. Subscription lanes (Claude, Codex Cloud) spend an included allowance rather than API money and are never blocked by a dollar ceiling. Raising a ceiling is a deliberate human edit."
+  },
+  "qualification": {
+    "required_states": ["QUALIFIED"],
+    "$comment": "A newly discovered model is CANDIDATE until it passes the synthetic suite, then QUALIFIED, or QUARANTINED on failure. Promotion happens only at a task boundary, never mid-task.",
+    "requalify_after_days": 30
+  },
+  "lease": {
+    "duration_seconds": 5400,
+    "heartbeat_seconds": 300,
+    "stale_after_missed_heartbeats": 3
+  },
+  "optimization": {
+    "caveman": {
+      "routine": "full",
+      "critical": "lite"
+    },
+    "ponytail": {
+      "routine": "full",
+      "critical": "lite"
+    },
+    "context7_trigger_paths": [
+      "apps/web",
+      "services/api",
+      "migrations",
+      "infra",
+      "packages/contracts"
+    ]
+  },
+  "notifications": {
+    "issue_title": "Shoulder Autonomous Build Log",
+    "issue_label": "agentops"
+  },
+  "$comment_capability_classes": "Every class here is reachable from classification_to_class or from the visual-work override. A class nothing selects reads like a guarantee and is not one, so it does not belong in this file."
+}

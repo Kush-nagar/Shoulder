@@ -1,0 +1,225 @@
+name: AgentOps Verify
+
+# Bootstrap verification, run in the cloud because that is the only place the
+# provider credentials exist. A local run cannot prove any of this: the secrets
+# are write-only to everything outside Actions.
+#
+# It proves lanes work rather than asserting they do:
+#   * the live model catalogue is reachable and parses
+#   * OpenRouter answers real requests under the privacy contract, and the
+#     qualification suite produces verdicts
+#   * the Claude subscription token actually authenticates a cloud run
+#   * the coordinator reaches a decision with real state
+#
+# It never implements product work and never enables autonomy.
+#
+# It runs only from the default branch, by explicit dispatch. It holds the
+# provider secrets, so it must never execute code from an unmerged branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      qualify_limit:
+        description: 'How many candidate models to qualify (costs a few cents)'
+        type: string
+        default: '4'
+  # Also on a merge that changes the control plane, which needs no ref choice
+  # at all and is the safer of the two paths.
+  push:
+    branches: [main]
+    paths:
+      - 'ops/policy.json'
+      - 'services/agentops/**'
+      - '.github/workflows/agentops-*.yml'
+concurrency:
+  group: agentops-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  guard:
+    # `gh workflow run --ref` chooses which branch's *workflow file* runs, so
+    # pinning the checkout is not enough on its own: a branch could rewrite
+    # these steps. This refuses a dispatch from anywhere but the default
+    # branch, which stops the accidental case outright.
+    #
+    # It does not stop a determined one: replacing this file requires push
+    # access, and anyone with that could change the default branch anyway. The
+    # containment that matters is elsewhere -- an autonomous worker's token
+    # has no `actions: write`, so a compromised worker cannot dispatch this
+    # workflow at all.
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "$DEFAULT_BRANCH" ]; then
+            echo "refusing a verification dispatch from $REF;"               "this workflow holds every provider credential and runs only"               "from $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+
+  verify:
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # commit qualification verdicts back to the branch
+      issues: write # post the result to the activity feed
+      id-token: write # the Claude action's default app authentication
+    env:
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      QUALIFY_LIMIT: ${{ inputs.qualify_limit || '4' }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      # Pinned to the default branch, not the dispatched ref. `gh workflow run
+      # --ref` selects which branch's workflow file runs, so an unqualified
+      # checkout follows that branch and would hand the provider credentials
+      # to code that has not been reviewed or merged.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Discover the live model catalogue
+        id: discover
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli discover > discover.json
+          cat discover.json >> "$GITHUB_STEP_SUMMARY"
+          test "$(jq -r '.ok' discover.json)" = 'true'
+
+      - name: Probe provider health
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli health --probe \
+            > health.json
+          cat health.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Read OpenRouter's own usage numbers
+        # The local ledger only knows what this system recorded. This is the
+        # provider's own figure, so a ceiling can be checked against reality
+        # rather than an estimate.
+        continue-on-error: true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli usage > usage.json
+          cat usage.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Qualify models against the synthetic suite
+        id: qualify
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Both model-selecting lanes need qualified models, or routing has
+          # nothing to choose and blocks. The probes go through OpenRouter
+          # because that one interface reaches every family for a few cents;
+          # where a model was tested does not change which lane executes it.
+          # The Codex lane is absent on purpose: it cannot be told which model
+          # to use, so it is gated on lane_qualified instead.
+          for lane in claude_subscription openrouter; do
+            uv run --locked python -m services.agentops.cli qualify \
+              --lane "$lane" --limit "$QUALIFY_LIMIT" > "qualify-$lane.json"
+            cat "qualify-$lane.json" >> "$GITHUB_STEP_SUMMARY"
+          done
+          jq -s '{results: (map(.results) | add)}' \
+            qualify-claude_subscription.json qualify-openrouter.json > qualify.json
+          cost="$(jq -r '[.results[].cost_usd] | add // 0' qualify.json)"
+          echo "cost=$cost" >> "$GITHUB_OUTPUT"
+          # Record what the qualification run itself spent, so the ceilings
+          # account for it rather than treating it as free.
+          if [ "$cost" != '0' ] && [ "$cost" != 'null' ]; then
+            uv run --locked python -m services.agentops.cli spend \
+              --lane openrouter --usd "$cost"
+          fi
+
+      # The Claude lane is proven by a real cloud run with the subscription
+      # token. A read-only prompt: this must not touch the repository.
+      - name: Smoke test the Claude subscription lane
+        id: claude
+        continue-on-error: true
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: >-
+            Read ops/policy.json and reply with exactly one line naming the
+            lanes it defines. Do not modify any file and do not run any command
+            other than reading that one file.
+          claude_args: --max-turns 4
+
+      - name: Record the Claude lane result
+        env:
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$CLAUDE_OUTCOME" = 'success' ]; then
+            uv run --locked python -m services.agentops.cli health \
+              --lane claude_subscription --status AVAILABLE \
+              --reason 'cloud smoke test passed'
+          else
+            uv run --locked python -m services.agentops.cli health \
+              --lane claude_subscription --status AUTH_FAILED \
+              --reason 'cloud smoke test failed; check CLAUDE_CODE_OAUTH_TOKEN'
+          fi
+
+      - name: Run the coordinator dry run
+        id: plan
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli plan > plan.json
+          cat plan.json >> "$GITHUB_STEP_SUMMARY"
+          uv run --locked python -m services.agentops.cli status \
+            >> "$GITHUB_STEP_SUMMARY"
+          # Autonomy must still be off after every one of these steps.
+          test "$(jq -r '.autonomy_enabled' plan.json)" = 'false'
+
+      - name: Commit the qualification verdicts
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          # A rebase between two state writers can leave conflict markers in a
+          # generated file nobody reads by hand. Never commit one.
+          uv run --locked python -m services.agentops.cli validate
+          git add ops/state
+          if git diff --cached --quiet; then
+            echo 'no state change'
+            exit 0
+          fi
+          git commit -m 'Record provider qualification from a cloud verify run'
+          git pull --rebase --autostash origin "$DEFAULT_BRANCH"
+          uv run --locked python -m services.agentops.cli validate
+          git push origin "HEAD:$DEFAULT_BRANCH"
+
+      - name: Report to the activity feed
+        if: always()
+        env:
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          QUALIFY_COST: ${{ steps.qualify.outputs.cost }}
+        run: |
+          set -uo pipefail
+          qualified="$(jq -c '[.results[]? | select(.verdict=="QUALIFIED") | .model]' \
+            qualify.json 2>/dev/null || echo '[]')"
+          details="$(jq -nc \
+            --arg claude "$CLAUDE_OUTCOME" \
+            --arg cost "$QUALIFY_COST" \
+            --argjson qualified "$qualified" \
+            '{claude_lane: $claude, qualification_cost_usd: $cost, qualified: $qualified}')"
+          uv run --locked python -m services.agentops.cli notify verify \
+            'Bootstrap verification run finished' \
+            --details "$details" --repo "$REPO" \
+            || echo 'activity feed unavailable'

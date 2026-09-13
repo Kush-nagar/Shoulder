@@ -1,0 +1,221 @@
+name: AgentOps Coordinator
+
+# The durable control plane. It decides what happens next and dispatches a
+# worker; it never implements a task itself.
+#
+# Continuation is event-driven: a merge to main runs the coordinator
+# immediately, so healthy tasks follow one another without waiting for a cron
+# tick. The watchdog exists only for recovery.
+#
+# As in the worker, nothing reaches a shell through ${{ }}. Every value a
+# run: block uses arrives as an environment variable.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      # This workflow commits ops/state to main. Without ignoring it, its own
+      # state commit retriggers it, and because the catalogue refresh rewrites
+      # timestamps on every run, each run would push again and start another
+      # coordinator -- an unbounded loop, even with autonomy disabled.
+      - 'ops/state/**'
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      force_plan_only:
+        description: 'Plan without dispatching a worker'
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [agentops-continue]
+
+concurrency:
+  # One writer of ops/state at a time. This group is shared with the watchdog:
+  # both push the ledger to main, and interleaving them loses a lease recovery
+  # or fails the push outright. It also keeps two coordinators from handing the
+  # same task to two workers before either lease is written.
+  group: agentops-state
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  coordinate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # commit the state ledger, and open a Codex task branch
+      issues: write # post to the activity feed
+      actions: write # dispatch the worker workflow
+      pull-requests: write # open the pull request Codex Cloud attaches to
+    env:
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+      FORCE_PLAN_ONLY: ${{ inputs.force_plan_only }}
+      RUN_ID: ${{ github.run_id }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Refresh the model catalogue
+        continue-on-error: true
+        run: uv run --locked python -m services.agentops.cli discover
+
+      - name: Reconcile merged work
+        # Closes the loop. A merged task branch is what marks a task complete
+        # and releases its lease; without this the coordinator would keep
+        # seeing the same task outstanding and held, and never advance.
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.reconcile --repo "$REPO"             > reconcile.json
+          cat reconcile.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Probe provider health
+        # Lanes are seeded UNAVAILABLE. This is what lifts one once its secret
+        # exists, so routing has something to choose from.
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: uv run --locked python -m services.agentops.cli health --probe
+
+      - name: Plan the next task
+        id: plan
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli plan > plan.json
+          cat plan.json >> "$GITHUB_STEP_SUMMARY"
+
+          task_id="$(jq -r '.task_id // empty' plan.json)"
+          blocked="$(jq -r '.blocked_reason // empty' plan.json)"
+          enabled="$(jq -r '.autonomy_enabled' plan.json)"
+
+          echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != 'true' ] || [ -n "$blocked" ] || [ -z "$task_id" ] \
+             || [ "${FORCE_PLAN_ONLY:-false}" = 'true' ]; then
+            echo 'dispatched=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'dispatched=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Take the task lease
+        id: lease
+        if: steps.plan.outputs.dispatched == 'true'
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli dispatch \
+            --owner "run-${RUN_ID}" --run-id "${RUN_ID}" --repo "$REPO" \
+            > dispatch.json
+          cat dispatch.json >> "$GITHUB_STEP_SUMMARY"
+          # Acquisition can decline -- a stale-but-live owner, or attempts
+          # exhausted -- and still exit zero. Later steps follow this, not the
+          # earlier plan, or they would hand off work that was never leased.
+          echo "acquired=$(jq -r '.dispatched // false' dispatch.json)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Commit the state ledger
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          # A rebase between two state writers can leave conflict markers in a
+          # generated file nobody reads by hand. Never commit one.
+          uv run --locked python -m services.agentops.cli validate
+          git add ops/state STATUS.md
+          if git diff --cached --quiet; then
+            echo 'no state change'
+            exit 0
+          fi
+          git commit -m 'Update the agentops state ledger'
+          # Another state writer may have landed while this run worked.
+          git pull --rebase --autostash origin main
+          # The rebase itself is what can leave conflict markers behind, so
+          # check again before this becomes someone else's starting point.
+          uv run --locked python -m services.agentops.cli validate
+          git push origin HEAD:main
+
+      - name: Hand the task to its lane
+        if: steps.lease.outputs.acquired == 'true'
+        run: |
+          set -euo pipefail
+          mechanism="$(jq -r '.writer.mechanism // "workflow-dispatch"' dispatch.json)"
+          task="$(jq -r '.task_id' dispatch.json)"
+
+          if [ "$mechanism" = 'github-mention' ]; then
+            # Subscription-backed Codex Cloud. There is no action to run: open
+            # the task branch and pull request, then mention @codex on it. The
+            # work happens in OpenAI's sandbox against the ChatGPT allowance,
+            # with no API key and nothing running on anyone's machine.
+            uv run --locked python -m services.agentops.delegate \
+              --task "$task" --repo "$REPO"
+          else
+            gh workflow run agentops-worker.yml \
+              --field task_id="$task" \
+              --field lane="$(jq -r '.writer.lane' dispatch.json)" \
+              --field model="$(jq -r '.writer.harness_model' dispatch.json)" \
+              --field effort="$(jq -r '.writer.effort' dispatch.json)" \
+              --field branch="$(jq -r '.branch' dispatch.json)"
+          fi
+
+      - name: Commit what the hand-off recorded
+        # Delegation attaches the Codex pull request to the lease, and that
+        # happens after the ledger commit above. Without this the attachment
+        # exists only in this runner and the watchdog, seeing no worker, can
+        # reclaim a lease Codex is still working on.
+        if: steps.lease.outputs.acquired == 'true'
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli validate
+          # Delegation leaves this checkout on the new task branch. Committing
+          # here and pushing HEAD to main would put that branch's starter
+          # commit on main, and reconcile would then read the branch as merged
+          # and mark the task complete before any work existed. Carry only the
+          # state files back onto main.
+          git stash push --include-untracked -- ops/state || true
+          git fetch origin main
+          git checkout -B agentops-state-handoff origin/main
+          git stash pop || true
+          uv run --locked python -m services.agentops.cli validate
+          git add ops/state STATUS.md
+          if git diff --cached --quiet; then
+            echo 'no hand-off state to record'
+            exit 0
+          fi
+          git commit -m 'Record the task hand-off'
+          git pull --rebase --autostash origin main
+          uv run --locked python -m services.agentops.cli validate
+          git push origin HEAD:main
+
+      - name: Report to the activity feed
+        # Runs even when planning failed, so it must not assume plan.json exists.
+        if: always()
+        env:
+          # What actually happened, not what was planned: acquisition can
+          # decline after a successful plan, and the feed should say so.
+          DISPATCHED: ${{ steps.lease.outputs.acquired }}
+          TASK_ID: ${{ steps.plan.outputs.task_id }}
+        run: |
+          set -uo pipefail
+          kind=blocked
+          headline='Coordinator did not dispatch'
+          details='{}'
+          if [ "${DISPATCHED:-false}" = 'true' ]; then
+            kind=start
+            headline="Task ${TASK_ID} dispatched"
+          fi
+          if [ -s plan.json ]; then
+            details="$(jq -c '{task: .task_id, title: .task_title,
+              lane: .writer.lane, model: .writer.model, effort: .writer.effort,
+              reviewer: .reviewer.lane, reason: .blocked_reason}' plan.json)" \
+              || details='{}'
+          fi
+          uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
+            --details "$details" --repo "$REPO" \
+            || echo 'activity feed unavailable'

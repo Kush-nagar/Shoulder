@@ -1,0 +1,4 @@
+{
+  "$comment": "Active task leases. One writer per task, per branch, per checkout.",
+  "leases": {}
+}

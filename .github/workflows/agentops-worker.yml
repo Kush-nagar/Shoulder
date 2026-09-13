@@ -1,0 +1,461 @@
+name: AgentOps Worker
+
+# One worker, one task, one branch. The coordinator chooses the lane, model,
+# and effort; this workflow only carries them out.
+#
+# Three lanes, two harnesses:
+#   claude_subscription  Claude Code against the Claude subscription
+#   openrouter           Claude Code against OpenRouter's Anthropic-compatible
+#                        endpoint, for cheap backend overflow
+#
+# Codex is deliberately absent. Subscription-backed Codex Cloud is reached by
+# mentioning @codex on a pull request, not by running an action, so it is
+# delegated by the coordinator rather than dispatched here. See
+# services/agentops/delegate.py.
+#
+# Dispatch inputs never reach a shell through ${{ }}. That substitution is
+# textual, so a crafted branch name would inject a command; every run: block
+# reads a job-level environment variable, and the inputs are validated first.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: 'Canonical task number from docs/06-tasks.md'
+        required: true
+        type: string
+      lane:
+        required: true
+        type: choice
+        options: [claude_subscription, openrouter]
+      model:
+        description: 'Harness model slug chosen by the coordinator'
+        required: true
+        type: string
+      effort:
+        required: true
+        type: choice
+        options: [low, medium, high, xhigh]
+      branch:
+        required: true
+        type: string
+
+concurrency:
+  # One writer per branch. This is the last line of defence behind the lease.
+  #
+  # Note this guards the branch, not ops/state. The steps in this workflow that
+  # push the ledger take the shared agentops-state lock themselves, because the
+  # coordinator and watchdog push the same files and an interleaved rebase
+  # loses one side's write.
+  group: agentops-worker-${{ inputs.branch }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    # No checkout and no permissions: this job only reads a repository
+    # variable, so the kill switch itself cannot be what leaks access.
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - id: check
+        env:
+          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "${AUTONOMY_ENABLED:-false}" = 'true' ]; then
+            echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'allowed=false' >> "$GITHUB_OUTPUT"
+            echo 'AUTONOMY_ENABLED is not true; refusing to start work.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  work:
+    needs: guard
+    if: needs.guard.outputs.allowed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      # The guard reads this too, but its scope is that job only. Without it
+      # here, verify-assignment loads the committed `enabled: false` and
+      # refuses every worker.
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+      TASK_ID: ${{ inputs.task_id }}
+      LANE: ${{ inputs.lane }}
+      MODEL: ${{ inputs.model }}
+      EFFORT: ${{ inputs.effort }}
+      BRANCH: ${{ inputs.branch }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate the dispatch inputs
+        run: |
+          set -euo pipefail
+          case "$TASK_ID" in
+            ''|*[!0-9]*) echo 'task_id must be a number' >&2; exit 1 ;;
+          esac
+          case "$BRANCH" in
+            ''|-*|*[!A-Za-z0-9._/-]*)
+              echo 'branch name contains something unsafe' >&2; exit 1 ;;
+          esac
+          # This job force-pushes the branch it is given. A reserved name would
+          # mean writing straight to a protected branch instead of a task one.
+          case "$BRANCH" in
+            main|master|HEAD|refs/*|*/HEAD)
+              echo "refusing to work on the reserved branch $BRANCH" >&2
+              exit 1 ;;
+          esac
+          case "$BRANCH" in
+            block-*|task-*) ;;
+            *) echo "branch must be a task branch, got $BRANCH" >&2; exit 1 ;;
+          esac
+          case "$MODEL" in
+            ''|-*|*[!A-Za-z0-9._/:-]*)
+              echo 'model slug contains something unsafe' >&2; exit 1 ;;
+          esac
+          # Codex Cloud is delegated by mention, not dispatched as a worker.
+          # Refuse rather than silently run the wrong harness for the lane.
+          case "$LANE" in
+            claude_subscription|openrouter) ;;
+            *) echo "lane $LANE is not executable by this workflow" >&2; exit 1 ;;
+          esac
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Re-check the assignment against policy
+        # Dispatch inputs are caller-controlled. The worker re-derives the
+        # policy decision itself rather than trusting what it was handed, so a
+        # hand-dispatched run cannot pair frontend work with a lane forbidden
+        # to write it, name an unqualified model, or reach past the gate.
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli verify-assignment \
+            --task "$TASK_ID" --lane "$LANE" --model "$MODEL" \
+            --branch "$BRANCH" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+
+      - name: Attach this run to the lease
+        # The lease was taken by the coordinator, whose run is already over.
+        # Recording this run is what lets the watchdog tell a live worker from
+        # a dead one instead of abandoning a branch that is still being used.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+
+          # An attachment that lives only in this runner cannot tell the
+          # watchdog that this worker is alive, so it has to reach the default
+          # branch. Each attempt starts from the current remote state and
+          # re-applies the change, rather than rebasing a commit built from
+          # state another writer has since replaced -- that would keep this
+          # side's stale content and silently drop theirs. Safe to repeat
+          # because attach sets a field rather than accumulating.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            if ! git checkout -B agentops-attach "origin/$DEFAULT_BRANCH"; then
+              # Usually a dirty tree left by a failed harness. Continuing here
+              # would leave the run on the task branch and push its content to
+              # the default branch.
+              echo 'could not switch to a clean state branch; discarding local edits' >&2
+              git reset --hard
+              git clean -fd -- ops/state
+              git checkout -B agentops-attach "origin/$DEFAULT_BRANCH" || break
+            fi
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-attach' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              break
+            fi
+
+            uv run --locked python -m services.agentops.cli attach \
+              --task "$TASK_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+            uv run --locked python -m services.agentops.cli validate || break
+
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'the attachment is already recorded'
+              break
+            fi
+            git commit -m "Attach worker run ${GITHUB_RUN_ID} to task ${TASK_ID}"
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
+      - name: Check out the task branch
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          # Resume an existing branch rather than resetting it. `-B` with no
+          # start point resets to the current HEAD, so on a recovery attempt
+          # this would throw away the previous worker's pushed commits and the
+          # later force-push would make that permanent.
+          if git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+            echo "resumed the existing branch $BRANCH"
+          else
+            git checkout -B "$BRANCH"
+            echo "started a new branch $BRANCH"
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+
+      - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          npm install --global pnpm@11.25.0
+          pnpm install --frozen-lockfile
+          uv sync --locked
+
+      - name: Build the task brief
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.brief \
+            --task "$TASK_ID" --out brief.md
+
+      # --- Claude lane: the Claude subscription pays for this one -----------
+      - name: Implement with Claude
+        id: claude
+        if: inputs.lane == 'claude_subscription'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
+          claude_args: --model ${{ inputs.model }} --max-turns 120
+
+      # --- OpenRouter lane: same harness, Anthropic-compatible endpoint -----
+      - name: Implement with an OpenRouter model
+        id: openrouter
+        if: inputs.lane == 'openrouter'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
+          claude_args: --model ${{ inputs.model }} --max-turns 120
+
+      - name: Record what the run cost
+        # Both lanes here bill differently -- the Claude lane against a
+        # subscription, OpenRouter against credits -- but both run the Claude
+        # Code harness, which reports usage in its execution file. Recording it
+        # is what makes the OpenRouter ceilings real.
+        if: always()
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: >-
+            ${{ steps.claude.outputs.execution_file
+            || steps.openrouter.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          if [ -z "${EXECUTION_FILE:-}" ] || [ ! -s "$EXECUTION_FILE" ]; then
+            echo 'no execution file; nothing to record'
+            exit 0
+          fi
+          cost="$(jq -r '[.. | objects | .total_cost_usd? // empty] | first // 0' \
+            "$EXECUTION_FILE")"
+          if [ "$cost" = '0' ] || [ "$cost" = 'null' ]; then
+            echo 'the harness reported no cost'
+            exit 0
+          fi
+          # Captured here, recorded later by the step that carries state back
+          # to the default branch, so the write happens once against fresh
+          # state rather than on this task branch where it would be lost.
+          echo "RECORDED_COST=$cost" >> "$GITHUB_ENV"
+
+      - name: Record a provider failure
+        # Only when the provider's own harness failed. `failure()` alone fires
+        # after any earlier step too, so a registry outage during dependency
+        # install or a bad brief would blame the provider and take a healthy
+        # lane out of the pool.
+        if: failure() && (steps.claude.outcome == 'failure' || steps.openrouter.outcome == 'failure')
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+
+          # DEGRADED keeps the lane out of the pool until something proves it
+          # works again, so the next coordinator run takes the fallback chain
+          # instead of choosing the lane that just failed.
+          #
+          # This job is already failing, so no later step will commit anything.
+          # A failure recorded only in this runner's checkout is not recorded
+          # at all. As with the other ledger writes, each attempt re-reads the
+          # remote state and re-applies the change rather than rebasing a
+          # commit built from state another writer has since replaced. Safe to
+          # repeat: marking health sets a value rather than accumulating.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            if ! git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH"; then
+              # Usually a dirty tree left by a failed harness. Continuing here
+              # would leave the run on the task branch and push its content to
+              # the default branch.
+              echo 'could not switch to a clean state branch; discarding local edits' >&2
+              git reset --hard
+              git clean -fd -- ops/state
+              git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH" || break
+            fi
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-state-push' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              break
+            fi
+
+            uv run --locked python -m services.agentops.cli health \
+              --lane "$LANE" --status DEGRADED \
+              --reason "worker run ${GITHUB_RUN_ID} failed"
+            uv run --locked python -m services.agentops.cli validate || break
+
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'the failure is already recorded'
+              break
+            fi
+            git commit -m "Record a provider failure from worker run ${GITHUB_RUN_ID}"
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
+      - name: Run the repository quality gate
+        id: gate
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/check.ps1
+
+      - name: Push the branch and open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE: ${{ steps.gate.outcome }}
+        run: |
+          set -euo pipefail
+          rm -f brief.md
+          # A harness may commit its own work, so an uncommitted-changes check
+          # alone would report "no change" for a run that did plenty. Look at
+          # both the working tree and what the branch has gained over main.
+          uncommitted=1
+          git diff --quiet HEAD -- . ':!ops/state' && uncommitted=0
+          committed=1
+          git diff --quiet "origin/main...HEAD" -- . ':!ops/state' && committed=0
+          if [ "$uncommitted" = '0' ] && [ "$committed" = '0' ]; then
+            echo 'The worker produced no change.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          git add -A
+          git commit -m "Task $TASK_ID: autonomous implementation" || true
+          git push --force-with-lease origin "$BRANCH"
+          body="$(printf '%s\n' \
+            "Autonomous implementation of canonical Task $TASK_ID." \
+            '' \
+            "- lane: $LANE" \
+            "- model: $MODEL" \
+            "- effort: $EFFORT" \
+            "- quality gate: $GATE" \
+            '' \
+            'Independent review and green CI are required before merge.')"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Task $TASK_ID: autonomous implementation" \
+            --body "$body" \
+            || echo 'a pull request already exists for this branch'
+
+      - name: Carry spend and the pull request back to the ledger
+        # Both were written on the task branch. A retry starts from a fresh
+        # default-branch checkout, so spend recorded here would not count
+        # against the per-task ceiling, and a lease with no pull request looks
+        # finished to the watchdog the moment this run ends.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          number="$(gh pr view "$BRANCH" --json number --jq '.number' 2>/dev/null || true)"
+          cost="${RECORDED_COST:-0}"
+
+          # Same pattern as the attachment: each attempt re-reads the current
+          # remote state and re-applies the change. Spend is additive, so it
+          # carries a key that makes re-applying it a no-op; without that a
+          # retry would double-count the run against the per-task ceiling.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            if ! git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH"; then
+              # Usually a dirty tree left by a failed harness. Continuing here
+              # would leave the run on the task branch and push its content to
+              # the default branch.
+              echo 'could not switch to a clean state branch; discarding local edits' >&2
+              git reset --hard
+              git clean -fd -- ops/state
+              git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH" || break
+            fi
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-state-return' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              break
+            fi
+
+            if [ -n "$number" ]; then
+              uv run --locked python -m services.agentops.cli attach \
+                --task "$TASK_ID" --pull-request "$number" || true
+            fi
+            if [ "$cost" != '0' ] && [ "$cost" != 'null' ]; then
+              uv run --locked python -m services.agentops.cli spend \
+                --lane "$LANE" --usd "$cost" --task "$TASK_ID" \
+                --once-key "run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}" || true
+            fi
+
+            uv run --locked python -m services.agentops.cli validate || break
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'nothing further to record'
+              break
+            fi
+            git commit -m "Record spend and the pull request for task ${TASK_ID}"
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
+      - name: Report to the activity feed
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE: ${{ steps.gate.outcome }}
+        run: |
+          set -uo pipefail
+          details="$(jq -nc \
+            --arg lane "$LANE" --arg model "$MODEL" --arg effort "$EFFORT" \
+            --arg branch "$BRANCH" --arg gate "$GATE" \
+            '{lane: $lane, model: $model, effort: $effort, branch: $branch, gate: $gate}')"
+          uv run --locked python -m services.agentops.cli notify verify \
+            "Task $TASK_ID worker finished" \
+            --details "$details" \
+            --repo "$GITHUB_REPOSITORY" || echo 'activity feed unavailable'

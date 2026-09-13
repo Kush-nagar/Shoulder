@@ -1,0 +1,16 @@
+{
+  "$comment": "Recorded API spend per lane. Ceilings live in ops/policy.json and are never raised automatically.",
+  "spend": {
+    "daily": {
+      "2026-09-13": {
+        "openrouter": 0.005799
+      }
+    },
+    "monthly": {
+      "2026-09": {
+        "openrouter": 0.005799
+      }
+    }
+  },
+  "updated_at": "2026-09-13T15:38:21+00:00"
+}

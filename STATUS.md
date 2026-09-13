@@ -13,11 +13,29 @@ against Git and GitHub before editing anything.
 | Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11–13, PR #13, `dab524f`) |
 | Current block | none active; Block 03 is merged |
 | Current worker / branch | none active |
-| Open PRs | this status sync only |
+| Open PRs | none |
 | Database revision | `0006_media_playback` locally; `Shoulder Dev` is still on `0005_video_ingest` |
 | Last full verification | 2026-09-12 on `dab524f`: PR #13 CI green on its final HEAD (`af2d782`), all three browser engines passing locally including Firefox, 340 Python tests, 36 Node tests, migration `0006` up/down/up, and the full-length playback budgets measured as passing |
 | Blockers | none that require a human |
-| Next action | **`AGENTOPS_BOOTSTRAP`.** Do not start Block 04. |
+| Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
+| Next action | **`AGENTOPS_BOOTSTRAP` is verified and merged; the system is ready for autonomy but idle.** Autonomy is disabled (`AUTONOMY_ENABLED=false`), so the coordinator dry-runs to Task 14 and dispatches nothing. Release evidence: `docs/agentops-bootstrap-verification.md`. Starting Block 04 needs one deliberate action by the owner; do not start it by hand. |
+
+
+The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
+
+<!-- agentops:progress:begin -->
+
+### Autonomous progress
+
+- Updated: 2026-09-12T00:00:00+00:00
+- Completed tasks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+- Completed blocks: [1, 2, 3]
+- Next eligible task: Task 14 - Manual clip marking
+
+Maintained by `services/agentops/reconcile.py`. Edit around this
+block, not inside it.
+
+<!-- agentops:progress:end -->
 
 ### Environment limitations on this workstation
 
@@ -41,6 +59,81 @@ against Git and GitHub before editing anything.
   the magic-link browser suites need a real Auth server, and CI only substitutes
   a bare `postgres` service plus `tests/fixtures/ci-auth-schema.sql`, which
   cannot serve magic links.
+
+## Autonomous build system
+
+- **Bootstrap: implemented, not enabled.** Branch `agentops-bootstrap`. Evidence:
+  [ADR 0019](docs/decisions/0019-autonomous-build-system.md) and `ops/README.md`.
+- GitHub Actions is the control plane: `agentops-coordinator.yml` selects and
+  dispatches, `agentops-worker.yml` implements one task on one branch, and
+  `agentops-watchdog.yml` recovers stale leases and elapsed provider cooldowns.
+  Continuation is event-driven; cron is recovery only.
+- Three active lanes, all reached without pay-per-use API billing for the two
+  subscription ones: Claude on the Claude subscription, **Codex Cloud on the
+  ChatGPT subscription** through the Codex GitHub integration (`@codex` on a
+  pull request), and OpenRouter through Claude Code's Anthropic-compatible
+  endpoint. Frontend implementation is restricted to the Codex lane and fails
+  closed rather than falling back.
+- `OPENAI_API_KEY` is **not** a bootstrap credential. `openai/codex-action`
+  accepts an API key only and cannot spend the ChatGPT allowance, so it is not
+  used as the subscription worker; the optional `codex_api` lane is disabled.
+- Owner-required setup is now two secrets (`CLAUDE_CODE_OAUTH_TOKEN`,
+  `OPENROUTER_API_KEY`) plus two account-level connections (Claude GitHub App,
+  Codex cloud + code review for this repository).
+- Routing is by capability class against a live model catalogue, so model names
+  are never hard-coded. 349 models discovered on 2026-09-12; every one starts as
+  `CANDIDATE` and cannot take real work until it passes the synthetic
+  qualification suite.
+- Machine-readable state is `ops/state/`; `ops/policy.json` holds every knob.
+  `STATUS.md` stays the human summary and the coordinator updates both.
+- Kill switch: `gh variable set AUTONOMY_ENABLED --body false`. No commit needed.
+- Phase D and later remain unreachable: `allow_phase_d_and_later` is false and
+  Task 23 carries the gate flag, so `AGENTS.md` rule 5 is enforced in code.
+- **Owner setup is complete except one item.** Both secrets are configured, the
+  Claude GitHub App is installed, and Codex Cloud is connected. Remaining:
+  confirm OpenRouter account-level privacy (see `ops/README.md`), because the
+  coding harness cannot send per-request retention fields and this repository
+  cannot read the account setting. Until confirmed, the OpenRouter lane is
+  refused rather than assumed safe.
+- **Proven in the cloud:** the Claude subscription lane authenticated a real
+  run; Codex Cloud completed a real `@codex review` round trip on PR #16;
+  OpenRouter answered real qualification probes and
+  `deepseek/deepseek-v4-flash-0731` passed 5/5; the activity feed received a
+  post from the control plane itself.
+- Superseded, kept for history:
+  1. `gh secret set CLAUDE_CODE_OAUTH_TOKEN` (value from `claude setup-token`).
+  2. `gh secret set OPENROUTER_API_KEY`.
+  3. Install the Claude GitHub App on this repository.
+  4. Connect this repository in Codex cloud and turn on Code review at
+     `chatgpt.com/codex/settings/code-review`.
+  All four are browser or secure-terminal actions that only the account owner
+  can perform. No `OPENAI_API_KEY` is required.
+- After those land, the remaining automated steps are: OpenRouter model
+  qualification, a real `@codex` round trip to set `lane_qualified` on
+  `codex_cloud`, cloud smoke tests per lane, the cloud coordinator dry run,
+  merge, and the readiness report.
+- Coordinator dry run selects **Task 14 — Manual clip marking** (block-04,
+  prerequisites 7 and 13 satisfied), classified `mixed`/`COMPLEX`.
+- Independent review ran twice on PR #16 and found twenty-five real defects
+  across both rounds, all repaired. The second round mattered most: nothing
+  marked a task complete or released its lease after a merge, so the loop never
+  advanced; the worker job never received `AUTONOMY_ENABLED` and would have
+  refused every run; a lease went stale after fifteen minutes while a harness
+  step can run ninety, so the watchdog would have abandoned live workers; and
+  branch validation permitted `main` on a job that force-pushes. Reconciliation,
+  run-status proof before reclaiming a lease, and a real reviewer workflow were
+  added in `ae8afee`.
+- The first round found eleven defects, repaired in `2dc4957`. Three were severe: the coordinator's own state commit
+  retriggered it in an unbounded loop; the coordinator and watchdog raced on
+  `ops/state` pushes; and the worker trusted caller-controlled dispatch inputs,
+  so a hand-dispatched run could have paired frontend work with a forbidden
+  lane and still received the provider secrets. Two more were claims the tests
+  asserted the shape of but nothing enforced: per-lane privacy and the spend
+  ceilings. Each repair carries a regression test.
+- Open limitation: the `uv` on PATH for this workstation is 0.11.28 while
+  `pyproject.toml` pins 0.12.10. `scripts/check.ps1` uses the vendored
+  `.tools/uv.exe`, which is 0.12.10, so the gate itself is unaffected; only an
+  ad-hoc `uv` invocation from PATH fails.
 
 ## Current state
 

@@ -1,0 +1,126 @@
+name: AgentOps Review
+
+# Independent review of a worker's pull request.
+#
+# The writer must not be the only judge of its own work, so the reviewer is
+# chosen from a different provider family than the one that wrote the branch.
+#
+# The work is split across two jobs on purpose. Choosing the reviewer runs
+# orchestrator code, so it runs from the base revision with no secrets at all.
+# Only the second job holds credentials, and it runs nothing from the branch
+# except the vendored review action itself. Without that split a branch could
+# edit services/agentops and read the provider secrets out of the runner --
+# and an autonomous writer's branch is exactly that kind of branch.
+#
+# This triggers on `pull_request`, never on the target-context variant, so a
+# fork's code is never handed these credentials.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+concurrency:
+  group: agentops-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  choose:
+    # Only branches this system produced. An ordinary human pull request is
+    # reviewed by whatever the repository already uses.
+    if: startsWith(github.head_ref, 'block-') || startsWith(github.head_ref, 'task-')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      task: ${{ steps.pick.outputs.task }}
+      lane: ${{ steps.pick.outputs.lane }}
+      model: ${{ steps.pick.outputs.model }}
+    env:
+      HEAD_REF: ${{ github.head_ref }}
+    steps:
+      # The base revision, deliberately: this job runs orchestrator code, and
+      # the pull request's copy of that code is not trusted.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Choose the reviewer
+        id: pick
+        run: |
+          set -euo pipefail
+          # The branch encodes its task: block-04-t14-... or task-14-...
+          task="$(printf '%s' "$HEAD_REF" | sed -n 's/.*[-]t\?\([0-9][0-9]*\)-.*/\1/p')"
+          if [ -z "$task" ]; then
+            echo 'could not read a task number from the branch' >&2
+            exit 1
+          fi
+          uv run --locked python -m services.agentops.cli reviewer --task "$task" \
+            > reviewer.json
+          cat reviewer.json >> "$GITHUB_STEP_SUMMARY"
+          echo "task=$task" >> "$GITHUB_OUTPUT"
+          echo "lane=$(jq -r '.lane // empty' reviewer.json)" >> "$GITHUB_OUTPUT"
+          echo "model=$(jq -r '.model // empty' reviewer.json)" >> "$GITHUB_OUTPUT"
+
+  review:
+    needs: choose
+    if: needs.choose.outputs.lane != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      # No checkout of the branch before a review step runs. Each action
+      # fetches what it needs itself, so no step here executes branch code with
+      # these credentials in scope.
+      - name: Review with Claude
+        if: needs.choose.outputs.lane == 'claude_subscription'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: >-
+            --model ${{ needs.choose.outputs.model }}
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+
+      - name: Review with an OpenRouter model
+        if: needs.choose.outputs.lane == 'openrouter'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: >-
+            --model ${{ needs.choose.outputs.model }}
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+
+      - name: Review with Codex Cloud
+        # Subscription-backed, through the Codex GitHub integration. The
+        # documented trigger is exactly `@codex review` in a pull request
+        # comment; Codex reacts, reviews the diff against AGENTS.md, and posts
+        # a standard GitHub review. No API key and no action to run.
+        if: needs.choose.outputs.lane == 'codex_cloud'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --repo "$REPO" \
+            --body '@codex review for correctness, privacy, row-level security, migration safety, and anything outside this task'
