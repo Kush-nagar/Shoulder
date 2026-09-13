@@ -433,6 +433,71 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
     return 0 if not problems else 1
 
 
+def cmd_usage(args: argparse.Namespace) -> int:
+    """Read a provider's own usage and remaining limit, where it exposes one.
+
+    The local ledger only knows what this system recorded. OpenRouter reports
+    the account's actual spend and remaining credit, so a lane can be cooled
+    on the provider's numbers rather than on an estimate. Codex and Claude
+    expose no equivalent on consumer plans, which is why exhaustion there is
+    inferred from a run that could not proceed.
+    """
+    import urllib.error
+    import urllib.request
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        _emit({"ok": False, "reason": "OPENROUTER_API_KEY is not set"})
+        return 1
+
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/key",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        _emit({"ok": False, "reason": f"{type(exc).__name__}: {exc}"})
+        return 1
+
+    data = payload.get("data", payload)
+    # Never echo the key's label or anything identifying; only the numbers.
+    reported = {
+        key: data.get(key)
+        for key in (
+            "limit",
+            "limit_remaining",
+            "usage",
+            "usage_daily",
+            "usage_weekly",
+            "usage_monthly",
+            "is_free_tier",
+        )
+    }
+
+    root = _root(args)
+    paths = state.Paths(root)
+    policy = state.load_policy(paths)
+    ceiling = float(policy["budget"]["openrouter_daily_usd"])
+    daily = float(reported.get("usage_daily") or 0.0)
+    exhausted = bool(
+        reported.get("limit_remaining") is not None
+        and float(reported["limit_remaining"]) <= 0
+    )
+
+    return _emit(
+        {
+            "ok": True,
+            "lane": "openrouter",
+            "provider_reported": reported,
+            "daily_ceiling_usd": ceiling,
+            "over_daily_ceiling": daily >= ceiling,
+            "credit_exhausted": exhausted,
+        }
+    )
+
+
 def cmd_confirm_privacy(args: argparse.Namespace) -> int:
     """Record that a lane's account-level privacy settings are configured.
 
@@ -671,6 +736,10 @@ def build_parser() -> argparse.ArgumentParser:
     exhausted.add_argument("--reason")
     exhausted.add_argument("--window", type=int)
     exhausted.set_defaults(func=cmd_exhausted)
+
+    sub.add_parser(
+        "usage", help="read OpenRouter's own reported usage and remaining limit"
+    ).set_defaults(func=cmd_usage)
 
     privacy = sub.add_parser(
         "confirm-privacy", help="record that a lane's account privacy is configured"

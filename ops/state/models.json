@@ -1111,7 +1111,7 @@
       "output_usd_per_mtok": 0.09688000000000001,
       "qualification": "QUARANTINED",
       "qualification_evidence": {
-        "cost_usd": 5.9e-05,
+        "cost_usd": 5.9e-5,
         "evaluated_at": "2026-09-13T15:27:00+00:00",
         "model": "deepseek/deepseek-v4-flash",
         "passed": 4,
@@ -1171,7 +1171,7 @@
       "output_usd_per_mtok": 0.08,
       "qualification": "QUALIFIED",
       "qualification_evidence": {
-        "cost_usd": 4.6e-05,
+        "cost_usd": 4.6e-5,
         "evaluated_at": "2026-09-13T15:25:33+00:00",
         "model": "deepseek/deepseek-v4-flash-0731",
         "passed": 5,
@@ -1957,7 +1957,7 @@
       "output_usd_per_mtok": 0.063,
       "qualification": "QUARANTINED",
       "qualification_evidence": {
-        "cost_usd": 7e-05,
+        "cost_usd": 7e-5,
         "evaluated_at": "2026-09-13T15:21:35+00:00",
         "model": "inclusionai/ling-3.0-flash",
         "passed": 3,

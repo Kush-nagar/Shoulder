@@ -72,6 +72,18 @@ jobs:
             > health.json
           cat health.json >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Read OpenRouter's own usage numbers
+        # The local ledger only knows what this system recorded. This is the
+        # provider's own figure, so a ceiling can be checked against reality
+        # rather than an estimate.
+        continue-on-error: true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli usage > usage.json
+          cat usage.json >> "$GITHUB_STEP_SUMMARY"
+
       - name: Qualify models against the synthetic suite
         id: qualify
         env:
