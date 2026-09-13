@@ -109,13 +109,13 @@ correctness, or execution. Follow-up work, not bootstrap work.
    receives a "did not dispatch" entry, so the system stops safely; an operator
    simply has to read the feed or `ops/state/tasks.json` to see why.
 
-2. **`git pull --rebase` in the verify commit step.** Elsewhere this pattern was
-   replaced with re-read plus idempotent re-apply, because a rebase between two
-   state writers can silently drop the other writer's data. The verify path
-   still uses it. It is no longer reachable concurrently — that step is now
-   dispatch-only and shares the state-writer concurrency group — so the
-   remaining risk is a conflict against a commit landed between checkout and
-   push, which fails the run loudly rather than losing data.
+2. ~~`git pull --rebase` in the verify commit step.~~ **Resolved.** It stopped
+   being theoretical: two runs qualified models, paid for the probes, and lost
+   the verdicts in a rebase conflict on the generated catalogue. The step now
+   uses the read-modify-write retry already used for spend and lease
+   attachment, re-applying only the verdict fields onto whatever the default
+   branch currently holds (`cli merge-verdicts`), and carries the job token
+   itself rather than relying on the credential the checkout left behind.
 
 ## Post-merge smoke test
 
@@ -157,6 +157,32 @@ plane still loads, plans and keeps autonomy off, and records nothing. Only a
 deliberate `workflow_dispatch` qualifies models, smoke-tests the Claude lane and
 commits verdicts, and it now shares the `agentops-state` concurrency group, so
 it can no longer run beside the coordinator or the watchdog.
+
+## Provider family policy
+
+Owner policy, added after the bootstrap merged:
+
+- Anthropic models are consumed **only** through `claude_subscription`.
+- OpenAI models are consumed **only** through `codex_cloud`. `codex_api` stays
+  disabled.
+- OpenRouter is the overflow pool for every other qualified family, and remains
+  forbidden from writing frontend code.
+
+`ops/policy.json` states this as `banned_namespaces` and `reject_meta_routers`
+on the openrouter lane, and `routing.eligible_models` enforces it — the one
+point every selection passes through, so a stale state file or a hand edit
+cannot reintroduce a banned family. It fails closed: a task with only a banned
+model available blocks rather than routing. Meta-routers are rejected because
+one picks its model at request time, so it could answer with a family confined
+to a subscription lane while the qualification verdict describes a model that
+never ran.
+
+Qualification is empirical and is not granted for novelty. Of the models tested
+against the suite after this policy landed: `deepseek-v4.1-flash` and
+`deepseek-v4-pro-0813` passed 5/5; `minimax-m3` and `kimi-k2.5` passed 5/5;
+`glm-5.2` (4/5) and `glm-4.7` (2/5) were quarantined; both Qwen candidates were
+unreachable through the provider and stayed CANDIDATE rather than being
+penalised for a transport failure.
 
 ## Standing invariants
 
