@@ -104,6 +104,55 @@ correctness, or execution. Follow-up work, not bootstrap work.
    receives a "did not dispatch" entry, so the system stops safely; an operator
    simply has to read the feed or `ops/state/tasks.json` to see why.
 
+2. **`git pull --rebase` in the verify commit step.** Elsewhere this pattern was
+   replaced with re-read plus idempotent re-apply, because a rebase between two
+   state writers can silently drop the other writer's data. The verify path
+   still uses it. It is no longer reachable concurrently — that step is now
+   dispatch-only and shares the state-writer concurrency group — so the
+   remaining risk is a conflict against a commit landed between checkout and
+   push, which fails the run loudly rather than losing data.
+
+## Post-merge smoke test
+
+Run from `main` immediately after the merge of PR #16 (merge commit
+`3740cb4`). The merge itself triggered the coordinator, which is the real
+proof rather than a simulation of one.
+
+| Claim | Result |
+|---|---|
+| Coordinator loads from `main` | run 34781468572, success: catalogue refreshed, merged work reconciled, health probed, next task planned |
+| Kill switch holds | "Take the task lease", "Hand the task to its lane" and "Commit what the hand-off recorded" all skipped |
+| No product code changed | the coordinator's own commit `cbc2a02` touches `ops/state/models.json` and `ops/state/providers.json` only |
+| Notification feed works | activity feed entry at 20:40:12Z: "Coordinator did not dispatch — task 14, Manual clip marking, lane codex_cloud" |
+| Review workflow loads from `main` | `agentops-review.yml` is present on `main`; its `choose` job is gated to `block-*`/`task-*` branches, so it correctly skipped for this one |
+
+The smoke test also found two defects in `agentops-verify.yml`, both repaired in
+a bounded hotfix before autonomy was declared ready:
+
+1. **False lane health on every merge.** `claude-code-action` does not support
+   the `push` event and fails with "Unsupported event type: push". The step ran
+   under `continue-on-error`, so the outcome was recorded as a failure of the
+   Claude subscription lane — a lane that was healthy. A recorded lane failure
+   removes that lane from routing.
+2. **Two writers racing for `ops/state` on `main`.** A merge fires this workflow
+   and the coordinator together, and this workflow's concurrency group was its
+   own rather than the shared state-writer group. Its `git pull --rebase` hit a
+   conflict in `models.json` and the run died mid-rebase, losing the
+   qualification verdicts it had just paid for.
+
+3. **Generated state failed the repository's own formatter.** `ops/state` is
+   written by Python in the cloud, and Biome formats floats differently
+   (`5.9e-05` against `5.9e-5`). The first catalogue refresh written from `main`
+   therefore turned the quality gate red, which would have failed every worker's
+   pull request for a reason no worker could fix. Generated state is now
+   excluded from the formatter; `cli validate` is what guards those files.
+
+A push-triggered verify run now reports without writing: it proves the control
+plane still loads, plans and keeps autonomy off, and records nothing. Only a
+deliberate `workflow_dispatch` qualifies models, smoke-tests the Claude lane and
+commits verdicts, and it now shares the `agentops-state` concurrency group, so
+it can no longer run beside the coordinator or the watchdog.
+
 ## Standing invariants
 
 These are enforced in code and must survive later work:

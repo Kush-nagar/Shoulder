@@ -819,3 +819,53 @@ class TestSquashMergeCompletion(unittest.TestCase):
             command = run.call_args[0][0]
         self.assertIn("--base", command)
         self.assertIn("main", command)
+
+
+class TestPostMergeVerifyFindings(unittest.TestCase):
+    """The two defects the post-merge smoke test surfaced on 2026-09-13."""
+
+    def setUp(self) -> None:
+        self.text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
+            encoding="utf-8"
+        )
+
+    def test_only_a_deliberate_dispatch_writes_state(self) -> None:
+        """A merge fires this workflow and the coordinator at the same moment.
+        Both committed ops/state to the default branch, and this one died in a
+        rebase conflict, losing the verdicts it had just paid for."""
+        for step in (
+            "Qualify models against the synthetic suite",
+            "Commit the qualification verdicts",
+        ):
+            after = self.text.split(f"- name: {step}", 1)[1].split("- name:", 1)[0]
+            self.assertIn(
+                "if: github.event_name == 'workflow_dispatch'",
+                after,
+                f"{step} must not run on push",
+            )
+
+    def test_the_claude_smoke_does_not_run_on_push(self) -> None:
+        """claude-code-action rejects the push event outright, and the failure
+        was then recorded against a lane that was in fact healthy."""
+        after = self.text.split("- name: Smoke test the Claude subscription lane", 1)[
+            1
+        ].split("- name: Record", 1)[0]
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", after)
+
+    def test_verify_shares_the_state_writer_concurrency_group(self) -> None:
+        """Its own group let it run beside the coordinator."""
+        self.assertIn("group: agentops-state", self.text)
+        head = self.text.split("jobs:", 1)[0]
+        self.assertIn("cancel-in-progress: false", head)
+
+    def test_generated_state_is_not_style_gated(self) -> None:
+        """`ops/state` is written by Python in the cloud, and Biome disagrees
+        with it about float formatting (`5.9e-05` against `5.9e-5`). While it
+        was covered, any coordinator run that wrote a small float turned the
+        quality gate red on main, failing every worker's pull request for a
+        reason no worker could fix. `cli validate` is what guards these files.
+        """
+        import json
+
+        config = json.loads((REPO_ROOT / "biome.json").read_text(encoding="utf-8"))
+        self.assertIn("!ops/state", config["files"]["includes"])

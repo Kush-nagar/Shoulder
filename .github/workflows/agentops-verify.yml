@@ -32,8 +32,14 @@ on:
       - 'services/agentops/**'
       - '.github/workflows/agentops-*.yml'
 concurrency:
-  group: agentops-verify-${{ github.ref }}
-  cancel-in-progress: true
+  # Shared with the coordinator and the watchdog: all three commit ops/state to
+  # the default branch, and a merge fires this workflow and the coordinator at
+  # the same moment. Running them together is what left this workflow stuck in
+  # a rebase conflict on 2026-09-13, losing the verdicts it had just paid for.
+  # cancel-in-progress must stay false here, or joining the group would cancel
+  # a coordinator run mid-push.
+  group: agentops-state
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -120,6 +126,8 @@ jobs:
           cat usage.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Qualify models against the synthetic suite
+        # Costs real money, and on push the verdicts are never committed.
+        if: github.event_name == 'workflow_dispatch'
         id: qualify
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -151,6 +159,10 @@ jobs:
       # token. A read-only prompt: this must not touch the repository.
       - name: Smoke test the Claude subscription lane
         id: claude
+        # The action does not support the push event: on a merge it fails with
+        # "Unsupported event type: push", which was then recorded as a failure
+        # of a lane that is in fact healthy.
+        if: github.event_name == 'workflow_dispatch'
         continue-on-error: true
         uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
         with:
@@ -162,6 +174,7 @@ jobs:
           claude_args: --max-turns 4
 
       - name: Record the Claude lane result
+        if: github.event_name == 'workflow_dispatch'
         env:
           CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
         run: |
@@ -188,6 +201,9 @@ jobs:
           test "$(jq -r '.autonomy_enabled' plan.json)" = 'false'
 
       - name: Commit the qualification verdicts
+        # A push-triggered run proves the control plane still loads and plans.
+        # It records nothing, so it cannot race the coordinator's own commit.
+        if: github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
