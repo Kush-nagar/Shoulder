@@ -53,6 +53,9 @@ jobs:
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
+          # A rebase between two state writers can leave conflict markers in a
+          # generated file nobody reads by hand. Never commit one.
+          uv run --locked python -m services.agentops.cli validate
           git add ops/state
           if git diff --cached --quiet; then
             echo 'nothing to recover'
@@ -60,6 +63,7 @@ jobs:
           fi
           git commit -m 'Recover stale agentops state'
           git pull --rebase --autostash origin main
+          uv run --locked python -m services.agentops.cli validate
           git push origin HEAD:main
 
       - name: Restart a lost continuation

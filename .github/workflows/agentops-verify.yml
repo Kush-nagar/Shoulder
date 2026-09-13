@@ -147,6 +147,9 @@ jobs:
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
+          # A rebase between two state writers can leave conflict markers in a
+          # generated file nobody reads by hand. Never commit one.
+          uv run --locked python -m services.agentops.cli validate
           git add ops/state
           if git diff --cached --quiet; then
             echo 'no state change'
@@ -154,6 +157,7 @@ jobs:
           fi
           git commit -m 'Record provider qualification from a cloud verify run'
           git pull --rebase --autostash origin "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          uv run --locked python -m services.agentops.cli validate
           git push origin "HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
 
       - name: Report to the activity feed

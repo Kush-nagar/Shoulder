@@ -412,6 +412,48 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
     return 0 if not problems else 1
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Check every state file parses and holds the shape the system expects.
+
+    Two workflows push `ops/state` to the same branch, so a rebase can leave
+    conflict markers inside a large generated JSON file. Nothing reads these by
+    hand, so that corruption is invisible until something fails to load. Every
+    workflow runs this before it commits.
+    """
+    root = _root(args)
+    paths = state.Paths(root)
+    problems: list[str] = []
+
+    expected = {
+        paths.policy: ("lanes", "capability_classes"),
+        paths.progress: ("completed_tasks",),
+        paths.models: ("models",),
+        paths.providers: ("lanes",),
+        paths.tasks: ("leases",),
+        paths.budget: (),
+    }
+    for path, keys in expected.items():
+        if not path.exists():
+            problems.append(f"{path.name}: missing")
+            continue
+        raw = path.read_text(encoding="utf-8")
+        for marker in ("<<<<<<<", ">>>>>>>"):
+            if any(line.startswith(marker) for line in raw.splitlines()):
+                problems.append(f"{path.name}: contains merge conflict markers")
+                break
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            problems.append(f"{path.name}: invalid JSON at line {exc.lineno}")
+            continue
+        for key in keys:
+            if key not in data:
+                problems.append(f"{path.name}: missing key {key!r}")
+
+    _emit({"ok": not problems, "problems": problems})
+    return 0 if not problems else 1
+
+
 def cmd_dispatch(args: argparse.Namespace) -> int:
     root = _root(args)
     ctx = coordinator.load_context(root)
@@ -566,6 +608,10 @@ def build_parser() -> argparse.ArgumentParser:
     exhausted.add_argument("--reason")
     exhausted.add_argument("--window", type=int)
     exhausted.set_defaults(func=cmd_exhausted)
+
+    sub.add_parser(
+        "validate", help="check the state files parse and are well formed"
+    ).set_defaults(func=cmd_validate)
 
     spend = sub.add_parser("spend", help="record API spend for a lane")
     spend.add_argument("--lane", required=True)

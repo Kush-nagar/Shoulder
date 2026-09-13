@@ -118,6 +118,9 @@ jobs:
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
+          # A rebase between two state writers can leave conflict markers in a
+          # generated file nobody reads by hand. Never commit one.
+          uv run --locked python -m services.agentops.cli validate
           git add ops/state
           if git diff --cached --quiet; then
             echo 'no state change'
@@ -126,6 +129,9 @@ jobs:
           git commit -m 'Update the agentops state ledger'
           # Another state writer may have landed while this run worked.
           git pull --rebase --autostash origin main
+          # The rebase itself is what can leave conflict markers behind, so
+          # check again before this becomes someone else's starting point.
+          uv run --locked python -m services.agentops.cli validate
           git push origin HEAD:main
 
       - name: Hand the task to its lane

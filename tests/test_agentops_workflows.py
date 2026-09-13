@@ -472,3 +472,38 @@ class TestLoopCompletion(unittest.TestCase):
         """The job force-pushes what it is given, so main must be rejected."""
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         self.assertIn("main|master|HEAD|refs/*|*/HEAD", text)
+
+
+class TestStateIntegrity(unittest.TestCase):
+    """A generated ledger nobody reads by hand must never land corrupted."""
+
+    def test_every_state_file_parses(self) -> None:
+        paths = state.Paths(REPO_ROOT)
+        for path in (
+            paths.policy,
+            paths.progress,
+            paths.models,
+            paths.providers,
+            paths.tasks,
+            paths.budget,
+        ):
+            with self.subTest(path.name):
+                json.loads(path.read_text(encoding="utf-8"))
+
+    def test_no_state_file_holds_conflict_markers(self) -> None:
+        """A rebase between two state writers left these once, unnoticed."""
+        paths = state.Paths(REPO_ROOT)
+        for path in (paths.models, paths.providers, paths.tasks, paths.budget):
+            with self.subTest(path.name):
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    self.assertFalse(line.startswith(("<<<<<<<", ">>>>>>>")))
+
+    def test_every_workflow_that_commits_state_validates_first(self) -> None:
+        for path in AGENTOPS_WORKFLOWS:
+            text = read(path)
+            if "git add ops/state" not in text:
+                continue
+            with self.subTest(path.name):
+                # Once before staging, and once after the rebase -- the rebase
+                # is what leaves the markers behind.
+                self.assertGreaterEqual(text.count("cli validate"), 2, path.name)
