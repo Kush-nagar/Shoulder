@@ -1,0 +1,8 @@
+{
+  "$comment": "Per-lane health. The coordinator writes this; a lane returns to AVAILABLE only after a health check succeeds.",
+  "lanes": {
+    "claude_subscription": { "status": "UNAVAILABLE", "reason": "CLAUDE_CODE_OAUTH_TOKEN not configured yet" },
+    "codex_api": { "status": "UNAVAILABLE", "reason": "OPENAI_API_KEY not configured yet" },
+    "openrouter": { "status": "UNAVAILABLE", "reason": "OPENROUTER_API_KEY not configured yet" }
+  }
+}

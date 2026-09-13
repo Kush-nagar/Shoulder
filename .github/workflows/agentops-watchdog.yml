@@ -1,0 +1,67 @@
+name: AgentOps Watchdog
+
+# Recovery only. Healthy tasks follow one another through merge events, so this
+# schedule exists to catch what event-driven continuation cannot: a crashed
+# worker, an expired lease, a run that never reported, a provider whose cooldown
+# has elapsed, or a continuation event that was simply lost.
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: agentops-watchdog
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Sweep stale leases and recover providers
+        id: sweep
+        env:
+          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.watchdog --repo '${{ github.repository }}' \
+            > sweep.json
+          cat sweep.json >> "$GITHUB_STEP_SUMMARY"
+          echo "recovered=$(jq -r '.recovered | length' sweep.json)" >> "$GITHUB_OUTPUT"
+          echo "idle=$(jq -r '.idle' sweep.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit any recovery
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          git add ops/state
+          if git diff --cached --quiet; then
+            echo 'nothing to recover'
+            exit 0
+          fi
+          git commit -m 'Recover stale agentops state'
+          git push origin HEAD:main
+
+      - name: Restart a lost continuation
+        # Only when autonomy is on, nothing is in flight, and the coordinator
+        # has not run recently. This repairs a dropped event; it is not the
+        # normal path.
+        if: steps.sweep.outputs.idle == 'true' && vars.AUTONOMY_ENABLED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run agentops-coordinator.yml

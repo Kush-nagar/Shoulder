@@ -1,0 +1,198 @@
+{
+  "$comment": "Routing, budget, and safety policy for the Shoulder autonomous build system. Model IDs are NOT listed here on purpose: lanes declare capability requirements and services/agentops/catalog.py picks the cheapest live model that meets them. Edit this file to change behaviour; do not edit the orchestrator.",
+  "version": 1,
+  "autonomy": {
+    "enabled": false,
+    "$comment_enabled": "Master kill switch. The repository variable AUTONOMY_ENABLED overrides this at run time so autonomy can be stopped without a commit.",
+    "max_parallel_writers": 1,
+    "allow_phase_d_and_later": false,
+    "$comment_phase_d": "AGENTS.md rule 5 and the mandatory real-use gate forbid starting Task 23+ automatically. A human must clear the gate."
+  },
+  "lanes": {
+    "claude_subscription": {
+      "provider": "anthropic",
+      "harness": "claude-code-action",
+      "billing": "subscription",
+      "secret": "CLAUDE_CODE_OAUTH_TOKEN",
+      "may_write_frontend": false,
+      "$comment": "AGENTS-level project policy: Claude is never the frontend implementation writer.",
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 1
+    },
+    "codex_api": {
+      "provider": "openai",
+      "harness": "codex-action",
+      "billing": "api",
+      "secret": "OPENAI_API_KEY",
+      "may_write_frontend": true,
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 2,
+      "$comment": "openai/codex-action@v1 authenticates with an API key only; ChatGPT subscription auth is not available to GitHub Actions. This lane therefore bills the OpenAI API."
+    },
+    "openrouter": {
+      "provider": "openrouter",
+      "harness": "claude-code-action",
+      "billing": "api",
+      "secret": "OPENROUTER_API_KEY",
+      "base_url": "https://openrouter.ai/api",
+      "may_write_frontend": false,
+      "$comment": "DeepSeek and other OpenRouter models are not permitted to write Shoulder frontend code under current project policy.",
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 3
+    }
+  },
+  "capability_classes": {
+    "CHEAP_MECHANICAL": {
+      "min_context": 100000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": false,
+      "max_input_usd_per_mtok": 1.5,
+      "effort": "low",
+      "$comment": "Ceiling admits the cheap tier of every family (Haiku-class, nano-class, flash-class) and excludes mid and frontier tiers."
+    },
+    "ROUTINE_CODING": {
+      "min_context": 150000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 2.0,
+      "effort": "medium"
+    },
+    "STRONG_CODING": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 8.0,
+      "effort": "high"
+    },
+    "FRONTIER_REASONING": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 30.0,
+      "effort": "high"
+    },
+    "VISUAL_FRONTEND": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": true,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 30.0,
+      "effort": "high"
+    },
+    "LONG_HORIZON_AGENT": {
+      "min_context": 400000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 30.0,
+      "effort": "high"
+    },
+    "INDEPENDENT_REVIEW": {
+      "min_context": 200000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": true,
+      "max_input_usd_per_mtok": 8.0,
+      "effort": "high"
+    },
+    "LOW_COST_FALLBACK": {
+      "min_context": 100000,
+      "needs_tools": true,
+      "needs_vision": false,
+      "needs_reasoning": false,
+      "max_input_usd_per_mtok": 1.5,
+      "effort": "medium"
+    }
+  },
+  "classification_to_class": {
+    "backend": {
+      "TRIVIAL": "CHEAP_MECHANICAL",
+      "ROUTINE": "ROUTINE_CODING",
+      "COMPLEX": "STRONG_CODING",
+      "CRITICAL": "FRONTIER_REASONING",
+      "EXTREME": "LONG_HORIZON_AGENT"
+    },
+    "frontend": {
+      "TRIVIAL": "CHEAP_MECHANICAL",
+      "ROUTINE": "ROUTINE_CODING",
+      "COMPLEX": "STRONG_CODING",
+      "CRITICAL": "VISUAL_FRONTEND",
+      "EXTREME": "VISUAL_FRONTEND"
+    },
+    "mixed": {
+      "TRIVIAL": "ROUTINE_CODING",
+      "ROUTINE": "ROUTINE_CODING",
+      "COMPLEX": "STRONG_CODING",
+      "CRITICAL": "FRONTIER_REASONING",
+      "EXTREME": "LONG_HORIZON_AGENT"
+    }
+  },
+  "effort_ladder": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "escalation": {
+    "max_implementation_attempts": 3,
+    "max_effort_escalations": 2,
+    "max_model_escalations": 2,
+    "max_provider_escalations": 2,
+    "max_ci_repair_cycles": 3,
+    "max_review_repair_cycles": 3,
+    "max_failed_cloud_runs": 3
+  },
+  "privacy": {
+    "require_zero_data_retention": true,
+    "deny_data_collection": true,
+    "$comment": "Shoulder handles minors' data. Coding agents receive source, synthetic fixtures, and sanitised logs only -- never production footage, reflections, rows, or secrets. OpenRouter requests set provider.zdr and provider.data_collection accordingly; an endpoint that cannot satisfy these is ineligible at any price."
+  },
+  "budget": {
+    "openrouter_daily_usd": 5.0,
+    "openrouter_monthly_usd": 40.0,
+    "openai_daily_usd": 5.0,
+    "openai_monthly_usd": 40.0,
+    "per_task_usd": 3.0,
+    "$comment": "Conservative starting ceilings chosen because the repository had no prior value. Raising them is a deliberate human edit; the orchestrator never raises a ceiling by itself."
+  },
+  "qualification": {
+    "required_states": [
+      "QUALIFIED"
+    ],
+    "$comment": "A newly discovered model is CANDIDATE until it passes the synthetic suite, then QUALIFIED, or QUARANTINED on failure. Promotion happens only at a task boundary, never mid-task.",
+    "requalify_after_days": 30
+  },
+  "lease": {
+    "duration_seconds": 5400,
+    "heartbeat_seconds": 300,
+    "stale_after_missed_heartbeats": 3
+  },
+  "optimization": {
+    "caveman": {
+      "routine": "full",
+      "critical": "lite"
+    },
+    "ponytail": {
+      "routine": "full",
+      "critical": "lite"
+    },
+    "context7_trigger_paths": [
+      "apps/web",
+      "services/api",
+      "migrations",
+      "infra",
+      "packages/contracts"
+    ]
+  },
+  "notifications": {
+    "issue_title": "Shoulder Autonomous Build Log",
+    "issue_label": "agentops"
+  }
+}

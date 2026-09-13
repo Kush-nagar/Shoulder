@@ -1,0 +1,4 @@
+{
+  "$comment": "Recorded API spend per lane. Ceilings live in ops/policy.json and are never raised automatically.",
+  "spend": {}
+}

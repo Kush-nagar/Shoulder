@@ -1,0 +1,187 @@
+name: AgentOps Worker
+
+# One worker, one task, one branch. The coordinator chooses the lane, model,
+# and effort; this workflow only carries them out.
+#
+# Three lanes, two harnesses:
+#   claude_subscription  Claude Code against the Claude subscription
+#   openrouter           Claude Code against OpenRouter's Anthropic-compatible
+#                        endpoint, for cheap backend overflow
+#   codex_api            Codex CLI, the only lane permitted to write frontend
+#                        code under project policy
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: 'Canonical task number from docs/06-tasks.md'
+        required: true
+        type: string
+      lane:
+        required: true
+        type: choice
+        options: [claude_subscription, openrouter, codex_api]
+      model:
+        description: 'Harness model slug chosen by the coordinator'
+        required: true
+        type: string
+      effort:
+        required: true
+        type: choice
+        options: [low, medium, high, xhigh]
+      branch:
+        required: true
+        type: string
+
+concurrency:
+  # One writer per branch. This is the last line of defence behind the lease.
+  group: agentops-worker-${{ inputs.branch }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: check
+        env:
+          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "${AUTONOMY_ENABLED:-false}" = "true" ]; then
+            echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'allowed=false' >> "$GITHUB_OUTPUT"
+            echo 'AUTONOMY_ENABLED is not true; refusing to start work.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  work:
+    needs: guard
+    if: needs.guard.outputs.allowed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Create the task branch
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          git checkout -B '${{ inputs.branch }}'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Install locked dependencies
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm install --frozen-lockfile
+          uv sync --locked
+
+      - name: Build the task brief
+        id: brief
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.brief \
+            --task '${{ inputs.task_id }}' --out brief.md
+          echo "path=brief.md" >> "$GITHUB_OUTPUT"
+
+      # --- Claude lane: the Claude subscription pays for this one -----------
+      - name: Implement with Claude
+        if: inputs.lane == 'claude_subscription'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
+          claude_args: --model ${{ inputs.model }} --max-turns 120
+
+      # --- OpenRouter lane: same harness, Anthropic-compatible endpoint -----
+      - name: Implement with an OpenRouter model
+        if: inputs.lane == 'openrouter'
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
+          claude_args: --model ${{ inputs.model }} --max-turns 120
+
+      # --- Codex lane: the only writer allowed to touch the frontend --------
+      - name: Implement with Codex
+        if: inputs.lane == 'codex_api'
+        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ inputs.model }}
+          effort: ${{ inputs.effort }}
+          prompt-file: brief.md
+          permission-profile: ':workspace'
+          safety-strategy: drop-sudo
+
+      - name: Run the repository quality gate
+        id: gate
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/check.ps1
+
+      - name: Push the branch and open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet HEAD -- . ':!ops/state'; then
+            echo 'The worker produced no change.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          rm -f brief.md
+          git add -A
+          git commit -m 'Task ${{ inputs.task_id }}: autonomous implementation' || true
+          git push --force-with-lease origin '${{ inputs.branch }}'
+          gh pr create \
+            --base main \
+            --head '${{ inputs.branch }}' \
+            --title 'Task ${{ inputs.task_id }}: autonomous implementation' \
+            --body "$(printf '%s\n' \
+              'Autonomous implementation of canonical Task ${{ inputs.task_id }}.' \
+              '' \
+              '- lane: `${{ inputs.lane }}`' \
+              '- model: `${{ inputs.model }}`' \
+              '- effort: `${{ inputs.effort }}`' \
+              '- quality gate: `${{ steps.gate.outcome }}`' \
+              '' \
+              'Independent review and green CI are required before merge.')" \
+            || echo 'a pull request already exists for this branch'
+
+      - name: Record the checkpoint and report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli notify verify \
+            'Task ${{ inputs.task_id }} worker finished' \
+            --details '{"lane":"${{ inputs.lane }}","model":"${{ inputs.model }}","effort":"${{ inputs.effort }}","gate":"${{ steps.gate.outcome }}","branch":"${{ inputs.branch }}"}' \
+            --repo '${{ github.repository }}' || echo 'activity feed unavailable'

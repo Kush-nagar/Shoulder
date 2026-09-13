@@ -17,7 +17,7 @@ against Git and GitHub before editing anything.
 | Database revision | `0006_media_playback` locally; `Shoulder Dev` is still on `0005_video_ingest` |
 | Last full verification | 2026-09-12 on `dab524f`: PR #13 CI green on its final HEAD (`af2d782`), all three browser engines passing locally including Firefox, 340 Python tests, 36 Node tests, migration `0006` up/down/up, and the full-length playback budgets measured as passing |
 | Blockers | none that require a human |
-| Next action | **`AGENTOPS_BOOTSTRAP`.** Do not start Block 04. |
+| Next action | **`AGENTOPS_BOOTSTRAP` is implemented and awaiting review.** Autonomy is disabled (`AUTONOMY_ENABLED=false`); the coordinator dry-runs to Task 14 but dispatches nothing. Do not start Block 04 by hand. |
 
 ### Environment limitations on this workstation
 
@@ -41,6 +41,33 @@ against Git and GitHub before editing anything.
   the magic-link browser suites need a real Auth server, and CI only substitutes
   a bare `postgres` service plus `tests/fixtures/ci-auth-schema.sql`, which
   cannot serve magic links.
+
+## Autonomous build system
+
+- **Bootstrap: implemented, not enabled.** Branch `agentops-bootstrap`. Evidence:
+  [ADR 0019](docs/decisions/0019-autonomous-build-system.md) and `ops/README.md`.
+- GitHub Actions is the control plane: `agentops-coordinator.yml` selects and
+  dispatches, `agentops-worker.yml` implements one task on one branch, and
+  `agentops-watchdog.yml` recovers stale leases and elapsed provider cooldowns.
+  Continuation is event-driven; cron is recovery only.
+- Three lanes: Claude on the subscription, Codex on the OpenAI API, and
+  OpenRouter through Claude Code's Anthropic-compatible endpoint. Frontend
+  implementation is restricted to the Codex lane and fails closed rather than
+  falling back.
+- Routing is by capability class against a live model catalogue, so model names
+  are never hard-coded. 349 models discovered on 2026-09-12; every one starts as
+  `CANDIDATE` and cannot take real work until it passes the synthetic
+  qualification suite.
+- Machine-readable state is `ops/state/`; `ops/policy.json` holds every knob.
+  `STATUS.md` stays the human summary and the coordinator updates both.
+- Kill switch: `gh variable set AUTONOMY_ENABLED --body false`. No commit needed.
+- Phase D and later remain unreachable: `allow_phase_d_and_later` is false and
+  Task 23 carries the gate flag, so `AGENTS.md` rule 5 is enforced in code.
+- Coordinator dry run selects **Task 14 — Manual clip marking** (block-04,
+  prerequisites 7 and 13 satisfied), classified `mixed`/`COMPLEX`.
+- Open limitation: this workstation's `uv` is 0.11.28 while `pyproject.toml`
+  pins 0.12.10, so `uv run` refuses locally. The pinned `ruff` and `mypy` in
+  `.venv` were used directly instead; CI installs 0.12.10 and is unaffected.
 
 ## Current state
 

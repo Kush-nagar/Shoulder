@@ -1,0 +1,129 @@
+name: AgentOps Coordinator
+
+# The durable control plane. It decides what happens next and dispatches a
+# worker; it never implements a task itself.
+#
+# Continuation is event-driven: a merge to main runs the coordinator
+# immediately, so healthy tasks follow one another without waiting for a cron
+# tick. The watchdog exists only for recovery.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      force_plan_only:
+        description: 'Plan without dispatching a worker'
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [agentops-continue]
+
+concurrency:
+  # One coordinator at a time. Two coordinators could hand the same task to two
+  # writers before either lease is written.
+  group: agentops-coordinator
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  coordinate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write      # commit the orchestrator state ledger
+      issues: write        # post to the activity feed
+      actions: write       # dispatch the worker workflow
+    outputs:
+      dispatched: ${{ steps.plan.outputs.dispatched }}
+      task_id: ${{ steps.plan.outputs.task_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Refresh the model catalogue
+        run: uv run --locked python -m services.agentops.cli discover
+
+      - name: Plan the next task
+        id: plan
+        env:
+          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli plan > plan.json
+          cat plan.json >> "$GITHUB_STEP_SUMMARY"
+
+          task_id="$(jq -r '.task_id // empty' plan.json)"
+          blocked="$(jq -r '.blocked_reason // empty' plan.json)"
+          enabled="$(jq -r '.autonomy_enabled' plan.json)"
+
+          echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != "true" ] || [ -n "$blocked" ] || [ -z "$task_id" ] \
+             || [ "${{ inputs.force_plan_only }}" = "true" ]; then
+            echo "dispatched=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "dispatched=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Take the task lease
+        if: steps.plan.outputs.dispatched == 'true'
+        env:
+          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli dispatch \
+            --owner "run-${{ github.run_id }}" > dispatch.json
+          cat dispatch.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit the state ledger
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          git add ops/state
+          if git diff --cached --quiet; then
+            echo 'no state change'
+            exit 0
+          fi
+          git commit -m 'Update the agentops state ledger'
+          git push origin HEAD:main
+
+      - name: Dispatch the worker
+        if: steps.plan.outputs.dispatched == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run agentops-worker.yml \
+            --field task_id="$(jq -r '.task_id' dispatch.json)" \
+            --field lane="$(jq -r '.writer.lane' dispatch.json)" \
+            --field model="$(jq -r '.writer.harness_model' dispatch.json)" \
+            --field effort="$(jq -r '.writer.effort' dispatch.json)" \
+            --field branch="$(jq -r '.branch' dispatch.json)"
+
+      - name: Report to the activity feed
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          kind=start
+          headline="Task ${{ steps.plan.outputs.task_id }} dispatched"
+          if [ "${{ steps.plan.outputs.dispatched }}" != "true" ]; then
+            kind=blocked
+            headline="Coordinator did not dispatch"
+          fi
+          uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
+            --details "$(jq -c '{task: .task_id, title: .task_title, lane: .writer.lane, model: .writer.model, effort: .writer.effort, reviewer: .reviewer.lane, reason: .blocked_reason}' plan.json)" \
+            --repo '${{ github.repository }}' || echo 'activity feed unavailable'
