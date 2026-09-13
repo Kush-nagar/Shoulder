@@ -140,6 +140,13 @@ a bounded hotfix before autonomy was declared ready:
    conflict in `models.json` and the run died mid-rebase, losing the
    qualification verdicts it had just paid for.
 
+3. **Generated state failed the repository's own formatter.** `ops/state` is
+   written by Python in the cloud, and Biome formats floats differently
+   (`5.9e-05` against `5.9e-5`). The first catalogue refresh written from `main`
+   therefore turned the quality gate red, which would have failed every worker's
+   pull request for a reason no worker could fix. Generated state is now
+   excluded from the formatter; `cli validate` is what guards those files.
+
 A push-triggered verify run now reports without writing: it proves the control
 plane still loads, plans and keeps autonomy off, and records nothing. Only a
 deliberate `workflow_dispatch` qualifies models, smoke-tests the Claude lane and

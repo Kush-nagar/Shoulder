@@ -857,3 +857,15 @@ class TestPostMergeVerifyFindings(unittest.TestCase):
         self.assertIn("group: agentops-state", self.text)
         head = self.text.split("jobs:", 1)[0]
         self.assertIn("cancel-in-progress: false", head)
+
+    def test_generated_state_is_not_style_gated(self) -> None:
+        """`ops/state` is written by Python in the cloud, and Biome disagrees
+        with it about float formatting (`5.9e-05` against `5.9e-5`). While it
+        was covered, any coordinator run that wrote a small float turned the
+        quality gate red on main, failing every worker's pull request for a
+        reason no worker could fix. `cli validate` is what guards these files.
+        """
+        import json
+
+        config = json.loads((REPO_ROOT / "biome.json").read_text(encoding="utf-8"))
+        self.assertIn("!ops/state", config["files"]["includes"])
