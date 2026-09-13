@@ -64,6 +64,10 @@ class Assignment:
     # False when the lane cannot be told which model to use, so the recorded
     # tier is a decision rather than an applied setting.
     model_enforced: bool = True
+    # The catalogue entry used to prove the capability class is satisfiable.
+    # On a non-enforcing lane it is evidence for the decision, not the model
+    # that will run.
+    representative_model: str = ""
     fallbacks: tuple[tuple[str, str], ...] = ()
     rejections: tuple[str, ...] = ()
 
@@ -77,6 +81,7 @@ class Assignment:
             "capability_class": self.capability_class,
             "mechanism": self.mechanism,
             "model_enforced": self.model_enforced,
+            "representative_model": self.representative_model,
             "reason": self.reason,
             "fallbacks": [list(f) for f in self.fallbacks],
             "rejections": list(self.rejections),
@@ -96,6 +101,12 @@ class RoutingInputs:
 
 
 def capability_class(policy: dict[str, Any], c: Classification) -> str:
+    """The tier this task earns.
+
+    A reviewer uses the same class as the writer rather than one of its own:
+    risk already decided the class, so a separate review tier would either
+    under-resource a critical review or waste capability on a trivial one.
+    """
     table = policy["classification_to_class"]
     mapping = table.get(c.category, table["backend"])
     name: str = mapping[c.complexity]
@@ -161,7 +172,9 @@ def eligible_models(
         if model.input_usd_per_mtok > spec["max_input_usd_per_mtok"]:
             continue
         out.append(model)
-    # Cheapest first: the least expensive model that clears every requirement.
+    # Cheapest first, on every lane. A subscription allowance is finite too,
+    # and a stronger model drains a five-hour window faster, so "there is no
+    # cost to optimise" is false even where no invoice arrives.
     return sorted(
         out, key=lambda m: (m.input_usd_per_mtok, m.output_usd_per_mtok, m.id)
     )
@@ -269,6 +282,12 @@ def select(
 
     lane_name, lane, model = chosen
     enforced = bool(lane.get("model_enforced", True))
+    # Reporting a specific slug for a lane that cannot be told which model to
+    # use is worse than reporting none: a log saying "gpt-5-nano" for a
+    # STRONG_CODING task reads as a decision that was never made and never
+    # applied. The class is the real decision; the model is whatever the
+    # account has configured.
+    harness_model = model.harness_model if enforced else "account-configured"
     reason = (
         f"{classification.category}/{classification.complexity} -> {class_name}; "
         f"cheapest qualified model in lane {lane_name} "
@@ -284,7 +303,8 @@ def select(
         lane=lane_name,
         model=model.id,
         harness=lane["harness"],
-        harness_model=model.harness_model,
+        harness_model=harness_model,
+        representative_model=model.id,
         effort=effort,
         capability_class=class_name,
         mechanism=str(lane.get("mechanism", "workflow-dispatch")),

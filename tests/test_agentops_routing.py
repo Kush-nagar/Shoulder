@@ -1064,3 +1064,70 @@ class TestAccountLevelPrivacy(unittest.TestCase):
                 self.assertIsNone(
                     routing.privacy_violation(settings, settings["lanes"][name])
                 )
+
+
+class TestPolicyHasNoDeadConfiguration(unittest.TestCase):
+    """A setting nothing reads looks like a guarantee and is not one."""
+
+    def test_every_capability_class_is_reachable(self) -> None:
+        settings = policy()
+        declared = {
+            name for name in settings["capability_classes"] if not name.startswith("$")
+        }
+        reachable = {
+            name
+            for mapping in settings["classification_to_class"].values()
+            for name in mapping.values()
+        }
+        # Visual work overrides the mapped class directly.
+        reachable.add("VISUAL_FRONTEND")
+        self.assertEqual(declared - reachable, set())
+
+    def test_every_mapped_class_exists(self) -> None:
+        settings = policy()
+        for mapping in settings["classification_to_class"].values():
+            for name in mapping.values():
+                self.assertIn(name, settings["capability_classes"])
+
+    def test_a_reviewer_uses_the_writers_tier(self) -> None:
+        """Risk already set the class, so review does not get its own."""
+        routing_inputs = inputs()
+        for complexity in ("ROUTINE", "COMPLEX"):
+            with self.subTest(complexity):
+                current = classification("backend", complexity)
+                writer = routing.select(routing_inputs, current)
+                reviewer = routing.select_reviewer(routing_inputs, current, writer)
+                self.assertEqual(reviewer.capability_class, writer.capability_class)
+
+
+class TestAdvisoryModelReporting(unittest.TestCase):
+    """A lane that cannot pick a model must not report one as if it did."""
+
+    def test_a_non_enforcing_lane_reports_no_harness_model(self) -> None:
+        chosen = routing.select(inputs(), classification("frontend", "COMPLEX"))
+        self.assertFalse(chosen.model_enforced)
+        self.assertEqual(chosen.harness_model, "account-configured")
+
+    def test_it_still_records_evidence_the_tier_was_satisfiable(self) -> None:
+        chosen = routing.select(inputs(), classification("frontend", "COMPLEX"))
+        self.assertTrue(chosen.representative_model)
+        self.assertEqual(chosen.capability_class, "STRONG_CODING")
+
+    def test_an_enforcing_lane_still_reports_its_real_model(self) -> None:
+        chosen = routing.select(inputs(), classification("backend", "ROUTINE"))
+        self.assertTrue(chosen.model_enforced)
+        self.assertNotEqual(chosen.harness_model, "account-configured")
+
+    def test_cheapest_first_applies_to_subscription_lanes_too(self) -> None:
+        """An allowance is finite: a stronger model drains the window faster.
+
+        So trivial work takes the cheap tier even where no invoice arrives.
+        """
+        trivial = routing.select(inputs(), classification("frontend", "TRIVIAL"))
+        complex_pick = routing.select(inputs(), classification("frontend", "COMPLEX"))
+        cheap = next(m for m in model_pool() if m.id == trivial.representative_model)
+        strong = next(
+            m for m in model_pool() if m.id == complex_pick.representative_model
+        )
+        self.assertLessEqual(cheap.input_usd_per_mtok, strong.input_usd_per_mtok)
+        self.assertEqual(trivial.capability_class, "CHEAP_MECHANICAL")

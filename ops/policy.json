@@ -138,22 +138,6 @@
       "needs_reasoning": true,
       "max_input_usd_per_mtok": 30.0,
       "effort": "high"
-    },
-    "INDEPENDENT_REVIEW": {
-      "min_context": 200000,
-      "needs_tools": true,
-      "needs_vision": false,
-      "needs_reasoning": true,
-      "max_input_usd_per_mtok": 8.0,
-      "effort": "high"
-    },
-    "LOW_COST_FALLBACK": {
-      "min_context": 100000,
-      "needs_tools": true,
-      "needs_vision": false,
-      "needs_reasoning": false,
-      "max_input_usd_per_mtok": 1.5,
-      "effort": "medium"
     }
   },
   "classification_to_class": {
@@ -232,5 +216,6 @@
   "notifications": {
     "issue_title": "Shoulder Autonomous Build Log",
     "issue_label": "agentops"
-  }
+  },
+  "$comment_capability_classes": "Every class here is reachable from classification_to_class or from the visual-work override. A class nothing selects reads like a guarantee and is not one, so it does not belong in this file."
 }
