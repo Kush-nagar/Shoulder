@@ -72,7 +72,18 @@ against Git and GitHub before editing anything.
 - Kill switch: `gh variable set AUTONOMY_ENABLED --body false`. No commit needed.
 - Phase D and later remain unreachable: `allow_phase_d_and_later` is false and
   Task 23 carries the gate flag, so `AGENTS.md` rule 5 is enforced in code.
-- **Remaining owner-required setup, and nothing else blocks readiness:**
+- **Owner setup is complete except one item.** Both secrets are configured, the
+  Claude GitHub App is installed, and Codex Cloud is connected. Remaining:
+  confirm OpenRouter account-level privacy (see `ops/README.md`), because the
+  coding harness cannot send per-request retention fields and this repository
+  cannot read the account setting. Until confirmed, the OpenRouter lane is
+  refused rather than assumed safe.
+- **Proven in the cloud:** the Claude subscription lane authenticated a real
+  run; Codex Cloud completed a real `@codex review` round trip on PR #16;
+  OpenRouter answered real qualification probes and
+  `deepseek/deepseek-v4-flash-0731` passed 5/5; the activity feed received a
+  post from the control plane itself.
+- Superseded, kept for history:
   1. `gh secret set CLAUDE_CODE_OAUTH_TOKEN` (value from `claude setup-token`).
   2. `gh secret set OPENROUTER_API_KEY`.
   3. Install the Claude GitHub App on this repository.

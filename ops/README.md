@@ -81,6 +81,25 @@ Never paste a credential into a file, a log, an issue, or a chat.
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude | Backend work and review. From `claude setup-token`. |
 | `OPENROUTER_API_KEY` | OpenRouter | Backend overflow, cheap mechanical work, independent review, model qualification. |
 
+### One owner action this system cannot do for you
+
+The OpenRouter lane's retention and training policy is configured on the
+OpenRouter **account**, not per request: the coding harness does not send
+`provider.zdr`, so only the account setting governs real traffic. This
+repository cannot read that setting, so the lane stays ineligible until you
+confirm it:
+
+1. In OpenRouter privacy settings, disable prompt logging/training and restrict
+   routing to zero-data-retention providers.
+2. Record it:
+
+```
+python -m services.agentops.cli confirm-privacy --lane openrouter   --note "ZDR-only routing and training disabled in account privacy settings"
+```
+
+Until then, backend overflow to OpenRouter is refused rather than assumed safe.
+Shoulder handles minors' data, so the unconfirmed state fails closed.
+
 **Codex Cloud needs no secret.** It is reached through the Codex GitHub
 integration: the coordinator opens a task branch and pull request and comments
 `@codex <instruction>`, and the work runs in OpenAI's sandbox against the
