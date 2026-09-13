@@ -74,15 +74,25 @@ jobs:
             > health.json
           cat health.json >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Qualify OpenRouter models against the synthetic suite
+      - name: Qualify models against the synthetic suite
         id: qualify
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          uv run --locked python -m services.agentops.cli qualify \
-            --lane openrouter --limit "$QUALIFY_LIMIT" > qualify.json
-          cat qualify.json >> "$GITHUB_STEP_SUMMARY"
+          # Both model-selecting lanes need qualified models, or routing has
+          # nothing to choose and blocks. The probes go through OpenRouter
+          # because that one interface reaches every family for a few cents;
+          # where a model was tested does not change which lane executes it.
+          # The Codex lane is absent on purpose: it cannot be told which model
+          # to use, so it is gated on lane_qualified instead.
+          for lane in claude_subscription openrouter; do
+            uv run --locked python -m services.agentops.cli qualify \
+              --lane "$lane" --limit "$QUALIFY_LIMIT" > "qualify-$lane.json"
+            cat "qualify-$lane.json" >> "$GITHUB_STEP_SUMMARY"
+          done
+          jq -s '{results: (map(.results) | add)}' \
+            qualify-claude_subscription.json qualify-openrouter.json > qualify.json
           cost="$(jq -r '[.results[].cost_usd] | add // 0' qualify.json)"
           echo "cost=$cost" >> "$GITHUB_OUTPUT"
           # Record what the qualification run itself spent, so the ceilings
