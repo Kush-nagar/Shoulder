@@ -754,3 +754,87 @@ class TestFourthReviewFindings(unittest.TestCase):
         )
         handoff = text.split("Commit what the hand-off recorded", 1)[1]
         self.assertIn("git checkout -B agentops-state-handoff origin/main", handoff)
+
+
+class TestSixthReviewFindings(unittest.TestCase):
+    """Regressions for the sixth review round."""
+
+    def setUp(self) -> None:
+        self.policy = policy()
+
+    def test_the_guard_accepts_the_worker_it_was_dispatched_for(self) -> None:
+        """The coordinator takes the lease before the worker runs.
+
+        Treating that lease as a conflict refused every legitimate worker, so
+        nothing would ever have been implemented.
+        """
+        import shutil
+        import tempfile
+
+        from agentops_fixtures import REPO_ROOT as source
+
+        tmp = tempfile.mkdtemp()
+        root = Path(tmp)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(source / relative, root / relative)
+
+        ctx = coordinator.load_context(root)
+        leases.acquire(
+            ctx.tasks,
+            ctx.policy,
+            task_id=14,
+            owner="run-1",
+            branch="block-04-t14",
+            assignment={"lane": "codex_cloud"},
+        )
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+
+        fresh = coordinator.load_context(root)
+        task = fresh.backlog.tasks[14]
+        self.assertTrue(
+            coordinator.evaluate(fresh, task, ignore_own_lease=True).eligible
+        )
+        self.assertFalse(coordinator.evaluate(fresh, task).eligible)
+
+    def test_an_open_pull_request_outlives_its_finished_run(self) -> None:
+        """A worker's run ending does not mean the work is done."""
+        from unittest import mock
+
+        from services.agentops import watchdog
+
+        lease = {
+            "worker_run_id": "123",
+            "pull_request": 42,
+            "heartbeat_at": state.now(),
+        }
+        with mock.patch.object(watchdog, "_run_finished", return_value=True):
+            with mock.patch.object(
+                watchdog, "_pull_request_finished", return_value=False
+            ):
+                self.assertFalse(watchdog.owner_finished(lease, policy=self.policy))
+            with mock.patch.object(
+                watchdog, "_pull_request_finished", return_value=True
+            ):
+                self.assertTrue(watchdog.owner_finished(lease, policy=self.policy))
+
+    def test_a_pull_request_lease_waits_far_longer_when_unanswerable(self) -> None:
+        """Two hours is nothing for a Codex task or a review queue."""
+        from services.agentops import watchdog
+
+        self.assertGreater(
+            watchdog.UNRESOLVED_PULL_REQUEST_MULTIPLE,
+            watchdog.UNRESOLVED_GRACE_MULTIPLE * 4,
+        )
+        settings = self.policy["lease"]
+        grace = (
+            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
+        )
+        two_hours = grace * watchdog.UNRESOLVED_GRACE_MULTIPLE
+        self.assertFalse(
+            watchdog._long_unresolved(
+                {"heartbeat_at": ago(two_hours + 600)},
+                self.policy,
+                has_pull_request=True,
+            )
+        )

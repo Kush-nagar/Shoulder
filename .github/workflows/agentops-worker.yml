@@ -42,6 +42,11 @@ on:
 
 concurrency:
   # One writer per branch. This is the last line of defence behind the lease.
+  #
+  # Note this guards the branch, not ops/state. The steps in this workflow that
+  # push the ledger take the shared agentops-state lock themselves, because the
+  # coordinator and watchdog push the same files and an interleaved rebase
+  # loses one side's write.
   group: agentops-worker-${{ inputs.branch }}
   cancel-in-progress: false
 
@@ -164,9 +169,16 @@ jobs:
           git add ops/state
           if ! git diff --cached --quiet; then
             git commit -m "Attach worker run ${GITHUB_RUN_ID} to task ${TASK_ID}"
-            git pull --rebase --autostash origin "$DEFAULT_BRANCH"
-            uv run --locked python -m services.agentops.cli validate
-            git push origin "HEAD:$DEFAULT_BRANCH"
+            # Another state writer may land between the pull and the push, so
+            # retry the whole rebase-and-push rather than failing the worker.
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase --autostash origin "$DEFAULT_BRANCH" || true
+              uv run --locked python -m services.agentops.cli validate || break
+              if git push origin "HEAD:$DEFAULT_BRANCH"; then
+                break
+              fi
+              sleep $((attempt * 5))
+            done
           fi
 
       - name: Check out the task branch
@@ -282,9 +294,16 @@ jobs:
           git add ops/state
           if ! git diff --cached --quiet; then
             git commit -m "Record a provider failure from worker run ${GITHUB_RUN_ID}"
-            git pull --rebase --autostash origin "$DEFAULT_BRANCH"
-            uv run --locked python -m services.agentops.cli validate
-            git push origin "HEAD:$DEFAULT_BRANCH"
+            # Another state writer may land between the pull and the push, so
+            # retry the whole rebase-and-push rather than failing the worker.
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase --autostash origin "$DEFAULT_BRANCH" || true
+              uv run --locked python -m services.agentops.cli validate || break
+              if git push origin "HEAD:$DEFAULT_BRANCH"; then
+                break
+              fi
+              sleep $((attempt * 5))
+            done
           fi
 
       - name: Run the repository quality gate

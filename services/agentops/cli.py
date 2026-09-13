@@ -380,8 +380,16 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         return 1
 
     problems: list[str] = []
-    candidate = coordinator.evaluate(ctx, task)
+    # The worker exists because a lease was taken for this task, so its own
+    # lease is not a conflict. Everything else about eligibility still applies.
+    candidate = coordinator.evaluate(ctx, task, ignore_own_lease=True)
     classification = classify.classify(task)
+
+    held = ctx.tasks.get("leases", {}).get(str(args.task)) or {}
+    if held.get("state") not in leases.ACTIVE_STATES:
+        problems.append(
+            f"task {args.task} has no active lease; a worker runs only against one"
+        )
     lane = ctx.policy["lanes"].get(args.lane)
 
     if lane is None:

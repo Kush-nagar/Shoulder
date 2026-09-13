@@ -81,8 +81,15 @@ class Candidate:
     reasons: list[str] = field(default_factory=list)
 
 
-def evaluate(ctx: Context, task: backlog_mod.Task) -> Candidate:
-    """Decide whether one task may be started right now."""
+def evaluate(
+    ctx: Context, task: backlog_mod.Task, *, ignore_own_lease: bool = False
+) -> Candidate:
+    """Decide whether one task may be started right now.
+
+    `ignore_own_lease` is for a worker checking the assignment it was handed.
+    It reaches that check only because a lease was taken for it, so treating
+    that lease as a conflict would refuse every legitimate worker.
+    """
     block = ctx.backlog.block_for_task(task.id)
     done = state.completed_tasks(ctx.progress)
     reasons: list[str] = []
@@ -95,6 +102,8 @@ def evaluate(ctx: Context, task: backlog_mod.Task) -> Candidate:
     # the problem, one step too late.
     for lease in leases.active_leases(ctx.tasks, ctx.policy):
         if int(lease.get("task_id", -1)) == task.id:
+            if ignore_own_lease:
+                continue
             return Candidate(
                 task,
                 block,

@@ -24,6 +24,11 @@ RUNNING_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 # stops protecting it. Long enough that an API outage cannot cause a takeover,
 # short enough that a lease pointing at a deleted run does not wedge forever.
 UNRESOLVED_GRACE_MULTIPLE = 8
+# A lease whose evidence is a pull request waits far longer before an
+# unanswerable query releases it. Eight grace windows is two hours, and a Codex
+# Cloud task or a pull request awaiting review can legitimately be open for
+# much longer than that; releasing it would put a second writer on the branch.
+UNRESOLVED_PULL_REQUEST_MULTIPLE = 96
 
 
 def owner_finished(
@@ -48,32 +53,48 @@ def owner_finished(
     run_id = lease.get("worker_run_id")
     pull_request = lease.get("pull_request")
 
-    if run_id:
-        answer = _run_finished(str(run_id), repo=repo)
-    elif pull_request is not None:
-        # Codex Cloud has no workflow run to inspect, so the pull request is
-        # the evidence. An open one means the work may still be in flight.
-        answer = _pull_request_finished(int(pull_request), repo=repo)
-    else:
-        # Nothing was ever attached, so there is nothing that could still be
-        # running on this lease's behalf.
+    if run_id is None and pull_request is None:
+        # Nothing was ever attached, so nothing could still be running on this
+        # lease's behalf.
         return True
 
-    if answer is not None:
-        return answer
-    # Unanswerable. Hold the lease unless it has been unanswerable so long that
-    # protecting it has become the bigger problem.
-    return _long_unresolved(lease, policy)
+    # Every attached signal gets a say, and any one of them saying "still
+    # active" wins. A worker's run finishing does not mean the work is done
+    # when its pull request is still open and under review.
+    answers: list[bool | None] = []
+    if run_id:
+        answers.append(_run_finished(str(run_id), repo=repo))
+    if pull_request is not None:
+        answers.append(_pull_request_finished(int(pull_request), repo=repo))
+
+    if any(answer is False for answer in answers):
+        return False
+    if all(answer is True for answer in answers):
+        return True
+
+    # At least one signal was unanswerable. Hold the lease unless holding it
+    # has itself become the problem.
+    return _long_unresolved(lease, policy, has_pull_request=pull_request is not None)
 
 
-def _long_unresolved(lease: dict[str, Any], policy: dict[str, Any] | None) -> bool:
+def _long_unresolved(
+    lease: dict[str, Any],
+    policy: dict[str, Any] | None,
+    *,
+    has_pull_request: bool = False,
+) -> bool:
     if policy is None:
         return False
     settings = policy["lease"]
+    multiple = (
+        UNRESOLVED_PULL_REQUEST_MULTIPLE
+        if has_pull_request
+        else UNRESOLVED_GRACE_MULTIPLE
+    )
     window = (
         int(settings["heartbeat_seconds"])
         * int(settings["stale_after_missed_heartbeats"])
-        * UNRESOLVED_GRACE_MULTIPLE
+        * multiple
     )
     last = lease.get("heartbeat_at") or lease.get("acquired_at")
     if not last:
