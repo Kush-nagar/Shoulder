@@ -28,6 +28,11 @@ CATALOG_URL = "https://openrouter.ai/api/v1/models"
 # for price and cannot serve an interactive agent; `:free` carries its own
 # retention terms and rate limits.
 EXCLUDED_SUFFIXES = (":batch", ":free", ":extended", ":thinking", ":online")
+# `openrouter/*` is not a provider family. Those entries are meta-routers and
+# aliases -- auto, fusion, pareto-code -- that pick some model at request time.
+# Routing to one would mean the capability class, the qualification verdict and
+# the privacy contract all describe a model that is not the one which runs.
+EXCLUDED_NAMESPACES = ("openrouter",)
 
 QualificationState = Literal["CANDIDATE", "QUALIFIED", "QUARANTINED"]
 
@@ -116,6 +121,8 @@ def normalise(
     model_id = str(entry.get("id", ""))
     if not model_id or any(model_id.endswith(s) for s in EXCLUDED_SUFFIXES):
         return None
+    if model_id.split("/", 1)[0] in EXCLUDED_NAMESPACES:
+        return None
 
     params = set(entry.get("supported_parameters") or ())
     architecture = entry.get("architecture") or {}
@@ -138,6 +145,16 @@ def normalise(
         supports_structured_output="structured_outputs" in params,
         deprecated=bool(entry.get("expiration_date")),
     )
+
+
+def priced(model: Model) -> bool:
+    """Whether this model has a real, usable price.
+
+    OpenRouter reports a negative sentinel for variable pricing. Sorting
+    cheapest-first would then rank those ahead of everything, and a spend
+    ceiling cannot bound a cost that is not knowable in advance.
+    """
+    return model.input_usd_per_mtok >= 0 and model.output_usd_per_mtok >= 0
 
 
 def fetch(

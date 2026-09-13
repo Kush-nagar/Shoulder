@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from . import catalog
 from .catalog import Model
 from .classify import Classification
 
@@ -135,6 +136,9 @@ def eligible_models(
     out = []
     for model in inputs.models:
         if model.lane != lane_name or model.deprecated:
+            continue
+        if not catalog.priced(model):
+            # A price that is not knowable cannot be bounded by a ceiling.
             continue
         if (
             enforces_model

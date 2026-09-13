@@ -903,3 +903,56 @@ class TestQualificationRobustness(unittest.TestCase):
                     or record.get("quarantine_reason"),
                     f"{model_id} carries a verdict with no recorded reason",
                 )
+
+
+class TestCatalogueHygiene(unittest.TestCase):
+    """What must never enter the catalogue, found by a real discovery run."""
+
+    def test_meta_routers_are_not_models(self) -> None:
+        """`openrouter/auto` picks some model at request time.
+
+        Routing to it would mean the capability class, the qualification
+        verdict and the privacy contract all describe a model other than the
+        one that actually runs. A real run qualified it before this rule
+        existed.
+        """
+        for model_id in (
+            "openrouter/auto",
+            "openrouter/auto-beta",
+            "openrouter/fusion",
+            "openrouter/pareto-code",
+        ):
+            with self.subTest(model_id):
+                self.assertIsNone(catalog.normalise({"id": model_id}))
+
+    def test_a_negative_sentinel_price_is_not_cheap(self) -> None:
+        """OpenRouter reports -1 for variable pricing.
+
+        Cheapest-first would otherwise rank those ahead of everything, and no
+        spend ceiling can bound a cost that is not knowable in advance.
+        """
+        variable = model("vendor/variable", "openrouter", price_in=-1000000.0)
+        self.assertFalse(catalog.priced(variable))
+        eligible = routing.eligible_models(
+            inputs(models=[variable], qualification=qualification([variable])),
+            "CHEAP_MECHANICAL",
+            "openrouter",
+        )
+        self.assertEqual(eligible, [])
+
+    def test_an_ordinary_model_is_priced(self) -> None:
+        self.assertTrue(catalog.priced(model("vendor/normal", "openrouter")))
+
+    def test_the_committed_catalogue_holds_no_meta_router(self) -> None:
+        import json as _json
+        from pathlib import Path as _Path
+
+        ledger = _Path("ops/state/models.json")
+        if not ledger.exists():
+            self.skipTest("no catalogue has been discovered yet")
+        data = _json.loads(ledger.read_text(encoding="utf-8"))
+        for model_id in data["models"]:
+            self.assertFalse(
+                model_id.startswith("openrouter/"),
+                f"{model_id} is a meta-router, not a model",
+            )

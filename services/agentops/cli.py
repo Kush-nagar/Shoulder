@@ -99,6 +99,8 @@ def cmd_qualify(args: argparse.Namespace) -> int:
             and not record.get("deprecated")
             and (args.lane is None or record.get("lane") == args.lane)
             and record.get("supports_tools")
+            and record.get("input_usd_per_mtok", -1) >= 0
+            and record.get("output_usd_per_mtok", -1) >= 0
             and record.get("context_length", 0) >= spec["min_context"]
             and record.get("input_usd_per_mtok", 1e9) <= spec["max_input_usd_per_mtok"]
             and (not spec["needs_reasoning"] or record.get("supports_reasoning"))

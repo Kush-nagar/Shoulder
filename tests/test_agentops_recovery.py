@@ -309,8 +309,30 @@ class TestSeededStateShape(unittest.TestCase):
     def test_no_lease_is_committed(self) -> None:
         self.assertEqual(self.ctx.tasks.get("leases"), {})
 
-    def test_no_spend_is_committed(self) -> None:
-        self.assertEqual(self.ctx.budget.get("spend"), {})
+    def test_committed_spend_is_real_and_far_under_the_ceilings(self) -> None:
+        """Qualification runs really do spend, and it is recorded.
+
+        The ledger started empty; cloud verification then charged a fraction of
+        a cent for real probe calls. What matters is that every recorded amount
+        is finite, non-negative, and nowhere near a ceiling.
+        """
+        import math
+
+        limits = self.ctx.policy["budget"]
+        for bucket in ("daily", "monthly"):
+            for period in self.ctx.budget.get("spend", {}).get(bucket, {}).values():
+                for lane, amount in period.items():
+                    with self.subTest(f"{bucket}:{lane}"):
+                        self.assertTrue(math.isfinite(float(amount)))
+                        self.assertGreaterEqual(float(amount), 0.0)
+                        self.assertLess(
+                            float(amount), float(limits["openrouter_daily_usd"])
+                        )
+
+    def test_no_lane_is_budget_blocked_at_rest(self) -> None:
+        self.assertEqual(
+            state.budget_blocked(self.ctx.policy, self.ctx.budget), frozenset()
+        )
 
     def test_real_use_gate_is_closed(self) -> None:
         self.assertFalse(state.gate_passed(self.ctx.progress))
@@ -450,3 +472,117 @@ class TestSecondReviewFindings(unittest.TestCase):
     def test_spend_accepts_an_ordinary_amount(self) -> None:
         budget = state.record_spend({}, "openrouter", 0.25, task_id=14)
         self.assertEqual(state.task_spend(budget, 14), 0.25)
+
+
+class TestEndToEndFailover(unittest.TestCase):
+    """Failover driven through the real coordinator and real state files.
+
+    The routing tests cover the decision in isolation. This covers the whole
+    path: committed policy, a state file on disk, the coordinator loading it,
+    and the plan actually changing when a lane goes into cooldown.
+    """
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        from agentops_fixtures import REPO_ROOT as root
+
+        self.tmp = tempfile.mkdtemp()
+        self.root = Path(self.tmp)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(root / relative, self.root / relative)
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+        # Make every lane usable so the only variable is health.
+        providers = state.read_json(state.Paths(self.root).providers)
+        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
+            state.mark_provider(providers, lane, "AVAILABLE", reason="test")
+        state.mark_lane_qualified(providers, "codex_cloud", evidence="test")
+        state.write_json(state.Paths(self.root).providers, providers)
+
+        models = state.read_json(state.Paths(self.root).models)
+        for record in models.get("models", {}).values():
+            if not record.get("absent") and not record.get("deprecated"):
+                record["qualification"] = "QUALIFIED"
+        state.write_json(state.Paths(self.root).models, models)
+
+    def plan_for(self, task_id: int) -> coordinator.Plan:
+        ctx = coordinator.load_context(self.root)
+        task = ctx.backlog.tasks[task_id]
+        return coordinator.plan(ctx, coordinator.evaluate(ctx, task))
+
+    def cool(self, lane: str) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        paths = state.Paths(self.root)
+        providers = state.read_json(paths.providers)
+        state.mark_provider(
+            providers,
+            lane,
+            "COOLDOWN",
+            reason="allowance exhausted",
+            reset_at=(datetime.now(UTC) + timedelta(hours=5)).isoformat(
+                timespec="seconds"
+            ),
+        )
+        state.write_json(paths.providers, providers)
+
+    def test_a_backend_task_routes_before_any_failure(self) -> None:
+        built = self.plan_for(15)
+        assert built.writer is not None, built.blocked_reason
+        self.assertEqual(built.writer.lane, "claude_subscription")
+
+    def test_backend_work_prefers_the_other_subscription_lane(self) -> None:
+        """Paid credits are the last resort, not the first fallback.
+
+        With Claude cooled, Codex Cloud takes the work because it is also
+        subscription-backed. Reaching for metered OpenRouter capacity while an
+        included allowance sits unused would be the more expensive choice.
+        """
+        self.cool("claude_subscription")
+        built = self.plan_for(15)
+        assert built.writer is not None, built.blocked_reason
+        self.assertEqual(built.writer.lane, "codex_cloud")
+
+    def test_backend_work_reaches_openrouter_once_both_subscriptions_cool(
+        self,
+    ) -> None:
+        self.cool("claude_subscription")
+        self.cool("codex_cloud")
+        built = self.plan_for(15)
+        assert built.writer is not None, built.blocked_reason
+        self.assertEqual(built.writer.lane, "openrouter")
+
+    def test_frontend_work_waits_when_codex_cools(self) -> None:
+        """It must not fall through to a writer the policy forbids."""
+        self.cool("codex_cloud")
+        built = self.plan_for(18)
+        self.assertIsNone(built.writer)
+        self.assertIn("BLOCKED_PROVIDER", built.blocked_reason or "")
+        self.assertFalse(
+            any("deepseek" in r.lower() for r in built.rejections if "forbids" not in r)
+        )
+
+    def test_codex_returns_to_the_pool_after_its_window(self) -> None:
+        paths = state.Paths(self.root)
+        providers = state.read_json(paths.providers)
+        state.mark_provider(
+            providers,
+            "codex_cloud",
+            "COOLDOWN",
+            reason="allowance exhausted",
+            reset_at="2000-01-01T00:00:00+00:00",
+        )
+        state.write_json(paths.providers, providers)
+
+        built = self.plan_for(18)
+        assert built.writer is not None, built.blocked_reason
+        self.assertEqual(built.writer.lane, "codex_cloud")
+
+    def test_everything_down_blocks_rather_than_improvising(self) -> None:
+        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
+            self.cool(lane)
+        built = self.plan_for(15)
+        self.assertIsNone(built.writer)
+        self.assertIn("BLOCKED_PROVIDER", built.blocked_reason or "")
