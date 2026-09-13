@@ -161,10 +161,11 @@ def load_state(path: Path) -> dict[str, Any]:
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
+    """LF endings on every platform; see state.write_json for why."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    body = json.dumps(state, indent=2, sort_keys=True) + "\n"
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(body)
 
 
 def models_from_state(state: dict[str, Any]) -> list[Model]:

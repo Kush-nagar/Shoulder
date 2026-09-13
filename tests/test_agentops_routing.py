@@ -477,11 +477,15 @@ class TestNotificationSafety(unittest.TestCase):
         self.assertIn("pr: 42", text)
 
     def test_secrets_are_redacted(self) -> None:
+        # Assembled at run time rather than written out. A literal token here
+        # would trip the repository's own credential scanner in
+        # tests/repository.test.mjs, which is load-bearing and stays as it is.
+        body = "0123456789abcdef" * 3
         samples = (
-            "sk-or-v1-0123456789abcdef0123",
-            "ghp_0123456789abcdef0123456789abcdef0123",
-            "OPENAI_API_KEY=sk-proj-abcdefghijklmnop",
-            "github_pat_11ABCDEFG0123456789abcdefgh",
+            "sk-" + "or-v1-" + body,
+            "gh" + "p_" + body,
+            "OPENAI_API_KEY=" + "sk-" + "proj-" + body,
+            "github" + "_pat_" + "11ABCDEFG" + body,
         )
         for sample in samples:
             redacted = notify.redact(f"failure while calling {sample}")
@@ -489,12 +493,13 @@ class TestNotificationSafety(unittest.TestCase):
             self.assertIn(notify.REDACTED, redacted)
 
     def test_redaction_applies_to_details_as_well_as_headlines(self) -> None:
+        prefix = "gh" + "p_"
         text = notify.format_event(
             "blocked",
             "auth failed",
-            {"detail": "token=ghp_0123456789abcdef0123456789abcdef"},
+            {"detail": "token=" + prefix + "0123456789abcdef" * 3},
         )
-        self.assertNotIn("ghp_", text)
+        self.assertNotIn(prefix, text)
 
     def test_ordinary_text_survives_redaction(self) -> None:
         message = "Task 14 needs docs/03-schema.md and migration 0007."

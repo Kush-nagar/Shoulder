@@ -62,8 +62,16 @@ def read_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, An
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
+    """Write state with LF endings on every platform.
+
+    Default text mode translates to CRLF on Windows, and the repository
+    formatter rejects that, so a coordinator run on a workstation would break
+    the quality gate it exists to protect.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    body = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(body)
 
 
 def load_policy(paths: Paths) -> dict[str, Any]:

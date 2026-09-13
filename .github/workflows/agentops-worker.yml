@@ -43,10 +43,11 @@ permissions: {}
 jobs:
   guard:
     runs-on: ubuntu-24.04
+    # No checkout and no permissions: this job only reads a repository variable.
+    # Granting it nothing means the kill switch cannot be the thing that leaks.
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: check
         env:
           AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}

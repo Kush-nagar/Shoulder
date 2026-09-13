@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from agentops_fixtures import REPO_ROOT, policy
@@ -275,6 +276,49 @@ class TestKillSwitch(unittest.TestCase):
         self.assertEqual(code, 0)
         ctx = coordinator.load_context(REPO_ROOT)
         self.assertEqual(ctx.tasks.get("leases"), {}, "no lease may be taken")
+
+
+class TestStateWriting(unittest.TestCase):
+    """State is rewritten on every run; it must stay gate-clean."""
+
+    def test_state_is_written_with_lf_endings_on_every_platform(self) -> None:
+        """Default text mode emits CRLF on Windows, which the formatter rejects.
+
+        A coordinator run on a workstation would otherwise break the quality
+        gate it exists to protect.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "sample.json"
+            state.write_json(target, {"leases": {}, "note": "two\nlines"})
+            raw = target.read_bytes()
+            self.assertNotIn(b"\r\n", raw)
+            self.assertTrue(raw.endswith(b"\n"))
+
+    def test_committed_state_files_use_lf(self) -> None:
+        paths = state.Paths(REPO_ROOT)
+        for path in (
+            paths.progress,
+            paths.providers,
+            paths.tasks,
+            paths.budget,
+            paths.models,
+        ):
+            with self.subTest(path.name):
+                self.assertNotIn(b"\r\n", path.read_bytes())
+
+    def test_a_write_round_trip_is_stable(self) -> None:
+        """Rewriting unchanged state must not produce a diff."""
+        import tempfile
+
+        payload = {"b": 2, "a": {"nested": [1, 2]}}
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "sample.json"
+            state.write_json(target, payload)
+            first = target.read_bytes()
+            state.write_json(target, state.read_json(target))
+            self.assertEqual(first, target.read_bytes())
 
 
 class TestSeededStateShape(unittest.TestCase):

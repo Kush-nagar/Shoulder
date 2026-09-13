@@ -113,17 +113,24 @@ jobs:
             --field branch="$(jq -r '.branch' dispatch.json)"
 
       - name: Report to the activity feed
+        # Runs even when planning failed, so it must not assume plan.json exists.
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          kind=start
-          headline="Task ${{ steps.plan.outputs.task_id }} dispatched"
-          if [ "${{ steps.plan.outputs.dispatched }}" != "true" ]; then
-            kind=blocked
-            headline="Coordinator did not dispatch"
+          set -uo pipefail
+          kind=blocked
+          headline='Coordinator did not dispatch'
+          details='{}'
+          if [ "${{ steps.plan.outputs.dispatched }}" = 'true' ]; then
+            kind=start
+            headline="Task ${{ steps.plan.outputs.task_id }} dispatched"
+          fi
+          if [ -s plan.json ]; then
+            details="$(jq -c '{task: .task_id, title: .task_title, lane: .writer.lane,
+              model: .writer.model, effort: .writer.effort, reviewer: .reviewer.lane,
+              reason: .blocked_reason}' plan.json)" || details='{}'
           fi
           uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
-            --details "$(jq -c '{task: .task_id, title: .task_title, lane: .writer.lane, model: .writer.model, effort: .writer.effort, reviewer: .reviewer.lane, reason: .blocked_reason}' plan.json)" \
+            --details "$details" \
             --repo '${{ github.repository }}' || echo 'activity feed unavailable'
