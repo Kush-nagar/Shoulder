@@ -1175,3 +1175,165 @@ class TestCapabilityLadder(unittest.TestCase):
         """A missing knob silently means cheapest, which is the defect."""
         for name, spec in policy()["capability_classes"].items():
             self.assertIn(spec.get("prefer"), ("cheapest", "strongest"), name)
+
+
+class TestOpenRouterFamilyPolicy(unittest.TestCase):
+    """Owner policy: Anthropic runs only on the subscription lane, OpenAI only
+    on Codex Cloud, and OpenRouter is the overflow pool for everything else.
+
+    The bans are asserted at the router because that is the one point every
+    selection passes through: a stale state file or a hand edit cannot put a
+    banned family back on the lane.
+    """
+
+    def _select(
+        self,
+        pool: list[catalog.Model],
+        category: str = "backend",
+        complexity: str = "ROUTINE",
+        **health: str,
+    ) -> routing.Assignment:
+        return routing.select(
+            inputs(
+                policy=configured_policy(),
+                models=pool,
+                qualification=qualification(pool),
+                provider_health=health,
+            ),
+            classification(category, complexity),
+        )
+
+    def test_an_anthropic_model_on_the_openrouter_lane_is_never_chosen(self) -> None:
+        """Even qualified, cheapest, and with every other lane unavailable."""
+        pool = [
+            model("anthropic/claude-haiku-4.5", "openrouter", price_in=0.01),
+            model("deepseek/deepseek-v4-flash-0731", "openrouter", price_in=0.04),
+        ]
+        chosen = self._select(
+            pool, claude_subscription="UNAVAILABLE", codex_cloud="UNAVAILABLE"
+        )
+        self.assertEqual(chosen.lane, "openrouter")
+        self.assertEqual(chosen.model, "deepseek/deepseek-v4-flash-0731")
+
+    def test_an_openai_model_on_the_openrouter_lane_is_never_chosen(self) -> None:
+        pool = [
+            model("openai/gpt-5-mini", "openrouter", price_in=0.01),
+            model("qwen/qwen3.7-flash", "openrouter", price_in=0.03),
+        ]
+        chosen = self._select(
+            pool, claude_subscription="UNAVAILABLE", codex_cloud="UNAVAILABLE"
+        )
+        self.assertEqual(chosen.model, "qwen/qwen3.7-flash")
+
+    def test_a_banned_family_alone_blocks_rather_than_routing(self) -> None:
+        """Fails closed. Blocking is correct; running Claude through a metered
+        API lane when the owner pays a subscription for it is not."""
+        pool = [model("anthropic/claude-sonnet-5", "openrouter", price_in=0.01)]
+        with self.assertRaises(routing.RoutingBlocked):
+            self._select(
+                pool, claude_subscription="UNAVAILABLE", codex_cloud="UNAVAILABLE"
+            )
+
+    def test_meta_routers_are_rejected_by_the_catalogue(self) -> None:
+        """A router picks its model at request time, so it could answer with a
+        family the owner confined to a subscription lane -- and the
+        qualification verdict would describe a model that never ran."""
+        for model_id in (
+            "openrouter/auto",
+            "openrouter/fusion",
+            "somevendor/auto",
+            "vendor/model:auto",
+        ):
+            self.assertTrue(catalog.is_meta_router(model_id), model_id)
+            self.assertIsNone(catalog.normalise({"id": model_id}), model_id)
+
+    def test_an_ordinary_model_is_not_mistaken_for_a_meta_router(self) -> None:
+        for model_id in (
+            "deepseek/deepseek-v4-flash-0731",
+            "qwen/qwen3.7-flash",
+            "z-ai/glm-5.2",
+        ):
+            self.assertFalse(catalog.is_meta_router(model_id), model_id)
+
+    def test_a_meta_router_in_stale_state_still_cannot_be_selected(self) -> None:
+        """Defence in depth: the catalogue drops these, but a state file
+        written before that rule could still name one."""
+        pool = [
+            model("openrouter/auto", "openrouter", price_in=0.001),
+            model("deepseek/deepseek-v4-flash-0731", "openrouter", price_in=0.04),
+        ]
+        chosen = self._select(
+            pool, claude_subscription="UNAVAILABLE", codex_cloud="UNAVAILABLE"
+        )
+        self.assertEqual(chosen.model, "deepseek/deepseek-v4-flash-0731")
+
+    def test_the_allowed_families_can_all_route(self) -> None:
+        """OpenRouter is the overflow pool, not a DeepSeek-only lane."""
+        for model_id in (
+            "deepseek/deepseek-v4-flash-0731",
+            "qwen/qwen3.7-flash",
+            "z-ai/glm-5.2",
+            "moonshotai/kimi-k2.5",
+            "minimax/minimax-m3",
+        ):
+            pool = [model(model_id, "openrouter", price_in=0.05)]
+            chosen = self._select(
+                pool, claude_subscription="UNAVAILABLE", codex_cloud="UNAVAILABLE"
+            )
+            self.assertEqual(chosen.model, model_id)
+
+    def test_an_unqualified_candidate_cannot_take_work(self) -> None:
+        """Newness is not a qualification."""
+        pool = [model("deepseek/deepseek-v4.1-flash", "openrouter", price_in=0.15)]
+        routing_inputs = inputs(
+            policy=configured_policy(),
+            models=pool,
+            qualification={pool[0].id: "CANDIDATE"},
+            provider_health={
+                "claude_subscription": "UNAVAILABLE",
+                "codex_cloud": "UNAVAILABLE",
+            },
+        )
+        with self.assertRaises(routing.RoutingBlocked):
+            routing.select(routing_inputs, classification("backend", "ROUTINE"))
+
+    def test_frontend_work_never_reaches_openrouter(self) -> None:
+        pool = [
+            model("deepseek/deepseek-v4-flash-0731", "openrouter", price_in=0.04),
+            model("openai/gpt-5.5", "codex_cloud", price_in=5.0),
+        ]
+        # COMPLEX, because gpt-5.5 at $5/Mtok sits above the ROUTINE_CODING
+        # ceiling: the real Task 14 reaches this lane the same way.
+        chosen = self._select(pool, category="frontend", complexity="COMPLEX")
+        self.assertEqual(chosen.lane, "codex_cloud")
+
+    def test_frontend_work_blocks_when_only_openrouter_is_up(self) -> None:
+        pool = [model("deepseek/deepseek-v4-flash-0731", "openrouter", price_in=0.04)]
+        with self.assertRaises(routing.RoutingBlocked):
+            self._select(
+                pool,
+                category="frontend",
+                claude_subscription="UNAVAILABLE",
+                codex_cloud="UNAVAILABLE",
+            )
+
+    def test_the_claude_lane_is_unaffected(self) -> None:
+        pool = [
+            model("anthropic/claude-haiku-4.5", "claude_subscription", price_in=1.0),
+            model("anthropic/claude-sonnet-5", "claude_subscription", price_in=2.0),
+        ]
+        chosen = self._select(pool)
+        self.assertEqual(chosen.lane, "claude_subscription")
+        self.assertEqual(chosen.model, "anthropic/claude-haiku-4.5")
+
+    def test_the_codex_cloud_lane_is_unaffected(self) -> None:
+        pool = [model("openai/gpt-5.5", "codex_cloud", price_in=5.0)]
+        chosen = self._select(pool, category="frontend", complexity="COMPLEX")
+        self.assertEqual(chosen.lane, "codex_cloud")
+        self.assertFalse(chosen.model_enforced)
+
+    def test_the_policy_states_the_ban_rather_than_relying_on_code(self) -> None:
+        lane = policy()["lanes"]["openrouter"]
+        self.assertEqual(sorted(lane["banned_namespaces"]), ["anthropic", "openai"])
+        self.assertTrue(lane["reject_meta_routers"])
+        self.assertFalse(lane["may_write_frontend"])

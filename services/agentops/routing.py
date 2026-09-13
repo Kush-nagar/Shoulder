@@ -149,9 +149,21 @@ def eligible_models(
     # nothing about what actually executes. Such a lane is gated on the lane
     # itself having been proven end to end instead; see qualified_lanes.
     enforces_model = bool(lane.get("model_enforced", True))
+    # Owner policy, enforced here rather than only where the catalogue assigns
+    # lanes: this is the one point every selection passes through, so a stale
+    # state file, a hand edit, or a future catalogue change cannot put a banned
+    # family back on a lane. Matching is on the model id's own namespace, not on
+    # a lane's declared provider, because the id is what the harness sends.
+    banned = tuple(lane.get("banned_namespaces", ()))
+    reject_meta = bool(lane.get("reject_meta_routers"))
+
     out = []
     for model in inputs.models:
         if model.lane != lane_name or model.deprecated:
+            continue
+        if model.family in banned:
+            continue
+        if reject_meta and catalog.is_meta_router(model.id):
             continue
         if not catalog.priced(model):
             # A price that is not knowable cannot be bounded by a ceiling.

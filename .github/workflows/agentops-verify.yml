@@ -23,6 +23,10 @@ on:
         description: 'How many candidate models to qualify (costs a few cents)'
         type: string
         default: '4'
+      qualify_models:
+        description: 'Space-separated model ids to qualify instead of a sweep'
+        type: string
+        default: ''
   # Also on a merge that changes the control plane, which needs no ref choice
   # at all and is the safer of the two paths.
   push:
@@ -79,6 +83,7 @@ jobs:
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
       QUALIFY_LIMIT: ${{ inputs.qualify_limit || '4' }}
+      QUALIFY_MODELS: ${{ inputs.qualify_models }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       # Pinned to the default branch, not the dispatched ref. `gh workflow run
@@ -139,13 +144,28 @@ jobs:
           # where a model was tested does not change which lane executes it.
           # The Codex lane is absent on purpose: it cannot be told which model
           # to use, so it is gated on lane_qualified instead.
-          for lane in claude_subscription openrouter; do
-            uv run --locked python -m services.agentops.cli qualify \
-              --lane "$lane" --limit "$QUALIFY_LIMIT" > "qualify-$lane.json"
-            cat "qualify-$lane.json" >> "$GITHUB_STEP_SUMMARY"
-          done
-          jq -s '{results: (map(.results) | add)}' \
-            qualify-claude_subscription.json qualify-openrouter.json > qualify.json
+          if [ -n "${QUALIFY_MODELS:-}" ]; then
+            # Named models, for testing a specific new release rather than
+            # sweeping. The suite and the verdicts are the same: a model named
+            # here is not promoted, it is tested, and it stays CANDIDATE unless
+            # it passes.
+            args=''
+            for m in $QUALIFY_MODELS; do
+              args="$args --model $m"
+            done
+            # shellcheck disable=SC2086
+            uv run --locked python -m services.agentops.cli qualify $args \
+              > qualify.json
+            cat qualify.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            for lane in claude_subscription openrouter; do
+              uv run --locked python -m services.agentops.cli qualify \
+                --lane "$lane" --limit "$QUALIFY_LIMIT" > "qualify-$lane.json"
+              cat "qualify-$lane.json" >> "$GITHUB_STEP_SUMMARY"
+            done
+            jq -s '{results: (map(.results) | add)}' \
+              qualify-claude_subscription.json qualify-openrouter.json > qualify.json
+          fi
           cost="$(jq -r '[.results[].cost_usd] | add // 0' qualify.json)"
           echo "cost=$cost" >> "$GITHUB_OUTPUT"
           # Record what the qualification run itself spent, so the ceilings
