@@ -486,6 +486,37 @@ def cmd_usage(args: argparse.Namespace) -> int:
         and float(reported["limit_remaining"]) <= 0
     )
 
+    # Reporting an overrun and doing nothing leaves the lane eligible. Routing
+    # reads budget and health, so the provider's own numbers have to land in
+    # one of them or this check changes nothing.
+    acted = ""
+    if exhausted:
+        providers = state.read_json(paths.providers, {"lanes": {}})
+        state.mark_provider(
+            providers,
+            "openrouter",
+            "BUDGET_EXHAUSTED",
+            reason="the provider reports no remaining credit",
+        )
+        state.write_json(paths.providers, providers)
+        acted = "marked BUDGET_EXHAUSTED"
+    elif daily >= ceiling:
+        budget = state.read_json(paths.budget, {"spend": {}})
+        recorded = float(
+            budget.get("spend", {})
+            .get("daily", {})
+            .get(state.today(), {})
+            .get("openrouter", 0.0)
+        )
+        shortfall = daily - recorded
+        if shortfall > 0:
+            # Out-of-band charges and costs lost on failed runs never reached
+            # the ledger. Reconcile up to the provider's figure so the ceiling
+            # reflects what was really spent.
+            state.record_spend(budget, "openrouter", shortfall)
+            state.write_json(paths.budget, budget)
+            acted = f"reconciled the ledger up by {shortfall:.6f}"
+
     return _emit(
         {
             "ok": True,
@@ -494,6 +525,7 @@ def cmd_usage(args: argparse.Namespace) -> int:
             "daily_ceiling_usd": ceiling,
             "over_daily_ceiling": daily >= ceiling,
             "credit_exhausted": exhausted,
+            "action_taken": acted or "none needed",
         }
     )
 

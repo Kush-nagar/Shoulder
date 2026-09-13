@@ -195,6 +195,11 @@ def mark_provider(
 # --- budget ----------------------------------------------------------------
 
 
+def today() -> str:
+    """The daily bucket key, so callers do not re-derive it inconsistently."""
+    return datetime.now(UTC).strftime("%Y-%m-%d")
+
+
 def _period_keys() -> tuple[str, str]:
     current = datetime.now(UTC)
     return current.strftime("%Y-%m-%d"), current.strftime("%Y-%m")

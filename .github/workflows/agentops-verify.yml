@@ -41,13 +41,16 @@ jobs:
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
       QUALIFY_LIMIT: ${{ inputs.qualify_limit || '4' }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      # No ref: workflow_dispatch only runs from the default branch, so this
-      # is always the trusted revision. Checking out a pull request head here
-      # would run unreviewed code with the provider secrets in scope.
+      # Pinned to the default branch, not the dispatched ref. `gh workflow run
+      # --ref` selects which branch's workflow file runs, so an unqualified
+      # checkout follows that branch and would hand the provider credentials
+      # to code that has not been reviewed or merged.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
@@ -166,9 +169,9 @@ jobs:
             exit 0
           fi
           git commit -m 'Record provider qualification from a cloud verify run'
-          git pull --rebase --autostash origin "$GITHUB_REF_NAME"
+          git pull --rebase --autostash origin "$DEFAULT_BRANCH"
           uv run --locked python -m services.agentops.cli validate
-          git push origin "HEAD:$GITHUB_REF_NAME"
+          git push origin "HEAD:$DEFAULT_BRANCH"
 
       - name: Report to the activity feed
         if: always()

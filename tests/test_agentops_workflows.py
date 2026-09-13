@@ -572,3 +572,58 @@ class TestCodexReviewFindings(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         self.assertIn("cli attach", text)
         self.assertIn("GITHUB_RUN_ID", text)
+
+
+class TestThirdReviewFindings(unittest.TestCase):
+    """Regressions for the third Codex review round."""
+
+    def test_verify_checks_out_the_default_branch_not_the_dispatched_ref(
+        self,
+    ) -> None:
+        """`gh workflow run --ref` chooses which branch's file runs.
+
+        An unqualified checkout follows that branch, so the credentials would
+        reach code that was never reviewed or merged.
+        """
+        text = read(WORKFLOW_DIR / "agentops-verify.yml")
+        self.assertIn("ref: ${{ github.event.repository.default_branch }}", text)
+
+    def test_a_provider_failure_is_pushed_not_just_written(self) -> None:
+        """The failing job runs no later step, so it must push for itself."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        failure = text.split("Record a provider failure", 1)[1]
+        self.assertIn("git push origin", failure.split("- name:", 1)[0])
+
+    def test_the_hand_off_state_is_committed(self) -> None:
+        """Delegation attaches the Codex PR after the ledger commit runs."""
+        text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
+        self.assertIn("Commit what the hand-off recorded", text)
+
+    def test_an_open_delegated_pull_request_counts_as_live(self) -> None:
+        from unittest import mock
+
+        from services.agentops import watchdog
+
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout='{"state":"OPEN"}')
+            self.assertFalse(watchdog.owner_finished({"pull_request": 42}))
+            run.return_value = mock.Mock(returncode=0, stdout='{"state":"MERGED"}')
+            self.assertTrue(watchdog.owner_finished({"pull_request": 42}))
+
+    def test_an_unreadable_pull_request_does_not_wedge_recovery(self) -> None:
+        from unittest import mock
+
+        from services.agentops import watchdog
+
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            self.assertTrue(watchdog.owner_finished({"pull_request": 42}))
+
+    def test_the_usage_check_acts_on_what_it_finds(self) -> None:
+        """Reporting an overrun and doing nothing leaves the lane eligible."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        usage = source.split("def cmd_usage", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("BUDGET_EXHAUSTED", usage)
+        self.assertIn("record_spend", usage)

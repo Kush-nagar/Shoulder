@@ -90,6 +90,7 @@ jobs:
       MODEL: ${{ inputs.model }}
       EFFORT: ${{ inputs.effort }}
       BRANCH: ${{ inputs.branch }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -237,6 +238,25 @@ jobs:
           # DEGRADED keeps the lane out of the pool until something proves it
           # works again, so the next coordinator run takes the fallback chain
           # instead of choosing the lane that just failed.
+          #
+          # This job is already failing, so no later step will commit anything.
+          # A failure recorded only in this runner's checkout is not recorded
+          # at all: the durable coordinator would never see it and would pick
+          # the same lane again. Push it to the default branch here.
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          git stash push --include-untracked -- ops/state || true
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH"
+          git stash pop || true
+          uv run --locked python -m services.agentops.cli validate
+          git add ops/state
+          if ! git diff --cached --quiet; then
+            git commit -m "Record a provider failure from worker run ${GITHUB_RUN_ID}"
+            git pull --rebase --autostash origin "$DEFAULT_BRANCH"
+            uv run --locked python -m services.agentops.cli validate
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
 
       - name: Run the repository quality gate
         id: gate

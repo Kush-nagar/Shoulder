@@ -33,10 +33,12 @@ def owner_finished(lease: dict[str, Any], *, repo: str | None = None) -> bool:
     # doing, so falling back to it would prove nothing.
     run_id = lease.get("worker_run_id")
     if not run_id:
-        if lease.get("pull_request") is not None:
-            # Codex Cloud work has no workflow run to inspect. Its liveness is
-            # the pull request, and only the timestamps can speak for it.
-            return True
+        pull_request = lease.get("pull_request")
+        if pull_request is not None:
+            # Codex Cloud has no workflow run to inspect, so the pull request
+            # is the evidence. An open one means the work may still be in
+            # flight; reclaiming it would put a second writer on the branch.
+            return _pull_request_finished(int(pull_request), repo=repo)
         return True
     command = ["gh", "run", "view", str(run_id), "--json", "status"]
     if repo:
@@ -49,6 +51,26 @@ def owner_finished(lease: dict[str, Any], *, repo: str | None = None) -> bool:
     except json.JSONDecodeError:
         return True
     return status not in RUNNING_STATUSES
+
+
+def _pull_request_finished(number: int, *, repo: str | None = None) -> bool:
+    """Whether a delegated pull request has stopped being worked on.
+
+    Open means possibly still in flight. Closed or merged means finished. A
+    question that cannot be answered must not wedge recovery forever, so an
+    unreadable pull request counts as finished.
+    """
+    command = ["gh", "pr", "view", str(number), "--json", "state,updatedAt"]
+    if repo:
+        command += ["--repo", repo]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return True
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return True
+    return str(payload.get("state", "")).upper() != "OPEN"
 
 
 def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
