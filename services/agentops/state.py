@@ -137,6 +137,30 @@ def provider_health(providers: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def qualified_lanes(providers: dict[str, Any]) -> frozenset[str]:
+    """Lanes proven to work end to end.
+
+    Used for lanes whose model cannot be selected, where qualifying one model
+    proves nothing about what the account actually runs. The proof is a real
+    round trip through the lane, recorded by `cli qualify-lane`.
+    """
+    return frozenset(
+        lane
+        for lane, record in providers.get("lanes", {}).items()
+        if record.get("lane_qualified")
+    )
+
+
+def mark_lane_qualified(
+    providers: dict[str, Any], lane: str, *, evidence: str
+) -> dict[str, Any]:
+    record = providers.setdefault("lanes", {}).setdefault(lane, {})
+    record["lane_qualified"] = True
+    record["lane_qualified_at"] = now()
+    record["lane_qualification_evidence"] = evidence
+    return providers
+
+
 def mark_provider(
     providers: dict[str, Any],
     lane: str,

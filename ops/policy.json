@@ -21,21 +21,10 @@
       "priority": 1,
       "zero_data_retention": true,
       "data_collection": "deny",
-      "privacy_basis": "Anthropic commercial terms: prompts are not used for training."
-    },
-    "codex_api": {
-      "provider": "openai",
-      "harness": "codex-action",
-      "billing": "api",
-      "secret": "OPENAI_API_KEY",
-      "may_write_frontend": true,
-      "may_write_backend": true,
-      "may_review": true,
-      "priority": 2,
-      "$comment": "openai/codex-action@v1 authenticates with an API key only; ChatGPT subscription auth is not available to GitHub Actions. This lane therefore bills the OpenAI API.",
-      "zero_data_retention": true,
-      "data_collection": "deny",
-      "privacy_basis": "OpenAI API platform terms: API data is not used for training by default."
+      "privacy_basis": "Anthropic commercial terms: prompts are not used for training.",
+      "enabled": true,
+      "model_enforced": true,
+      "catalog_namespace": "anthropic"
     },
     "openrouter": {
       "provider": "openrouter",
@@ -50,7 +39,48 @@
       "priority": 3,
       "zero_data_retention": true,
       "data_collection": "deny",
-      "privacy_basis": "Enforced per request via provider.zdr and provider.data_collection=deny."
+      "privacy_basis": "Enforced per request via provider.zdr and provider.data_collection=deny.",
+      "enabled": true,
+      "model_enforced": true,
+      "catalog_namespace": "*",
+      "$comment_namespace": "The fallback lane: any namespace no enabled lane claims routes here."
+    },
+    "codex_cloud": {
+      "provider": "openai",
+      "harness": "codex-cloud-github",
+      "mechanism": "github-mention",
+      "billing": "subscription",
+      "secret": null,
+      "enabled": true,
+      "may_write_frontend": true,
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 2,
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "ChatGPT Business/Enterprise and consumer plan terms: Codex cloud work is not used for training by default.",
+      "model_enforced": false,
+      "usage_window_seconds": 18000,
+      "$comment": "Subscription-backed Codex Cloud, reached through the Codex GitHub integration. The coordinator opens a task branch and pull request and comments '@codex <instruction>'; Codex Cloud does the work in OpenAI's sandbox and pushes back to the branch. No API key and no local machine. A mention cannot select a model or reasoning effort, so the tier this router chooses is advisory for this lane and the account's configured Codex model actually executes: model_enforced is false.",
+      "$comment_window": "usage_window_seconds is the 5-hour rolling allowance window Codex meters against. It is the cooldown applied when the lane looks exhausted.",
+      "catalog_namespace": "openai"
+    },
+    "codex_api": {
+      "provider": "openai",
+      "harness": "codex-action",
+      "billing": "api",
+      "secret": "OPENAI_API_KEY",
+      "may_write_frontend": true,
+      "may_write_backend": true,
+      "may_review": true,
+      "priority": 4,
+      "$comment": "Optional pay-per-use OpenAI API lane, disabled. openai/codex-action authenticates with an API key only and cannot spend the ChatGPT subscription allowance, so it is NOT the subscription-backed worker. Enable this only as a deliberate decision to add API billing.",
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "OpenAI API platform terms: API data is not used for training by default.",
+      "enabled": false,
+      "model_enforced": true,
+      "catalog_namespace": "openai"
     }
   },
   "capability_classes": {
@@ -164,7 +194,7 @@
     "openai_daily_usd": 5.0,
     "openai_monthly_usd": 40.0,
     "per_task_usd": 3.0,
-    "$comment": "Conservative starting ceilings chosen because the repository had no prior value. Raising them is a deliberate human edit; the orchestrator never raises a ceiling by itself. per_task_usd is checked before dispatch and again as spend is recorded."
+    "$comment": "Ceilings for metered lanes only. Subscription lanes (Claude, Codex Cloud) spend an included allowance rather than API money and are never blocked by a dollar ceiling. Raising a ceiling is a deliberate human edit."
   },
   "qualification": {
     "required_states": ["QUALIFIED"],

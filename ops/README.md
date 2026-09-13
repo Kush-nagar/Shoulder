@@ -79,8 +79,27 @@ Never paste a credential into a file, a log, an issue, or a chat.
 | Secret | Lane | Needed for |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude | Backend work and review. From `claude setup-token`. |
-| `OPENAI_API_KEY` | Codex | All frontend work. |
-| `OPENROUTER_API_KEY` | OpenRouter | Backend overflow, cheap mechanical work, independent review, qualification runs. |
+| `OPENROUTER_API_KEY` | OpenRouter | Backend overflow, cheap mechanical work, independent review, model qualification. |
+
+**Codex Cloud needs no secret.** It is reached through the Codex GitHub
+integration: the coordinator opens a task branch and pull request and comments
+`@codex <instruction>`, and the work runs in OpenAI's sandbox against the
+ChatGPT allowance. Setup is account-level rather than a repository credential:
+connect the repository in Codex cloud and turn on code review at
+`chatgpt.com/codex/settings/code-review`.
+
+`OPENAI_API_KEY` is **not** required. The optional `codex_api` lane is disabled;
+enabling it is a deliberate decision to add pay-per-use API billing.
+
+### What the Codex lane cannot do
+
+- A mention carries no model or effort, so the tier the router picks is
+  advisory and the account's configured Codex model runs. Assignments carry
+  `model_enforced: false`.
+- Consumer plans expose no usage API, so remaining allowance cannot be read.
+  Exhaustion is inferred from a run that could not proceed:
+  `cli exhausted --lane codex_cloud` cools it for its five-hour window, backend
+  work overflows to OpenRouter, and frontend work waits.
 
 ## Budgets
 

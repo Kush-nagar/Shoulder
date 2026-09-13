@@ -98,10 +98,17 @@ class TestWorkflowPermissions(unittest.TestCase):
             with self.subTest(path.name):
                 self.assertNotIn("pull_request_target", read(path))
 
-    def test_coordinator_cannot_open_pull_requests(self) -> None:
-        """The coordinator dispatches; only a worker writes product code."""
+    def test_the_coordinator_never_writes_product_code(self) -> None:
+        """It opens the pull request Codex attaches to, and nothing more.
+
+        The Codex lane is reached by mentioning @codex on a pull request, so
+        one has to exist first. The coordinator creates that branch and pull
+        request; it never runs a harness and never implements anything.
+        """
         text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
-        self.assertNotIn("pull-requests: write", text)
+        self.assertIn("pull-requests: write", text)
+        for harness in ("claude-code-action", "codex-action"):
+            self.assertNotIn(harness, text)
 
     def test_watchdog_cannot_write_pull_requests(self) -> None:
         text = read(WORKFLOW_DIR / "agentops-watchdog.yml")
@@ -212,10 +219,19 @@ class TestWorkflowSecretHygiene(unittest.TestCase):
             with self.subTest(path.name):
                 self.assertIsNone(bad.search(read(path)))
 
-    def test_each_lane_uses_its_declared_secret(self) -> None:
+    def test_each_executable_lane_uses_its_declared_secret(self) -> None:
+        """A secretless lane has no credential to reference; skip it rather
+        than inventing one for it."""
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        for lane in policy()["lanes"].values():
-            self.assertIn(f"secrets.{lane['secret']}", text, lane["secret"])
+        for name in ("claude_subscription", "openrouter"):
+            secret = policy()["lanes"][name]["secret"]
+            self.assertIn(f"secrets.{secret}", text, secret)
+
+    def test_no_workflow_needs_an_openai_api_key(self) -> None:
+        """The Codex lane spends the ChatGPT subscription, not API billing."""
+        for path in AGENTOPS_WORKFLOWS:
+            with self.subTest(path.name):
+                self.assertNotIn("OPENAI_API_KEY", read(path))
 
     def test_autonomy_is_guarded_before_any_work_starts(self) -> None:
         """51/61. The worker refuses to run while the kill switch is off."""
@@ -378,10 +394,11 @@ class TestSpendRecording(unittest.TestCase):
         self.assertIn("total_cost_usd", text)
         self.assertIn('--task "$TASK_ID"', text)
 
-    def test_the_codex_lane_is_excluded_rather_than_guessed_at(self) -> None:
-        """openai/codex-action reports no usage, so nothing is invented."""
+    def test_the_worker_only_runs_lanes_it_can_execute(self) -> None:
+        """Codex Cloud is delegated by mention, never dispatched here."""
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        self.assertIn("inputs.lane != 'codex_api'", text)
+        self.assertIn("lane $LANE is not executable by this workflow", text)
+        self.assertNotIn("codex-action", text)
 
 
 class TestReviewWorkflow(unittest.TestCase):
@@ -393,7 +410,7 @@ class TestReviewWorkflow(unittest.TestCase):
     def test_the_reviewer_is_actually_run(self) -> None:
         """The assignment used to be logged and never executed."""
         self.assertIn("cli reviewer --task", self.text)
-        for lane in ("claude_subscription", "openrouter", "codex_api"):
+        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
             self.assertIn(f"steps.pick.outputs.lane == '{lane}'", self.text)
 
     def test_review_only_touches_branches_this_system_made(self) -> None:
@@ -403,8 +420,10 @@ class TestReviewWorkflow(unittest.TestCase):
         self.assertIn("contents: read", self.text)
         self.assertNotIn("contents: write", self.text)
 
-    def test_the_codex_reviewer_is_read_only(self) -> None:
-        self.assertIn("safety-strategy: read-only", self.text)
+    def test_the_codex_reviewer_uses_the_documented_mention(self) -> None:
+        """`@codex review` is the supported trigger, and it needs no key."""
+        self.assertIn("@codex review", self.text)
+        self.assertNotIn("openai-api-key", self.text)
 
 
 class TestLoopCompletion(unittest.TestCase):

@@ -60,7 +60,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_discover(args: argparse.Namespace) -> int:
     root = _root(args)
     paths = state.Paths(root)
-    models, reason = catalog.discover()
+    models, reason = catalog.discover(
+        lanes=catalog.namespace_lanes(state.load_policy(paths))
+    )
     if not models:
         return _emit({"ok": False, "reason": reason})
     previous = catalog.load_state(paths.models)
@@ -126,11 +128,36 @@ def cmd_health(args: argparse.Namespace) -> int:
     changed = False
 
     if args.probe:
+        health = state.provider_health(providers)
         for lane_name, lane in policy["lanes"].items():
             if args.lane and lane_name != args.lane:
                 continue
-            secret = lane["secret"]
-            if os.environ.get(secret):
+            if not lane.get("enabled", True):
+                state.mark_provider(
+                    providers,
+                    lane_name,
+                    "DISABLED",
+                    reason="lane is disabled in policy",
+                )
+                changed = True
+                continue
+
+            secret = lane.get("secret")
+            if not secret:
+                # A secretless lane is subscription-backed and reached through
+                # an account-level integration rather than a credential this
+                # repository holds -- Codex Cloud through the GitHub app. There
+                # is nothing here to probe, so an existing cooldown is the only
+                # thing that may keep it out of the pool.
+                if health.get(lane_name) == "COOLDOWN":
+                    continue
+                state.mark_provider(
+                    providers,
+                    lane_name,
+                    "AVAILABLE",
+                    reason="subscription lane; availability is proven by use",
+                )
+            elif os.environ.get(secret):
                 state.mark_provider(
                     providers,
                     lane_name,
@@ -158,6 +185,70 @@ def cmd_health(args: argparse.Namespace) -> int:
     if changed:
         state.write_json(paths.providers, providers)
     return _emit({"provider_health": state.provider_health(providers)})
+
+
+def cmd_qualify_lane(args: argparse.Namespace) -> int:
+    """Record that a lane has been proven end to end.
+
+    For a lane whose model cannot be selected -- Codex Cloud, reached by
+    mentioning @codex -- qualifying one model proves nothing about what the
+    account actually runs. What can be proven is the lane: a real task went
+    through it and came back as work on a branch. That proof is recorded here
+    and is what routing requires before such a lane takes real work.
+    """
+    root = _root(args)
+    paths = state.Paths(root)
+    providers = state.read_json(paths.providers, {"lanes": {}})
+    state.mark_lane_qualified(providers, args.lane, evidence=args.evidence)
+    state.write_json(paths.providers, providers)
+    return _emit(
+        {
+            "ok": True,
+            "lane": args.lane,
+            "qualified_lanes": sorted(state.qualified_lanes(providers)),
+        }
+    )
+
+
+def cmd_exhausted(args: argparse.Namespace) -> int:
+    """Put a subscription lane into cooldown until its allowance resets.
+
+    Codex meters a rolling window and exposes no usage API on consumer plans,
+    so exhaustion is inferred from a run that could not proceed. The cooldown
+    is the lane's own declared window, which is conservative: coming back too
+    early only wastes a retry, coming back too late only delays one.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    root = _root(args)
+    paths = state.Paths(root)
+    policy = state.load_policy(paths)
+    lane = policy["lanes"].get(args.lane)
+    if lane is None:
+        _emit({"ok": False, "reason": f"lane {args.lane!r} is not defined"})
+        return 1
+
+    window = int(args.window or lane.get("usage_window_seconds", 18000))
+    reset_at = (datetime.now(UTC) + timedelta(seconds=window)).isoformat(
+        timespec="seconds"
+    )
+    providers = state.read_json(paths.providers, {"lanes": {}})
+    state.mark_provider(
+        providers,
+        args.lane,
+        "COOLDOWN",
+        reason=args.reason or "usage allowance appears exhausted",
+        reset_at=reset_at,
+    )
+    state.write_json(paths.providers, providers)
+    return _emit(
+        {
+            "ok": True,
+            "lane": args.lane,
+            "reset_at": reset_at,
+            "provider_health": state.provider_health(providers),
+        }
+    )
 
 
 def cmd_spend(args: argparse.Namespace) -> int:
@@ -440,6 +531,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reviewer.add_argument("--task", type=int, required=True)
     reviewer.set_defaults(func=cmd_reviewer)
+
+    lane_q = sub.add_parser(
+        "qualify-lane", help="record that a lane was proven end to end"
+    )
+    lane_q.add_argument("--lane", required=True)
+    lane_q.add_argument("--evidence", required=True)
+    lane_q.set_defaults(func=cmd_qualify_lane)
+
+    exhausted = sub.add_parser(
+        "exhausted", help="cool a subscription lane down until its window resets"
+    )
+    exhausted.add_argument("--lane", required=True)
+    exhausted.add_argument("--reason")
+    exhausted.add_argument("--window", type=int)
+    exhausted.set_defaults(func=cmd_exhausted)
 
     spend = sub.add_parser("spend", help="record API spend for a lane")
     spend.add_argument("--lane", required=True)

@@ -7,8 +7,11 @@ name: AgentOps Worker
 #   claude_subscription  Claude Code against the Claude subscription
 #   openrouter           Claude Code against OpenRouter's Anthropic-compatible
 #                        endpoint, for cheap backend overflow
-#   codex_api            Codex CLI, the only lane permitted to write frontend
-#                        code under project policy
+#
+# Codex is deliberately absent. Subscription-backed Codex Cloud is reached by
+# mentioning @codex on a pull request, not by running an action, so it is
+# delegated by the coordinator rather than dispatched here. See
+# services/agentops/delegate.py.
 #
 # Dispatch inputs never reach a shell through ${{ }}. That substitution is
 # textual, so a crafted branch name would inject a command; every run: block
@@ -24,7 +27,7 @@ on:
       lane:
         required: true
         type: choice
-        options: [claude_subscription, openrouter, codex_api]
+        options: [claude_subscription, openrouter]
       model:
         description: 'Harness model slug chosen by the coordinator'
         required: true
@@ -117,6 +120,12 @@ jobs:
             ''|-*|*[!A-Za-z0-9._/:-]*)
               echo 'model slug contains something unsafe' >&2; exit 1 ;;
           esac
+          # Codex Cloud is delegated by mention, not dispatched as a worker.
+          # Refuse rather than silently run the wrong harness for the lane.
+          case "$LANE" in
+            claude_subscription|openrouter) ;;
+            *) echo "lane $LANE is not executable by this workflow" >&2; exit 1 ;;
+          esac
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
@@ -181,24 +190,12 @@ jobs:
           prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
           claude_args: --model ${{ inputs.model }} --max-turns 120
 
-      # --- Codex lane: the only writer allowed to touch the frontend --------
-      - name: Implement with Codex
-        if: inputs.lane == 'codex_api'
-        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: ${{ inputs.model }}
-          effort: ${{ inputs.effort }}
-          prompt-file: brief.md
-          permission-profile: ':workspace'
-          safety-strategy: drop-sudo
-
       - name: Record what the run cost
-        # Only the Claude Code harness reports usage, through its execution
-        # file. openai/codex-action exposes just its final message, so the
-        # Codex lane's spend cannot be recorded from the action and is left
-        # unrecorded rather than guessed at.
-        if: always() && inputs.lane != 'codex_api'
+        # Both lanes here bill differently -- the Claude lane against a
+        # subscription, OpenRouter against credits -- but both run the Claude
+        # Code harness, which reports usage in its execution file. Recording it
+        # is what makes the OpenRouter ceilings real.
+        if: always()
         continue-on-error: true
         env:
           EXECUTION_FILE: >-

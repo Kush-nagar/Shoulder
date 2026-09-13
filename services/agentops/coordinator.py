@@ -39,6 +39,7 @@ class Context:
             qualification=qualification,
             provider_health=state.provider_health(self.providers),
             budget_blocked=state.budget_blocked(self.policy, self.budget),
+            qualified_lanes=state.qualified_lanes(self.providers),
         )
 
 

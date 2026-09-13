@@ -44,9 +44,10 @@ jobs:
   coordinate:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write # commit the orchestrator state ledger
+      contents: write # commit the state ledger, and open a Codex task branch
       issues: write # post to the activity feed
       actions: write # dispatch the worker workflow
+      pull-requests: write # open the pull request Codex Cloud attaches to
     env:
       AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
       FORCE_PLAN_ONLY: ${{ inputs.force_plan_only }}
@@ -81,7 +82,6 @@ jobs:
         # exists, so routing has something to choose from.
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: uv run --locked python -m services.agentops.cli health --probe
 
@@ -128,16 +128,28 @@ jobs:
           git pull --rebase --autostash origin main
           git push origin HEAD:main
 
-      - name: Dispatch the worker
+      - name: Hand the task to its lane
         if: steps.plan.outputs.dispatched == 'true'
         run: |
           set -euo pipefail
-          gh workflow run agentops-worker.yml \
-            --field task_id="$(jq -r '.task_id' dispatch.json)" \
-            --field lane="$(jq -r '.writer.lane' dispatch.json)" \
-            --field model="$(jq -r '.writer.harness_model' dispatch.json)" \
-            --field effort="$(jq -r '.writer.effort' dispatch.json)" \
-            --field branch="$(jq -r '.branch' dispatch.json)"
+          mechanism="$(jq -r '.writer.mechanism // "workflow-dispatch"' dispatch.json)"
+          task="$(jq -r '.task_id' dispatch.json)"
+
+          if [ "$mechanism" = 'github-mention' ]; then
+            # Subscription-backed Codex Cloud. There is no action to run: open
+            # the task branch and pull request, then mention @codex on it. The
+            # work happens in OpenAI's sandbox against the ChatGPT allowance,
+            # with no API key and nothing running on anyone's machine.
+            uv run --locked python -m services.agentops.delegate \
+              --task "$task" --repo "$REPO"
+          else
+            gh workflow run agentops-worker.yml \
+              --field task_id="$task" \
+              --field lane="$(jq -r '.writer.lane' dispatch.json)" \
+              --field model="$(jq -r '.writer.harness_model' dispatch.json)" \
+              --field effort="$(jq -r '.writer.effort' dispatch.json)" \
+              --field branch="$(jq -r '.branch' dispatch.json)"
+          fi
 
       - name: Report to the activity feed
         # Runs even when planning failed, so it must not assume plan.json exists.

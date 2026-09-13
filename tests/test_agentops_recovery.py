@@ -326,9 +326,11 @@ class TestSeededStateShape(unittest.TestCase):
             self.ctx.paths.budget,
         ):
             text = path.read_text(encoding="utf-8")
-            self.assertEqual(
-                notify.redact(text), text, f"{path.name} looks like it holds a secret"
-            )
+            for pattern in notify.CREDENTIAL_PATTERNS:
+                self.assertIsNone(
+                    pattern.search(text),
+                    f"{path.name} looks like it holds a real credential",
+                )
 
 
 if __name__ == "__main__":

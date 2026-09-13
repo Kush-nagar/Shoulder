@@ -54,6 +54,10 @@ class Assignment:
     effort: Effort
     capability_class: str
     reason: str
+    mechanism: str = "workflow-dispatch"
+    # False when the lane cannot be told which model to use, so the recorded
+    # tier is a decision rather than an applied setting.
+    model_enforced: bool = True
     fallbacks: tuple[tuple[str, str], ...] = ()
     rejections: tuple[str, ...] = ()
 
@@ -65,6 +69,8 @@ class Assignment:
             "harness_model": self.harness_model,
             "effort": self.effort,
             "capability_class": self.capability_class,
+            "mechanism": self.mechanism,
+            "model_enforced": self.model_enforced,
             "reason": self.reason,
             "fallbacks": [list(f) for f in self.fallbacks],
             "rejections": list(self.rejections),
@@ -78,6 +84,9 @@ class RoutingInputs:
     qualification: dict[str, str]
     provider_health: dict[str, str] = field(default_factory=dict)
     budget_blocked: frozenset[str] = frozenset()
+    # Lanes proven to work end to end. Only consulted for lanes that cannot be
+    # told which model to use, where per-model qualification says nothing.
+    qualified_lanes: frozenset[str] = frozenset()
 
 
 def capability_class(policy: dict[str, Any], c: Classification) -> str:
@@ -117,11 +126,20 @@ def eligible_models(
 ) -> list[Model]:
     spec = inputs.policy["capability_classes"][class_name]
     required = inputs.policy["qualification"]["required_states"]
+    lane = inputs.policy["lanes"].get(lane_name, {})
+    # A lane that cannot be told which model to use runs whatever the account
+    # has configured, so qualifying a particular model there would prove
+    # nothing about what actually executes. Such a lane is gated on the lane
+    # itself having been proven end to end instead; see qualified_lanes.
+    enforces_model = bool(lane.get("model_enforced", True))
     out = []
     for model in inputs.models:
         if model.lane != lane_name or model.deprecated:
             continue
-        if inputs.qualification.get(model.id, "CANDIDATE") not in required:
+        if (
+            enforces_model
+            and inputs.qualification.get(model.id, "CANDIDATE") not in required
+        ):
             continue
         if model.context_length < spec["min_context"]:
             continue
@@ -182,6 +200,9 @@ def select(
         if lane_name in exclude_lanes:
             rejections.append(f"{lane_name}: excluded by caller")
             continue
+        if not lane.get("enabled", True):
+            rejections.append(f"{lane_name}: lane is disabled in policy")
+            continue
         if not _lane_may_write(lane, classification.category, purpose):
             rejections.append(
                 f"{lane_name}: policy forbids {purpose} of "
@@ -194,6 +215,14 @@ def select(
         privacy_failure = privacy_violation(inputs.policy, lane)
         if privacy_failure:
             rejections.append(f"{lane_name}: {privacy_failure}")
+            continue
+        if (
+            not lane.get("model_enforced", True)
+            and lane_name not in inputs.qualified_lanes
+        ):
+            rejections.append(
+                f"{lane_name}: lane has not passed an end-to-end qualification run"
+            )
             continue
         health = inputs.provider_health.get(lane_name, "AVAILABLE")
         if health not in USABLE_HEALTH:
@@ -221,6 +250,18 @@ def select(
         )
 
     lane_name, lane, model = chosen
+    enforced = bool(lane.get("model_enforced", True))
+    reason = (
+        f"{classification.category}/{classification.complexity} -> {class_name}; "
+        f"cheapest qualified model in lane {lane_name} "
+        f"at ${model.input_usd_per_mtok:.3f}/Mtok in"
+    )
+    if not enforced:
+        # Codex Cloud is reached by mentioning @codex on a pull request, and a
+        # mention carries no model or effort. The tier is still chosen and
+        # recorded so the decision is auditable, but saying it was applied
+        # would be false.
+        reason += "; tier is advisory, the account's configured Codex model runs"
     return Assignment(
         lane=lane_name,
         model=model.id,
@@ -228,11 +269,9 @@ def select(
         harness_model=model.harness_model,
         effort=effort,
         capability_class=class_name,
-        reason=(
-            f"{classification.category}/{classification.complexity} -> {class_name}; "
-            f"cheapest qualified model in lane {lane_name} "
-            f"at ${model.input_usd_per_mtok:.3f}/Mtok in"
-        ),
+        mechanism=str(lane.get("mechanism", "workflow-dispatch")),
+        model_enforced=enforced,
+        reason=reason,
         fallbacks=tuple(chain),
         rejections=tuple(rejections),
     )

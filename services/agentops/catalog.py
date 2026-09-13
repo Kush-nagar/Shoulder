@@ -31,12 +31,39 @@ EXCLUDED_SUFFIXES = (":batch", ":free", ":extended", ":thinking", ":online")
 
 QualificationState = Literal["CANDIDATE", "QUALIFIED", "QUARANTINED"]
 
-# Which lane executes a model, by catalogue namespace.
-NAMESPACE_LANE = {
-    "anthropic": "claude_subscription",
-    "openai": "codex_api",
-}
+# Which lane executes a model, by catalogue namespace. Derived from policy so
+# that changing which lane owns a provider family is a policy edit, not a code
+# edit: the OpenAI family moved from the API lane to subscription-backed Codex
+# Cloud without touching this module.
 DEFAULT_LANE = "openrouter"
+FALLBACK_NAMESPACE = "*"
+
+
+def namespace_lanes(policy: dict[str, Any] | None = None) -> dict[str, str]:
+    """Map catalogue namespace -> owning lane, preferring enabled lanes."""
+    if policy is None:
+        return {"anthropic": "claude_subscription", "openai": "codex_cloud"}
+    mapping: dict[str, str] = {}
+    for name, lane in sorted(
+        policy.get("lanes", {}).items(), key=lambda kv: kv[1].get("priority", 99)
+    ):
+        namespace = lane.get("catalog_namespace")
+        if not namespace or namespace == FALLBACK_NAMESPACE:
+            continue
+        # First by priority among enabled lanes wins; a disabled lane only
+        # claims a namespace nothing enabled has taken.
+        if namespace in mapping:
+            continue
+        if lane.get("enabled", True):
+            mapping[namespace] = name
+    for name, lane in policy.get("lanes", {}).items():
+        namespace = lane.get("catalog_namespace")
+        if namespace and namespace != FALLBACK_NAMESPACE and namespace not in mapping:
+            mapping[namespace] = name
+    return mapping
+
+
+NAMESPACE_LANE = namespace_lanes()
 
 
 @dataclass(frozen=True)
@@ -68,7 +95,7 @@ def _num(value: Any) -> float:
         return 0.0
 
 
-def _harness_model(model_id: str, family: str) -> str:
+def _harness_model(model_id: str, family: str, lanes: dict[str, str]) -> str:
     """The slug the lane's harness actually accepts.
 
     Claude Code against the Claude subscription and Codex against the OpenAI
@@ -76,13 +103,16 @@ def _harness_model(model_id: str, family: str) -> str:
     lane routes by namespaced id, so stripping the namespace there would leave
     a model name that identifies nothing.
     """
-    if family in NAMESPACE_LANE:
+    if family in lanes:
         return model_id.split("/", 1)[-1]
     return model_id
 
 
-def normalise(entry: dict[str, Any]) -> Model | None:
+def normalise(
+    entry: dict[str, Any], lanes: dict[str, str] | None = None
+) -> Model | None:
     """Turn one catalogue entry into a Model, or None if it is not usable."""
+    lanes = NAMESPACE_LANE if lanes is None else lanes
     model_id = str(entry.get("id", ""))
     if not model_id or any(model_id.endswith(s) for s in EXCLUDED_SUFFIXES):
         return None
@@ -95,9 +125,9 @@ def normalise(entry: dict[str, Any]) -> Model | None:
 
     return Model(
         id=model_id,
-        lane=NAMESPACE_LANE.get(family, DEFAULT_LANE),
+        lane=lanes.get(family, DEFAULT_LANE),
         family=family,
-        harness_model=_harness_model(model_id, family),
+        harness_model=_harness_model(model_id, family, lanes),
         context_length=int(entry.get("context_length") or 0),
         max_output_tokens=int(top.get("max_completion_tokens") or 0),
         input_usd_per_mtok=_num(pricing.get("prompt")) * 1_000_000,
@@ -110,19 +140,23 @@ def normalise(entry: dict[str, Any]) -> Model | None:
     )
 
 
-def fetch(url: str = CATALOG_URL, *, timeout: int = 30) -> list[Model]:
+def fetch(
+    url: str = CATALOG_URL, *, timeout: int = 30, lanes: dict[str, str] | None = None
+) -> list[Model]:
     """Fetch the live catalogue. Raises on network or decode failure."""
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
         payload = json.loads(response.read().decode("utf-8"))
-    models = [normalise(e) for e in payload.get("data", [])]
+    models = [normalise(e, lanes) for e in payload.get("data", [])]
     return [m for m in models if m is not None]
 
 
-def discover(url: str = CATALOG_URL, *, timeout: int = 30) -> tuple[list[Model], str]:
+def discover(
+    url: str = CATALOG_URL, *, timeout: int = 30, lanes: dict[str, str] | None = None
+) -> tuple[list[Model], str]:
     """Fetch the catalogue, returning an empty list and a reason on failure."""
     try:
-        return fetch(url, timeout=timeout), "ok"
+        return fetch(url, timeout=timeout, lanes=lanes), "ok"
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         return [], f"catalog discovery failed: {type(exc).__name__}: {exc}"
 

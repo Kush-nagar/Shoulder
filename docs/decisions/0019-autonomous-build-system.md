@@ -19,11 +19,20 @@ paying frontier prices for all of it is waste.
 
 Three constraints shaped the design more than anything else.
 
-**Codex cannot authenticate from GitHub Actions with a ChatGPT subscription.**
-`openai/codex-action@v1` accepts an API key only. Subscription-backed Codex
-access tokens exist but require a ChatGPT Business or Enterprise workspace.
-Project policy requires OpenAI to write all frontend code, so that lane bills
-the OpenAI API or it does not exist.
+**`openai/codex-action` cannot spend a ChatGPT subscription.** It accepts an
+API key only, and Codex access tokens -- the headless credential for
+`codex exec` -- are limited to ChatGPT Business and Enterprise workspaces. That
+action is therefore not the subscription-backed worker, and using it would have
+meant paying OpenAI API rates for every frontend task while an included Codex
+allowance sat unused.
+
+**The Codex GitHub integration is the supported subscription path.** Mentioning
+`@codex <instruction>` on a pull request starts a Codex Cloud task with that
+pull request as context, and Codex pushes its work back to the branch. It runs
+in OpenAI's sandbox against the ChatGPT allowance: no API key, and nothing
+running on anyone's laptop. `@codex review` is the documented review trigger.
+The integration attaches to a pull request, so the coordinator opens the task
+branch and pull request first and then posts the mention.
 
 **Codex CLI no longer speaks Chat Completions.** `wire_api` accepts only
 `responses`, so Codex cannot be pointed at OpenRouter. The two are not
@@ -41,8 +50,9 @@ Three execution lanes, two harnesses, one control plane.
 | Lane | Harness | Billing | Writes |
 |---|---|---|---|
 | `claude_subscription` | `anthropics/claude-code-action@v1` | Claude subscription | backend, review |
-| `codex_api` | `openai/codex-action@v1` | OpenAI API | frontend and backend, review |
+| `codex_cloud` | Codex GitHub integration (`@codex`) | **ChatGPT subscription** | frontend and backend, review |
 | `openrouter` | `anthropics/claude-code-action@v1` | OpenRouter credits | backend overflow, review |
+| `codex_api` | `openai/codex-action@v1` | OpenAI API | **disabled**; opt-in only |
 
 GitHub Actions is the durable control plane. A coordinator selects and
 dispatches work, a worker implements exactly one task on its own branch, and a
@@ -71,9 +81,27 @@ a lower list price: allowance already paid for is cheaper than new API spend.
 Claude Code on the workstation becomes the bootstrap environment rather than a
 permanent dependency. Work continues while the laptop sleeps.
 
-Frontend tasks have a hard cost floor. Without `OPENAI_API_KEY` they block
-rather than being routed to a forbidden writer. That is the intended failure:
-policy is not negotiable against availability.
+Frontend work costs no API money. It spends the ChatGPT Codex allowance, which
+is metered in a rolling five-hour window shared with local Codex use. When that
+allowance runs out the lane goes into cooldown for its window: eligible backend
+work overflows to OpenRouter, and frontend work waits rather than being handed
+to a writer the policy forbids. Waiting is the correct outcome there -- the
+OpenAI-only frontend rule is not negotiable against availability.
+
+Two things the subscription path cannot do, recorded rather than papered over:
+
+- **A mention carries no model or reasoning effort.** The router still chooses
+  a tier and records it, so the decision stays auditable, but the account's
+  configured Codex model is what actually runs. Assignments from this lane
+  carry `model_enforced: false`.
+- **Consumer plans expose no usage API.** The Analytics API is an Enterprise
+  surface, so remaining allowance cannot be queried. Exhaustion is inferred
+  from a run that could not proceed, and the cooldown is the lane's declared
+  five-hour window -- conservative in the safe direction.
+
+Because the model cannot be selected there, qualifying one model for that lane
+would prove nothing about what executes. The lane is gated instead on having
+been proven end to end at least once, recorded as `lane_qualified`.
 
 Discovery depends on OpenRouter's public catalogue, including for the Anthropic
 and OpenAI families. The endpoint needs no key and its metadata matched the

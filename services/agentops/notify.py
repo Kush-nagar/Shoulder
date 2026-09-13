@@ -29,17 +29,24 @@ MARKERS = {
     "complete": "🏁",
 }
 
-# Anything shaped like a credential never reaches the feed. This is a last
-# line of defence: callers are not supposed to pass secrets in the first place.
-SECRET_PATTERNS = (
+# Shapes that are a credential wherever they appear. Matching one of these in
+# a committed file means a real secret leaked.
+CREDENTIAL_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_\-]{12,}"),
     re.compile(r"\bsk-or-v1-[A-Za-z0-9]{8,}"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bey[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
-    re.compile(r"(?i)\b(api[_-]?key|token|secret|password)\b\s*[:=]\s*\S+"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 )
+# Deliberately over-eager, and only applied to text bound for the activity
+# feed. It catches `token=...` and `secret: ...`, which is a real leak, but it
+# also flags a configuration key merely *named* secret. Over-redacting one feed
+# comment costs nothing; missing a credential does not.
+ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b(api[_-]?key|token|secret|password)\b\s*[:=]\s*\S+"
+)
+SECRET_PATTERNS = (*CREDENTIAL_PATTERNS, ASSIGNMENT_PATTERN)
 REDACTED = "[redacted]"
 
 

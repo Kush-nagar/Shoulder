@@ -50,10 +50,18 @@ against Git and GitHub before editing anything.
   dispatches, `agentops-worker.yml` implements one task on one branch, and
   `agentops-watchdog.yml` recovers stale leases and elapsed provider cooldowns.
   Continuation is event-driven; cron is recovery only.
-- Three lanes: Claude on the subscription, Codex on the OpenAI API, and
-  OpenRouter through Claude Code's Anthropic-compatible endpoint. Frontend
-  implementation is restricted to the Codex lane and fails closed rather than
-  falling back.
+- Three active lanes, all reached without pay-per-use API billing for the two
+  subscription ones: Claude on the Claude subscription, **Codex Cloud on the
+  ChatGPT subscription** through the Codex GitHub integration (`@codex` on a
+  pull request), and OpenRouter through Claude Code's Anthropic-compatible
+  endpoint. Frontend implementation is restricted to the Codex lane and fails
+  closed rather than falling back.
+- `OPENAI_API_KEY` is **not** a bootstrap credential. `openai/codex-action`
+  accepts an API key only and cannot spend the ChatGPT allowance, so it is not
+  used as the subscription worker; the optional `codex_api` lane is disabled.
+- Owner-required setup is now two secrets (`CLAUDE_CODE_OAUTH_TOKEN`,
+  `OPENROUTER_API_KEY`) plus two account-level connections (Claude GitHub App,
+  Codex cloud + code review for this repository).
 - Routing is by capability class against a live model catalogue, so model names
   are never hard-coded. 349 models discovered on 2026-09-12; every one starts as
   `CANDIDATE` and cannot take real work until it passes the synthetic

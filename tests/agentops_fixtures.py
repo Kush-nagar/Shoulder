@@ -42,7 +42,9 @@ def model(
         id=model_id,
         lane=lane,
         family=model_id.split("/", 1)[0],
-        harness_model=catalog._harness_model(model_id, model_id.split("/", 1)[0]),
+        harness_model=catalog._harness_model(
+            model_id, model_id.split("/", 1)[0], catalog.namespace_lanes(policy())
+        ),
         context_length=context,
         max_output_tokens=32_000,
         input_usd_per_mtok=price_in,
@@ -80,24 +82,25 @@ def model_pool() -> list[catalog.Model]:
             vision=True,
             context=1_000_000,
         ),
-        # OpenAI lane -- the only lane allowed to write frontend code.
+        # Codex Cloud -- subscription backed, the only lane allowed to write
+        # frontend code.
         model(
             "openai/gpt-5-nano",
-            "codex_api",
+            "codex_cloud",
             price_in=0.05,
             vision=True,
             context=400_000,
         ),
         model(
             "openai/gpt-5-mini",
-            "codex_api",
+            "codex_cloud",
             price_in=0.25,
             vision=True,
             context=400_000,
         ),
         model(
             "openai/gpt-5.6-luna",
-            "codex_api",
+            "codex_cloud",
             price_in=1.2,
             vision=True,
             context=1_000_000,

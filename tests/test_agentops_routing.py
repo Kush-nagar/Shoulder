@@ -41,6 +41,11 @@ def task(
 
 
 def inputs(**overrides: object) -> routing.RoutingInputs:
+    """Routing inputs with every lane usable unless a test says otherwise.
+
+    codex_cloud is qualified here because its gate is a proven end-to-end run
+    rather than a per-model verdict; TestCodexCloudLane covers the ungated case.
+    """
     models = model_pool()
     base: dict[str, Any] = {
         "policy": policy(),
@@ -48,6 +53,7 @@ def inputs(**overrides: object) -> routing.RoutingInputs:
         "qualification": qualification(models),
         "provider_health": {},
         "budget_blocked": frozenset(),
+        "qualified_lanes": frozenset({"codex_cloud"}),
     }
     base.update(overrides)
     return routing.RoutingInputs(**base)
@@ -119,20 +125,20 @@ class TestFrontendHardPolicy(unittest.TestCase):
 
     def test_claude_never_writes_frontend_code(self) -> None:
         chosen = routing.select(inputs(), classification("frontend", "ROUTINE"))
-        self.assertEqual(chosen.lane, "codex_api")
+        self.assertEqual(chosen.lane, "codex_cloud")
         self.assertNotEqual(chosen.lane, "claude_subscription")
 
     def test_deepseek_never_writes_frontend_code(self) -> None:
         for complexity in ("TRIVIAL", "ROUTINE", "COMPLEX", "CRITICAL", "EXTREME"):
             chosen = routing.select(inputs(), classification("frontend", complexity))
-            self.assertEqual(chosen.lane, "codex_api", complexity)
+            self.assertEqual(chosen.lane, "codex_cloud", complexity)
             self.assertFalse(chosen.model.startswith("deepseek/"), complexity)
 
     def test_frontend_blocks_rather_than_falling_back_to_claude(self) -> None:
         """The lane being down must not hand UI work to a forbidden writer."""
         with self.assertRaises(routing.RoutingBlocked) as raised:
             routing.select(
-                inputs(provider_health={"codex_api": "UNAVAILABLE"}),
+                inputs(provider_health={"codex_cloud": "UNAVAILABLE"}),
                 classification("frontend", "ROUTINE"),
             )
         self.assertIn("BLOCKED_PROVIDER", raised.exception.reason)
@@ -148,7 +154,7 @@ class TestFrontendHardPolicy(unittest.TestCase):
             classification("frontend", "CRITICAL", visual_required=True),
         )
         self.assertEqual(chosen.capability_class, "VISUAL_FRONTEND")
-        self.assertEqual(chosen.lane, "codex_api")
+        self.assertEqual(chosen.lane, "codex_cloud")
         selected = next(m for m in model_pool() if m.id == chosen.model)
         self.assertTrue(selected.supports_vision)
 
@@ -201,7 +207,7 @@ class TestProviderFailover(unittest.TestCase):
             inputs(
                 provider_health={
                     "claude_subscription": "COOLDOWN",
-                    "codex_api": "UNAVAILABLE",
+                    "codex_cloud": "UNAVAILABLE",
                 }
             ),
             classification("backend", "ROUTINE"),
@@ -216,11 +222,11 @@ class TestProviderFailover(unittest.TestCase):
             ),
             classification("backend", "ROUTINE"),
         )
-        self.assertEqual(chosen.lane, "codex_api")
+        self.assertEqual(chosen.lane, "codex_cloud")
 
     def test_budget_never_blocks_the_subscription_lane(self) -> None:
         chosen = routing.select(
-            inputs(budget_blocked=frozenset({"openrouter", "codex_api"})),
+            inputs(budget_blocked=frozenset({"openrouter", "codex_cloud"})),
             classification("backend", "ROUTINE"),
         )
         self.assertEqual(chosen.lane, "claude_subscription")
@@ -231,14 +237,14 @@ class TestProviderFailover(unittest.TestCase):
                 inputs(
                     provider_health={
                         "claude_subscription": "UNAVAILABLE",
-                        "codex_api": "AUTH_FAILED",
+                        "codex_cloud": "AUTH_FAILED",
                         "openrouter": "BUDGET_EXHAUSTED",
                     }
                 ),
                 classification("backend", "ROUTINE"),
             )
         self.assertIn("BLOCKED_PROVIDER", raised.exception.reason)
-        self.assertEqual(len(raised.exception.rejections), 3)
+        self.assertEqual(len(raised.exception.rejections), len(policy()["lanes"]))
 
     def test_a_fallback_chain_is_recorded(self) -> None:
         chosen = routing.select(inputs(), classification("backend", "ROUTINE"))
@@ -290,7 +296,7 @@ class TestProviderHealthState(unittest.TestCase):
             {}, "openrouter", settings["budget"]["openrouter_daily_usd"]
         )
         self.assertIn("openrouter", state.budget_blocked(settings, budget))
-        self.assertNotIn("codex_api", state.budget_blocked(settings, budget))
+        self.assertNotIn("codex_cloud", state.budget_blocked(settings, budget))
 
     def test_spend_below_the_ceiling_does_not_block(self) -> None:
         settings = policy()
@@ -323,7 +329,7 @@ class TestQualification(unittest.TestCase):
         openai = catalog.normalise({"id": "openai/gpt-5-mini"})
         assert anthropic is not None and openai is not None
         self.assertEqual(anthropic.lane, "claude_subscription")
-        self.assertEqual(openai.lane, "codex_api")
+        self.assertEqual(openai.lane, "codex_cloud")
 
     def test_batch_and_free_variants_are_not_discovered(self) -> None:
         for model_id in ("openai/gpt-5-mini:batch", "deepseek/deepseek-v4-flash:free"):
@@ -456,8 +462,8 @@ class TestIndependentReview(unittest.TestCase):
         current = classification("frontend", "ROUTINE")
         writer = routing.select(routing_inputs, current)
         reviewer = routing.select_reviewer(routing_inputs, current, writer)
-        self.assertEqual(writer.lane, "codex_api")
-        self.assertNotEqual(reviewer.lane, "codex_api")
+        self.assertEqual(writer.lane, "codex_cloud")
+        self.assertNotEqual(reviewer.lane, "codex_cloud")
 
     def test_a_reviewer_may_review_work_it_could_not_write(self) -> None:
         """Claude may not write UI, but it may review it."""
@@ -519,7 +525,7 @@ class TestRealBacklogRouting(unittest.TestCase):
     def test_task_18_player_ui_never_routes_to_claude(self) -> None:
         current = classify.classify(real_backlog().tasks[18])
         chosen = routing.select(inputs(), current)
-        self.assertEqual(chosen.lane, "codex_api")
+        self.assertEqual(chosen.lane, "codex_cloud")
 
     def test_task_17_export_is_critical_and_well_resourced(self) -> None:
         current = classify.classify(real_backlog().tasks[17])
@@ -533,7 +539,7 @@ class TestRealBacklogRouting(unittest.TestCase):
         """Routing is by class, so a future model list still obeys the rules."""
         future = [
             model("anthropic/claude-next", "claude_subscription", price_in=0.3),
-            model("openai/gpt-next", "codex_api", price_in=0.4, vision=True),
+            model("openai/gpt-next", "codex_cloud", price_in=0.4, vision=True),
             model("deepseek/deepseek-v9", "openrouter", price_in=0.02),
         ]
         routing_inputs = inputs(models=future, qualification=qualification(future))
@@ -545,7 +551,7 @@ class TestRealBacklogRouting(unittest.TestCase):
         overflow = routing.select(
             routing_inputs,
             classification("backend", "TRIVIAL"),
-            exclude_lanes=frozenset({"claude_subscription", "codex_api"}),
+            exclude_lanes=frozenset({"claude_subscription", "codex_cloud"}),
         )
         self.assertEqual(overflow.model, "deepseek/deepseek-v9")
 
@@ -602,7 +608,7 @@ class TestReviewFindings(unittest.TestCase):
             qualification=qualification(pool),
             provider_health={
                 "claude_subscription": "UNAVAILABLE",
-                "codex_api": "UNAVAILABLE",
+                "codex_cloud": "UNAVAILABLE",
             },
         )
         with self.assertRaises(routing.RoutingBlocked) as raised:
@@ -622,7 +628,7 @@ class TestReviewFindings(unittest.TestCase):
             qualification=qualification(pool),
             provider_health={
                 "claude_subscription": "UNAVAILABLE",
-                "codex_api": "UNAVAILABLE",
+                "codex_cloud": "UNAVAILABLE",
             },
         )
         with self.assertRaises(routing.RoutingBlocked):
@@ -680,5 +686,144 @@ class TestReviewFindings(unittest.TestCase):
 
     def test_per_task_spend_accumulates_across_lanes(self) -> None:
         budget = state.record_spend({}, "openrouter", 1.0, task_id=14)
-        budget = state.record_spend(budget, "codex_api", 0.5, task_id=14)
+        budget = state.record_spend(budget, "codex_cloud", 0.5, task_id=14)
         self.assertEqual(state.task_spend(budget, 14), 1.5)
+
+
+class TestCodexCloudLane(unittest.TestCase):
+    """Subscription-backed Codex Cloud, reached by mentioning @codex."""
+
+    def qualified(self, **overrides: object) -> routing.RoutingInputs:
+        return inputs(**overrides)
+
+    def test_frontend_work_goes_to_the_subscription_lane(self) -> None:
+        chosen = routing.select(self.qualified(), classification("frontend", "ROUTINE"))
+        self.assertEqual(chosen.lane, "codex_cloud")
+        self.assertEqual(policy()["lanes"]["codex_cloud"]["billing"], "subscription")
+
+    def test_the_lane_needs_no_api_key(self) -> None:
+        """OPENAI_API_KEY is not a bootstrap credential any more."""
+        self.assertIsNone(policy()["lanes"]["codex_cloud"]["secret"])
+
+    def test_the_optional_api_lane_is_disabled(self) -> None:
+        lane = policy()["lanes"]["codex_api"]
+        self.assertFalse(lane["enabled"])
+        self.assertEqual(lane["secret"], "OPENAI_API_KEY")
+
+    def test_a_disabled_lane_never_takes_work(self) -> None:
+        chosen = routing.select(self.qualified(), classification("frontend", "ROUTINE"))
+        self.assertNotEqual(chosen.lane, "codex_api")
+        self.assertTrue(
+            any("disabled in policy" in r for r in chosen.rejections), chosen.rejections
+        )
+
+    def test_the_lane_is_delegated_by_mention_not_dispatched(self) -> None:
+        chosen = routing.select(self.qualified(), classification("frontend", "ROUTINE"))
+        self.assertEqual(chosen.mechanism, "github-mention")
+
+    def test_the_tier_is_recorded_but_marked_advisory(self) -> None:
+        """A mention carries no model, so claiming the tier was applied is false."""
+        chosen = routing.select(self.qualified(), classification("frontend", "ROUTINE"))
+        self.assertFalse(chosen.model_enforced)
+        self.assertIn("advisory", chosen.reason)
+        # The tier is still chosen, so the decision stays auditable.
+        self.assertEqual(chosen.capability_class, "ROUTINE_CODING")
+
+    def test_frontend_tiers_still_climb_with_complexity(self) -> None:
+        tiers = {
+            complexity: routing.select(
+                self.qualified(), classification("frontend", complexity)
+            ).capability_class
+            for complexity in ("TRIVIAL", "ROUTINE", "COMPLEX")
+        }
+        self.assertEqual(tiers["TRIVIAL"], "CHEAP_MECHANICAL")
+        self.assertEqual(tiers["ROUTINE"], "ROUTINE_CODING")
+        self.assertEqual(tiers["COMPLEX"], "STRONG_CODING")
+
+    def test_visual_work_still_reaches_the_frontier_tier(self) -> None:
+        chosen = routing.select(
+            self.qualified(),
+            classification("frontend", "CRITICAL", visual_required=True),
+        )
+        self.assertEqual(chosen.capability_class, "VISUAL_FRONTEND")
+
+    def test_an_unqualified_lane_is_refused(self) -> None:
+        """Per-model qualification says nothing here, so the lane is the gate."""
+        with self.assertRaises(routing.RoutingBlocked) as raised:
+            routing.select(
+                inputs(qualified_lanes=frozenset()),
+                classification("frontend", "ROUTINE"),
+            )
+        self.assertTrue(
+            any("end-to-end qualification" in r for r in raised.exception.rejections),
+            raised.exception.rejections,
+        )
+
+
+class TestCodexExhaustion(unittest.TestCase):
+    """9-10. What happens when the Codex allowance runs out, and after reset."""
+
+    def qualified(self, **overrides: object) -> routing.RoutingInputs:
+        return inputs(**overrides)
+
+    def test_backend_work_overflows_to_openrouter(self) -> None:
+        chosen = routing.select(
+            self.qualified(
+                provider_health={
+                    "claude_subscription": "UNAVAILABLE",
+                    "codex_cloud": "COOLDOWN",
+                }
+            ),
+            classification("backend", "ROUTINE"),
+        )
+        self.assertEqual(chosen.lane, "openrouter")
+
+    def test_frontend_work_waits_rather_than_using_deepseek(self) -> None:
+        """The OpenAI-only frontend rule outranks availability."""
+        with self.assertRaises(routing.RoutingBlocked) as raised:
+            routing.select(
+                self.qualified(provider_health={"codex_cloud": "COOLDOWN"}),
+                classification("frontend", "ROUTINE"),
+            )
+        self.assertIn("BLOCKED_PROVIDER", raised.exception.reason)
+        self.assertTrue(
+            any(
+                "openrouter" in r and "forbids" in r
+                for r in raised.exception.rejections
+            ),
+            raised.exception.rejections,
+        )
+
+    def test_the_lane_returns_after_its_window_resets(self) -> None:
+        providers = state.mark_provider(
+            {"lanes": {}},
+            "codex_cloud",
+            "COOLDOWN",
+            reason="allowance exhausted",
+            reset_at="2000-01-01T00:00:00+00:00",
+        )
+        self.assertEqual(state.provider_health(providers)["codex_cloud"], "DEGRADED")
+
+    def test_a_cooled_lane_stays_out_until_its_window_passes(self) -> None:
+        providers = state.mark_provider(
+            {"lanes": {}},
+            "codex_cloud",
+            "COOLDOWN",
+            reason="allowance exhausted",
+            reset_at="2999-01-01T00:00:00+00:00",
+        )
+        self.assertEqual(state.provider_health(providers)["codex_cloud"], "COOLDOWN")
+
+    def test_the_cooldown_matches_the_declared_usage_window(self) -> None:
+        self.assertEqual(
+            policy()["lanes"]["codex_cloud"]["usage_window_seconds"], 18000
+        )
+
+    def test_subscription_lanes_are_never_budget_blocked(self) -> None:
+        settings = policy()
+        budget = state.record_spend(
+            {}, "openrouter", settings["budget"]["openrouter_daily_usd"]
+        )
+        blocked = state.budget_blocked(settings, budget)
+        self.assertNotIn("codex_cloud", blocked)
+        self.assertNotIn("claude_subscription", blocked)
