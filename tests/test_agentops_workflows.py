@@ -946,3 +946,22 @@ class TestVerdictDurability(unittest.TestCase):
         after = text.split("- name: Commit the qualification verdicts", 1)[1]
         self.assertNotIn("git pull --rebase", after)
         self.assertIn("merge-verdicts", after)
+
+    def test_the_verdict_commit_authenticates_its_own_remote_work(self) -> None:
+        """A run that had already paid for its verdicts failed on the first
+        fetch with "Password authentication is not supported", so this step
+        carries the job token itself rather than trusting what the checkout
+        left behind."""
+        text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
+            encoding="utf-8"
+        )
+        step = text.split("- name: Commit the qualification verdicts", 1)[1].split(
+            "- name: Report", 1
+        )[0]
+        self.assertIn("git_auth fetch origin", step)
+        self.assertIn("git_auth push origin", step)
+        # The encoded credential is not the token itself, so the runner does
+        # not mask it automatically.
+        self.assertIn("::add-mask::$auth", step)
+        # And it never reaches the remote URL or the repository config.
+        self.assertNotIn("git remote set-url", step)

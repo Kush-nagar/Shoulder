@@ -232,13 +232,28 @@ jobs:
           # Keep this run's verdicts somewhere the branch switch cannot touch.
           cp ops/state/models.json "$RUNNER_TEMP/verdicts.json"
 
+          # Authenticate this step's own remote work with the job token rather
+          # than relying on whatever credential the checkout left behind: a
+          # later action in this job can replace it, and a run that had already
+          # paid for its verdicts then failed on the first fetch with
+          # "Password authentication is not supported". The header is passed per
+          # command, so the token is never written into the remote URL or the
+          # repository config.
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          # The runner masks the token itself, but not this encoding of it, so
+          # say so explicitly before it can reach a log line.
+          echo "::add-mask::$auth"
+          git_auth() {
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" "$@"
+          }
+
           # Read-modify-write, not rebase. This run refreshed the whole
           # catalogue before qualifying anything, so its models.json differs
           # from the branch's in every last_seen timestamp; rebasing that
           # against another writer's commit conflicts on a generated file, and
           # that is how two runs lost verdicts they had already paid for.
           for attempt in 1 2 3 4 5; do
-            git fetch origin "$DEFAULT_BRANCH"
+            git_auth fetch origin "$DEFAULT_BRANCH"
             git checkout -B agentops-verdicts "origin/$DEFAULT_BRANCH"
             git checkout "origin/$DEFAULT_BRANCH" -- ops/state
             # Belt and braces: never push from anywhere but the branch just made.
@@ -262,7 +277,7 @@ jobs:
               exit 0
             fi
             git commit -m 'Record provider qualification from a cloud verify run'
-            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+            if git_auth push origin "HEAD:$DEFAULT_BRANCH"; then
               exit 0
             fi
             echo "another writer landed first; re-reading and re-applying (attempt $attempt)" >&2
