@@ -33,6 +33,7 @@ class TestWorkflowsExist(unittest.TestCase):
                 "agentops-worker.yml",
                 "agentops-watchdog.yml",
                 "agentops-review.yml",
+                "agentops-verify.yml",
             },
         )
 
@@ -113,6 +114,16 @@ class TestWorkflowPermissions(unittest.TestCase):
     def test_watchdog_cannot_write_pull_requests(self) -> None:
         text = read(WORKFLOW_DIR / "agentops-watchdog.yml")
         self.assertNotIn("pull-requests: write", text)
+
+    def test_verify_cannot_open_or_merge_pull_requests(self) -> None:
+        """It proves lanes work; it must not be able to land anything."""
+        text = read(WORKFLOW_DIR / "agentops-verify.yml")
+        self.assertNotIn("pull-requests: write", text)
+        self.assertNotIn("actions: write", text)
+
+    def test_verify_never_enables_autonomy(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-verify.yml")
+        self.assertIn(".autonomy_enabled' plan.json)\" = 'false'", text)
 
     def test_worker_has_the_permissions_it_needs_and_no_more(self) -> None:
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
