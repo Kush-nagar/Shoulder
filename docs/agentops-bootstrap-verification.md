@@ -7,12 +7,17 @@ and reasoning: [ADR 0019](decisions/0019-autonomous-build-system.md). Operation:
 This record exists so the claim "ready for autonomy" can be checked rather than
 trusted. Every row names what was run and where the result lives.
 
+Frozen release SHA `c455687`, merged as `3740cb4` (PR #16). Post-merge hotfix
+`cfc6d9f`, merged as `a308dec` (PR #17). Full suite from `main`: 641 Python
+tests, 274 skipped for want of a local database or object store, of which 301
+are the orchestrator's own and all run.
+
 ## Release gate
 
 | # | Gate | Result | Evidence |
 |---|---|---|---|
 | A | Full Shoulder quality gate | green | `scripts/check.ps1`: Biome format + lint + typecheck, 36 + 1 node tests, ruff format, ruff check, mypy, unittest, OpenAPI contract drift check, build, auth bundle test, Playwright smoke (3 browsers), `git diff --check` |
-| B | AgentOps tests | 297 green | `python -m unittest discover -s tests -p 'test_agentops_*.py'` — backlog 33, recovery 68, routing 108, workflows 88 |
+| B | AgentOps tests | 301 green | `python -m unittest discover -s tests -p 'test_agentops_*.py'` — backlog 33, recovery 68, routing 108, workflows 92 |
 | C | Strict types and lint | green | `mypy` 50 source files, `ruff check`, `ruff format --check` |
 | D | `git diff --check` | green | part of the gate above |
 | E | Cloud Claude subscription smoke | proven | `agentops-verify` run 34766183451 (`workflow_dispatch`, success); `providers.json` `claude_subscription` AVAILABLE, reason "cloud smoke test passed" |
