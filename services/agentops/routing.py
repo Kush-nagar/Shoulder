@@ -302,9 +302,12 @@ def select(
     # applied. The class is the real decision; the model is whatever the
     # account has configured.
     harness_model = model.harness_model if enforced else "account-configured"
+    preference = inputs.policy["capability_classes"][class_name].get(
+        "prefer", "cheapest"
+    )
     reason = (
         f"{classification.category}/{classification.complexity} -> {class_name}; "
-        f"cheapest qualified model in lane {lane_name} "
+        f"{preference} qualified model in lane {lane_name} "
         f"at ${model.input_usd_per_mtok:.3f}/Mtok in"
     )
     if not enforced:
