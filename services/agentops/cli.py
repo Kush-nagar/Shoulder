@@ -287,6 +287,47 @@ def cmd_exhausted(args: argparse.Namespace) -> int:
     )
 
 
+VERDICT_FIELDS = (
+    "qualification",
+    "qualification_evidence",
+    "qualification_probes",
+)
+
+
+def cmd_merge_verdicts(args: argparse.Namespace) -> int:
+    """Re-apply qualification verdicts from a saved catalogue onto the current one.
+
+    A verify run refreshes the whole catalogue before it qualifies anything, so
+    its `models.json` differs from the branch's in every `last_seen` timestamp.
+    Rebasing that against another writer's commit conflicts on a generated file,
+    which is how two runs lost verdicts they had already paid for.
+
+    This is the read-modify-write retry used elsewhere for spend and lease
+    attachment: take the remote's state as the base, then re-apply only the
+    fields this run actually produced. Running it twice changes nothing.
+    """
+    root = _root(args)
+    paths = state.Paths(root)
+    saved = catalog.load_state(Path(args.source))
+    current = catalog.load_state(paths.models)
+
+    applied: list[str] = []
+    for model_id, record in saved.get("models", {}).items():
+        if "qualification" not in record:
+            continue
+        target = current.setdefault("models", {}).setdefault(model_id, {})
+        if all(target.get(f) == record.get(f) for f in VERDICT_FIELDS):
+            continue
+        for field in VERDICT_FIELDS:
+            if field in record:
+                target[field] = record[field]
+        applied.append(model_id)
+
+    if applied:
+        catalog.save_state(paths.models, current)
+    return _emit({"ok": True, "applied": sorted(applied)})
+
+
 def cmd_spend(args: argparse.Namespace) -> int:
     """Record API spend against a lane and, when given, a task."""
     root = _root(args)
@@ -906,6 +947,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "validate", help="check the state files parse and are well formed"
     ).set_defaults(func=cmd_validate)
+
+    merge_verdicts = sub.add_parser(
+        "merge-verdicts",
+        help="re-apply qualification verdicts from a saved catalogue",
+    )
+    merge_verdicts.add_argument("--from", dest="source", required=True)
+    merge_verdicts.set_defaults(func=cmd_merge_verdicts)
 
     spend = sub.add_parser("spend", help="record API spend for a lane")
     spend.add_argument("--lane", required=True)

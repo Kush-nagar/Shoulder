@@ -228,18 +228,47 @@ jobs:
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
-          # A rebase between two state writers can leave conflict markers in a
-          # generated file nobody reads by hand. Never commit one.
-          uv run --locked python -m services.agentops.cli validate
-          git add ops/state
-          if git diff --cached --quiet; then
-            echo 'no state change'
-            exit 0
-          fi
-          git commit -m 'Record provider qualification from a cloud verify run'
-          git pull --rebase --autostash origin "$DEFAULT_BRANCH"
-          uv run --locked python -m services.agentops.cli validate
-          git push origin "HEAD:$DEFAULT_BRANCH"
+
+          # Keep this run's verdicts somewhere the branch switch cannot touch.
+          cp ops/state/models.json "$RUNNER_TEMP/verdicts.json"
+
+          # Read-modify-write, not rebase. This run refreshed the whole
+          # catalogue before qualifying anything, so its models.json differs
+          # from the branch's in every last_seen timestamp; rebasing that
+          # against another writer's commit conflicts on a generated file, and
+          # that is how two runs lost verdicts they had already paid for.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            git checkout -B agentops-verdicts "origin/$DEFAULT_BRANCH"
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-verdicts' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              exit 1
+            fi
+
+            # What main is carrying, before this run builds on it. If another
+            # writer ever lands a corrupt ledger, stop rather than extend it.
+            uv run --locked python -m services.agentops.cli validate
+
+            uv run --locked python -m services.agentops.cli merge-verdicts \
+              --from "$RUNNER_TEMP/verdicts.json"
+            # A conflict marker in a generated file nobody reads by hand would
+            # be committed silently. Never commit one.
+            uv run --locked python -m services.agentops.cli validate
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'verdicts already recorded'
+              exit 0
+            fi
+            git commit -m 'Record provider qualification from a cloud verify run'
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              exit 0
+            fi
+            echo "another writer landed first; re-reading and re-applying (attempt $attempt)" >&2
+          done
+          echo 'could not record the qualification verdicts' >&2
+          exit 1
 
       - name: Report to the activity feed
         if: always()

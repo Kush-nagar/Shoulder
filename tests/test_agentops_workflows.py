@@ -869,3 +869,80 @@ class TestPostMergeVerifyFindings(unittest.TestCase):
 
         config = json.loads((REPO_ROOT / "biome.json").read_text(encoding="utf-8"))
         self.assertIn("!ops/state", config["files"]["includes"])
+
+
+class TestVerdictDurability(unittest.TestCase):
+    """Two verify runs qualified models and lost the verdicts in a rebase."""
+
+    def _root(self) -> Path:
+        import shutil
+        import tempfile
+
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(REPO_ROOT / relative, tmp / relative)
+        return tmp
+
+    def _merge(self, root: Path, source: Path) -> dict[str, Any]:
+        import contextlib
+        import io
+
+        from services.agentops import cli
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.main(["--root", str(root), "merge-verdicts", "--from", str(source)])
+        parsed: dict[str, Any] = json.loads(out.getvalue())
+        return parsed
+
+    def test_verdicts_survive_another_writer_landing_first(self) -> None:
+        """The saved catalogue re-dates every model, which is what made a
+        rebase conflict. Only the verdict fields may be carried across."""
+        root = self._root()
+        models = root / "ops/state/models.json"
+        saved = json.loads(models.read_text(encoding="utf-8"))
+        target = "deepseek/deepseek-v4.1-flash"
+        saved["models"][target]["qualification"] = "QUALIFIED"
+        saved["models"][target]["qualification_probes"] = [
+            {"probe": "instruction_hierarchy", "passed": True}
+        ]
+        for record in saved["models"].values():
+            record["last_seen"] = "2030-01-01T00:00:00+00:00"
+        source = root / "verdicts.json"
+        source.write_text(json.dumps(saved), encoding="utf-8")
+
+        base_last_seen = json.loads(models.read_text(encoding="utf-8"))["models"][
+            target
+        ]["last_seen"]
+
+        result = self._merge(root, source)
+        self.assertEqual(result["applied"], [target])
+
+        after = json.loads(models.read_text(encoding="utf-8"))["models"][target]
+        self.assertEqual(after["qualification"], "QUALIFIED")
+        self.assertEqual(
+            after["qualification_probes"][0]["probe"], "instruction_hierarchy"
+        )
+        # The base state's own view of the catalogue is untouched.
+        self.assertEqual(after["last_seen"], base_last_seen)
+
+    def test_re_applying_the_same_verdicts_changes_nothing(self) -> None:
+        """The step retries, so this must be safe to run more than once."""
+        root = self._root()
+        models = root / "ops/state/models.json"
+        saved = json.loads(models.read_text(encoding="utf-8"))
+        saved["models"]["qwen/qwen3.7-flash"]["qualification"] = "QUARANTINED"
+        source = root / "verdicts.json"
+        source.write_text(json.dumps(saved), encoding="utf-8")
+
+        self.assertEqual(self._merge(root, source)["applied"], ["qwen/qwen3.7-flash"])
+        self.assertEqual(self._merge(root, source)["applied"], [])
+
+    def test_the_commit_step_no_longer_rebases_generated_state(self) -> None:
+        text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
+            encoding="utf-8"
+        )
+        after = text.split("- name: Commit the qualification verdicts", 1)[1]
+        self.assertNotIn("git pull --rebase", after)
+        self.assertIn("merge-verdicts", after)
