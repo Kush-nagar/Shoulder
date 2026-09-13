@@ -152,6 +152,32 @@ def acquire(
     return lease
 
 
+def attach_worker(
+    tasks: dict[str, Any],
+    task_id: int,
+    *,
+    run_id: str | None = None,
+    pull_request: int | None = None,
+) -> dict[str, Any]:
+    """Record what is really doing the work, once it exists.
+
+    The lease is taken by the coordinator, whose own run ends in seconds. If
+    the watchdog checks that run it proves nothing about the worker, and can
+    abandon a live worker's branch. The worker -- or, for Codex Cloud, the
+    pull request Codex is attached to -- is recorded here instead.
+    """
+    lease = tasks.get("leases", {}).get(str(task_id))
+    if lease is None:
+        raise LeaseConflict(f"no lease for task {task_id}")
+    if run_id:
+        lease["worker_run_id"] = run_id
+    if pull_request is not None:
+        lease["pull_request"] = pull_request
+    lease["heartbeat_at"] = now()
+    attached: dict[str, Any] = lease
+    return attached
+
+
 def heartbeat(tasks: dict[str, Any], task_id: int, owner: str) -> dict[str, Any]:
     lease = tasks.get("leases", {}).get(str(task_id))
     if lease is None:

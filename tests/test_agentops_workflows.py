@@ -422,7 +422,22 @@ class TestReviewWorkflow(unittest.TestCase):
         """The assignment used to be logged and never executed."""
         self.assertIn("cli reviewer --task", self.text)
         for lane in ("claude_subscription", "openrouter", "codex_cloud"):
-            self.assertIn(f"steps.pick.outputs.lane == '{lane}'", self.text)
+            self.assertIn(f"needs.choose.outputs.lane == '{lane}'", self.text)
+
+    def test_orchestrator_code_runs_from_the_base_revision(self) -> None:
+        """A writer's branch must not run its own orchestrator with secrets.
+
+        Choosing the reviewer executes repository code, so it runs from the
+        base commit in a job that holds no credentials at all.
+        """
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", self.text)
+        choose = self.text.split("  choose:", 1)[1].split("  review:", 1)[0]
+        self.assertNotIn("secrets.", choose)
+
+    def test_the_credentialed_job_checks_out_no_branch_code(self) -> None:
+        review = self.text.split("  review:", 1)[1]
+        self.assertIn("secrets.", review)
+        self.assertNotIn("actions/checkout", review)
 
     def test_review_only_touches_branches_this_system_made(self) -> None:
         self.assertIn("startsWith(github.head_ref, 'block-')", self.text)
@@ -507,3 +522,53 @@ class TestStateIntegrity(unittest.TestCase):
                 # Once before staging, and once after the rebase -- the rebase
                 # is what leaves the markers behind.
                 self.assertGreaterEqual(text.count("cli validate"), 2, path.name)
+
+
+class TestCodexReviewFindings(unittest.TestCase):
+    """Regressions for what the Codex Cloud review of PR #16 found."""
+
+    def test_verify_never_runs_branch_code(self) -> None:
+        """It holds every provider secret, so it runs only trusted code.
+
+        With a `pull_request` trigger and a head checkout, a branch could edit
+        services/agentops and read the credentials out of the runner -- and an
+        autonomous writer's branch is exactly that kind of branch.
+        """
+        text = read(WORKFLOW_DIR / "agentops-verify.yml")
+        self.assertNotIn("pull_request", text)
+        self.assertNotIn("github.head_ref", text)
+
+    def test_the_worker_guard_re_derives_the_routing_decision(self) -> None:
+        """Checking fragments of policy missed most of what routing decides."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        verify = source.split("def cmd_verify_assignment", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("routing.select(", verify)
+
+    def test_the_reviewer_comes_from_the_recorded_writer(self) -> None:
+        """Recomputing the writer can make a lane review its own work."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        reviewer = source.split("def cmd_reviewer", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('lease.get("assignment")', reviewer)
+        self.assertIn("exclude_family", reviewer)
+
+    def test_a_failed_lane_leaves_the_pool(self) -> None:
+        from services.agentops import routing
+
+        self.assertNotIn("DEGRADED", routing.USABLE_HEALTH)
+
+    def test_a_probe_does_not_launder_a_failed_lane_back(self) -> None:
+        """A credential being present is not evidence the provider works."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        health = source.split("def cmd_health", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('"COOLDOWN", "AUTH_FAILED", "DEGRADED"', health)
+
+    def test_the_worker_attaches_its_own_run_to_the_lease(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("cli attach", text)
+        self.assertIn("GITHUB_RUN_ID", text)

@@ -34,7 +34,12 @@ ProviderHealth = Literal[
     "UNAVAILABLE",
     "DISABLED",
 ]
-USABLE_HEALTH = ("AVAILABLE", "DEGRADED")
+# DEGRADED means "was failing, has not yet proven it recovered". It is not
+# usable: treating it as usable meant a harness failure recorded DEGRADED and
+# the very next routing decision picked the same lane again, so the recorded
+# fallback chain was never taken. A lane returns to AVAILABLE only by a real
+# success.
+USABLE_HEALTH = ("AVAILABLE",)
 
 
 class RoutingBlocked(Exception):
@@ -177,6 +182,15 @@ def privacy_violation(policy: dict[str, Any], lane: dict[str, Any]) -> str | Non
         return "does not declare zero data retention"
     if required.get("deny_data_collection") and lane.get("data_collection") != "deny":
         return "does not deny provider data collection"
+    if lane.get("requires_privacy_confirmation") and not lane.get("privacy_confirmed"):
+        # The setting lives on the provider account and this repository cannot
+        # read it, so the only honest state is unconfirmed until the owner says
+        # otherwise. The harness does not send per-request privacy fields, so
+        # nothing here can compensate.
+        return (
+            "account-level privacy has not been confirmed; "
+            "run `cli confirm-privacy --lane <lane>`"
+        )
     return None
 
 

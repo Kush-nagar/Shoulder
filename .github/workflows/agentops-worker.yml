@@ -142,6 +142,15 @@ jobs:
           uv run --locked python -m services.agentops.cli verify-assignment \
             --task "$TASK_ID" --lane "$LANE" --model "$MODEL"
 
+      - name: Attach this run to the lease
+        # The lease was taken by the coordinator, whose run is already over.
+        # Recording this run is what lets the watchdog tell a live worker from
+        # a dead one instead of abandoning a branch that is still being used.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli attach             --task "$TASK_ID" --run-id "$GITHUB_RUN_ID"
+
       - name: Create the task branch
         run: |
           set -euo pipefail
@@ -225,6 +234,9 @@ jobs:
         run: |
           set -uo pipefail
           uv run --locked python -m services.agentops.cli health             --lane "$LANE" --status DEGRADED             --reason "worker run ${GITHUB_RUN_ID} failed"
+          # DEGRADED keeps the lane out of the pool until something proves it
+          # works again, so the next coordinator run takes the fallback chain
+          # instead of choosing the lane that just failed.
 
       - name: Run the repository quality gate
         id: gate

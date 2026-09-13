@@ -157,6 +157,13 @@ def cmd_health(args: argparse.Namespace) -> int:
                 changed = True
                 continue
 
+            # A lane that failed, or is cooling down, is not restored by a
+            # probe. Presence of a credential is not evidence that the provider
+            # is working, and overwriting the failure would erase the very
+            # signal that makes failover happen.
+            if health.get(lane_name) in ("COOLDOWN", "AUTH_FAILED", "DEGRADED"):
+                continue
+
             secret = lane.get("secret")
             if not secret:
                 # A secretless lane is subscription-backed and reached through
@@ -164,8 +171,6 @@ def cmd_health(args: argparse.Namespace) -> int:
                 # repository holds -- Codex Cloud through the GitHub app. There
                 # is nothing here to probe, so an existing cooldown is the only
                 # thing that may keep it out of the pool.
-                if health.get(lane_name) == "COOLDOWN":
-                    continue
                 state.mark_provider(
                     providers,
                     lane_name,
@@ -306,9 +311,23 @@ def cmd_reviewer(args: argparse.Namespace) -> int:
 
     classification = classify.classify(task)
     inputs = ctx.routing_inputs()
+
+    # Who actually wrote this branch, from the lease. Recomputing it would ask
+    # who would write it *now*: if a lane was unavailable at dispatch and has
+    # since recovered, the writer could be named as its own reviewer.
+    lease = ctx.tasks.get("leases", {}).get(str(args.task)) or {}
+    recorded = (lease.get("assignment") or {}).get("lane")
     try:
-        writer = routing.select(inputs, classification)
-        reviewer = routing.select_reviewer(inputs, classification, writer)
+        if recorded and recorded in ctx.policy["lanes"]:
+            writer_family = ctx.policy["lanes"][recorded]["provider"]
+            reviewer = routing.select(
+                inputs, classification, purpose="review", exclude_family=writer_family
+            )
+            writer_lane = recorded
+        else:
+            writer = routing.select(inputs, classification)
+            reviewer = routing.select_reviewer(inputs, classification, writer)
+            writer_lane = writer.lane
     except routing.RoutingBlocked as blocked:
         _emit({"ok": False, "reason": blocked.reason, "rejections": blocked.rejections})
         return 1
@@ -317,7 +336,8 @@ def cmd_reviewer(args: argparse.Namespace) -> int:
         {
             "ok": True,
             "task": task.id,
-            "writer_lane": writer.lane,
+            "writer_lane": writer_lane,
+            "writer_from_lease": bool(recorded),
             "lane": reviewer.lane,
             "model": reviewer.harness_model,
             "effort": reviewer.effort,
@@ -372,23 +392,24 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
     if not satisfied:
         problems.append(f"prerequisites not complete: {missing}")
 
-    # The model must be one the catalogue actually qualified for this lane.
-    qualified = {
-        model_id
-        for model_id, record in ctx.models_state.get("models", {}).items()
-        if record.get("qualification") in ctx.policy["qualification"]["required_states"]
-        and record.get("lane") == args.lane
-        and not record.get("absent")
-    }
-    harness_names = {
-        record.get("harness_model")
-        for model_id, record in ctx.models_state.get("models", {}).items()
-        if model_id in qualified
-    }
-    if args.model not in qualified and args.model not in harness_names:
-        problems.append(
-            f"model {args.model!r} is not a qualified model of lane {args.lane}"
-        )
+    # Re-derive the decision rather than re-checking fragments of it. Hand
+    # checks missed lane enablement, provider health, budget ceilings, the
+    # capability class, cheapest-model selection, and lane qualification, so a
+    # manual dispatch could send complex work to an undersized model.
+    try:
+        routed = routing.select(ctx.routing_inputs(), classification)
+    except routing.RoutingBlocked as blocked:
+        problems.append(f"routing would not choose any lane: {blocked.reason}")
+    else:
+        if routed.lane != args.lane:
+            problems.append(f"routing chose lane {routed.lane}, not {args.lane}")
+        elif args.model not in (routed.model, routed.harness_model):
+            # A lane that cannot be told which model to use is exempt: the
+            # recorded tier is advisory there, so the slug is not binding.
+            if routed.model_enforced:
+                problems.append(
+                    f"routing chose model {routed.harness_model!r}, not {args.model!r}"
+                )
 
     if state.task_budget_exceeded(ctx.policy, ctx.budget, task.id):
         problems.append("per-task budget is already exhausted")
@@ -410,6 +431,48 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         }
     )
     return 0 if not problems else 1
+
+
+def cmd_confirm_privacy(args: argparse.Namespace) -> int:
+    """Record that a lane's account-level privacy settings are configured.
+
+    Some providers enforce retention and training policy on the account rather
+    than per request, and this repository cannot read that setting. Rather than
+    assume it, the lane stays ineligible until the account owner confirms it
+    here, with a note saying what was checked.
+    """
+    root = _root(args)
+    paths = state.Paths(root)
+    providers = state.read_json(paths.providers, {"lanes": {}})
+    record = providers.setdefault("lanes", {}).setdefault(args.lane, {})
+    record["privacy_confirmed"] = True
+    record["privacy_confirmed_at"] = state.now()
+    record["privacy_confirmation_note"] = args.note
+    state.write_json(paths.providers, providers)
+    return _emit({"ok": True, "lane": args.lane, "note": args.note})
+
+
+def cmd_attach(args: argparse.Namespace) -> int:
+    """Record the run or pull request actually doing a task's work."""
+    root = _root(args)
+    paths = state.Paths(root)
+    tasks = state.read_json(paths.tasks, {"leases": {}})
+    try:
+        lease = leases.attach_worker(
+            tasks, args.task, run_id=args.run_id, pull_request=args.pull_request
+        )
+    except leases.LeaseConflict as conflict:
+        _emit({"ok": False, "reason": str(conflict)})
+        return 1
+    state.write_json(paths.tasks, tasks)
+    return _emit(
+        {
+            "ok": True,
+            "task": args.task,
+            "worker_run_id": lease.get("worker_run_id"),
+            "pull_request": lease.get("pull_request"),
+        }
+    )
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -608,6 +671,21 @@ def build_parser() -> argparse.ArgumentParser:
     exhausted.add_argument("--reason")
     exhausted.add_argument("--window", type=int)
     exhausted.set_defaults(func=cmd_exhausted)
+
+    privacy = sub.add_parser(
+        "confirm-privacy", help="record that a lane's account privacy is configured"
+    )
+    privacy.add_argument("--lane", required=True)
+    privacy.add_argument("--note", required=True)
+    privacy.set_defaults(func=cmd_confirm_privacy)
+
+    attach = sub.add_parser(
+        "attach", help="record the run or pull request doing a task's work"
+    )
+    attach.add_argument("--task", type=int, required=True)
+    attach.add_argument("--run-id", dest="run_id")
+    attach.add_argument("--pull-request", dest="pull_request", type=int)
+    attach.set_defaults(func=cmd_attach)
 
     sub.add_parser(
         "validate", help="check the state files parse and are well formed"

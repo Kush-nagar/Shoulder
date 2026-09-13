@@ -5,7 +5,14 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from agentops_fixtures import model, model_pool, policy, qualification, real_backlog
+from agentops_fixtures import (
+    configured_policy,
+    model,
+    model_pool,
+    policy,
+    qualification,
+    real_backlog,
+)
 
 from services.agentops import (
     backlog,
@@ -48,7 +55,7 @@ def inputs(**overrides: object) -> routing.RoutingInputs:
     """
     models = model_pool()
     base: dict[str, Any] = {
-        "policy": policy(),
+        "policy": configured_policy(),
         "models": models,
         "qualification": qualification(models),
         "provider_health": {},
@@ -251,18 +258,35 @@ class TestProviderFailover(unittest.TestCase):
         self.assertTrue(chosen.fallbacks)
         self.assertNotIn(chosen.lane, [lane for lane, _ in chosen.fallbacks])
 
-    def test_degraded_lane_is_still_usable(self) -> None:
+    def test_a_degraded_lane_leaves_the_pool(self) -> None:
+        """DEGRADED means "failed, unproven", so it must not be chosen.
+
+        Treating it as usable meant a harness failure recorded DEGRADED and the
+        next decision picked the same lane again, so the fallback chain the
+        router computed was never actually taken.
+        """
         chosen = routing.select(
             inputs(provider_health={"claude_subscription": "DEGRADED"}),
             classification("backend", "ROUTINE"),
         )
-        self.assertEqual(chosen.lane, "claude_subscription")
+        self.assertNotEqual(chosen.lane, "claude_subscription")
+
+    def test_an_elapsed_cooldown_returns_a_lane_by_itself(self) -> None:
+        """Exhaustion is not failure: the allowance refills on a schedule."""
+        providers = state.mark_provider(
+            {"lanes": {}},
+            "codex_cloud",
+            "COOLDOWN",
+            reason="allowance exhausted",
+            reset_at="2000-01-01T00:00:00+00:00",
+        )
+        self.assertEqual(state.provider_health(providers)["codex_cloud"], "AVAILABLE")
 
 
 class TestProviderHealthState(unittest.TestCase):
     """23-24. Cooldown and recovery after a legitimate reset."""
 
-    def test_cooldown_expires_to_degraded_not_available(self) -> None:
+    def test_cooldown_expires_back_to_available(self) -> None:
         providers = state.mark_provider(
             {"lanes": {}},
             "openrouter",
@@ -270,7 +294,7 @@ class TestProviderHealthState(unittest.TestCase):
             reason="rate limited",
             reset_at="2000-01-01T00:00:00+00:00",
         )
-        self.assertEqual(state.provider_health(providers)["openrouter"], "DEGRADED")
+        self.assertEqual(state.provider_health(providers)["openrouter"], "AVAILABLE")
 
     def test_cooldown_before_reset_stays_in_cooldown(self) -> None:
         providers = state.mark_provider(
@@ -599,7 +623,7 @@ class TestReviewFindings(unittest.TestCase):
 
     def test_a_lane_without_a_privacy_declaration_is_ineligible(self) -> None:
         """Privacy is a filter, not a preference, and it fails closed."""
-        settings = policy()
+        settings = configured_policy()
         settings["lanes"]["openrouter"].pop("zero_data_retention", None)
         pool = [model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01)]
         routing_inputs = inputs(
@@ -619,7 +643,7 @@ class TestReviewFindings(unittest.TestCase):
         )
 
     def test_a_lane_that_allows_data_collection_is_ineligible(self) -> None:
-        settings = policy()
+        settings = configured_policy()
         settings["lanes"]["openrouter"]["data_collection"] = "allow"
         pool = [model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01)]
         routing_inputs = inputs(
@@ -635,7 +659,7 @@ class TestReviewFindings(unittest.TestCase):
             routing.select(routing_inputs, classification("backend", "ROUTINE"))
 
     def test_every_configured_lane_declares_its_privacy_posture(self) -> None:
-        settings = policy()
+        settings = configured_policy()
         for name, lane in settings["lanes"].items():
             with self.subTest(name):
                 self.assertIsNone(routing.privacy_violation(settings, lane))
@@ -802,7 +826,7 @@ class TestCodexExhaustion(unittest.TestCase):
             reason="allowance exhausted",
             reset_at="2000-01-01T00:00:00+00:00",
         )
-        self.assertEqual(state.provider_health(providers)["codex_cloud"], "DEGRADED")
+        self.assertEqual(state.provider_health(providers)["codex_cloud"], "AVAILABLE")
 
     def test_a_cooled_lane_stays_out_until_its_window_passes(self) -> None:
         providers = state.mark_provider(
@@ -990,3 +1014,53 @@ class TestFloatingAliases(unittest.TestCase):
             self.assertFalse(
                 model_id.startswith("~"), f"{model_id} is a floating alias"
             )
+
+
+class TestAccountLevelPrivacy(unittest.TestCase):
+    """A privacy claim the harness cannot make per request must fail closed."""
+
+    def test_an_unconfirmed_lane_is_ineligible(self) -> None:
+        settings = policy()
+        lane = settings["lanes"]["openrouter"]
+        self.assertTrue(lane["requires_privacy_confirmation"])
+        self.assertIsNotNone(routing.privacy_violation(settings, lane))
+
+    def test_confirmation_makes_it_eligible(self) -> None:
+        settings = policy()
+        lane = dict(settings["lanes"]["openrouter"], privacy_confirmed=True)
+        self.assertIsNone(routing.privacy_violation(settings, lane))
+
+    def test_routing_refuses_the_lane_until_it_is_confirmed(self) -> None:
+        settings = policy()  # deliberately unconfigured
+        pool = [model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01)]
+        routing_inputs = inputs(
+            policy=settings,
+            models=pool,
+            qualification=qualification(pool),
+            provider_health={
+                "claude_subscription": "UNAVAILABLE",
+                "codex_cloud": "UNAVAILABLE",
+            },
+        )
+        with self.assertRaises(routing.RoutingBlocked) as raised:
+            routing.select(routing_inputs, classification("backend", "ROUTINE"))
+        self.assertTrue(
+            any("privacy" in r for r in raised.exception.rejections),
+            raised.exception.rejections,
+        )
+
+    def test_the_stated_basis_does_not_claim_per_request_enforcement(self) -> None:
+        """The harness does not send provider.zdr, so saying it does is false."""
+        basis = policy()["lanes"]["openrouter"]["privacy_basis"].lower()
+        self.assertIn("account", basis)
+        self.assertEqual(
+            policy()["lanes"]["openrouter"]["privacy_enforcement"], "account"
+        )
+
+    def test_lanes_without_account_enforcement_need_no_confirmation(self) -> None:
+        settings = policy()
+        for name in ("claude_subscription", "codex_cloud"):
+            with self.subTest(name):
+                self.assertIsNone(
+                    routing.privacy_violation(settings, settings["lanes"][name])
+                )

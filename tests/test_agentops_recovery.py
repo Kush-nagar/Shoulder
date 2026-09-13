@@ -404,6 +404,44 @@ class TestSecondReviewFindings(unittest.TestCase):
         lease["expires_at"] = ago(grace + 120)
         self.assertTrue(leases.is_stale(lease, self.policy))
 
+    def test_the_coordinator_run_alone_never_proves_a_worker_finished(self) -> None:
+        """`run_id` is the coordinator's, and it ends in seconds.
+
+        Checking it would say the owner had finished while the worker it
+        dispatched was still going, and the branch would be taken away.
+        """
+        from services.agentops import watchdog
+
+        self.assertTrue(watchdog.owner_finished({"run_id": "123"}))
+
+    def test_attaching_a_worker_makes_liveness_checkable(self) -> None:
+        tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            tasks,
+            self.policy,
+            task_id=14,
+            owner="coordinator",
+            branch="block-04-t14",
+            assignment=assignment(),
+            run_id="coordinator-run",
+        )
+        lease = leases.attach_worker(tasks, 14, run_id="worker-run")
+        self.assertEqual(lease["worker_run_id"], "worker-run")
+        self.assertEqual(lease["run_id"], "coordinator-run")
+
+    def test_codex_work_records_its_pull_request(self) -> None:
+        tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            tasks,
+            self.policy,
+            task_id=14,
+            owner="coordinator",
+            branch="block-04-t14",
+            assignment=assignment(),
+        )
+        lease = leases.attach_worker(tasks, 14, pull_request=42)
+        self.assertEqual(lease["pull_request"], 42)
+
     def test_the_lease_records_which_run_owns_it(self) -> None:
         """The watchdog proves the owner is gone rather than assuming."""
         lease = leases.acquire(
@@ -426,9 +464,9 @@ class TestSecondReviewFindings(unittest.TestCase):
             run.return_value = mock.Mock(
                 returncode=0, stdout='{"status":"in_progress"}'
             )
-            self.assertFalse(watchdog.owner_finished({"run_id": "123"}))
+            self.assertFalse(watchdog.owner_finished({"worker_run_id": "123"}))
             run.return_value = mock.Mock(returncode=0, stdout='{"status":"completed"}')
-            self.assertTrue(watchdog.owner_finished({"run_id": "123"}))
+            self.assertTrue(watchdog.owner_finished({"worker_run_id": "123"}))
 
     def test_an_unanswerable_run_query_does_not_wedge_recovery(self) -> None:
         from unittest import mock
@@ -438,7 +476,7 @@ class TestSecondReviewFindings(unittest.TestCase):
         self.assertTrue(watchdog.owner_finished({}))
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="")
-            self.assertTrue(watchdog.owner_finished({"run_id": "123"}))
+            self.assertTrue(watchdog.owner_finished({"worker_run_id": "123"}))
 
     def test_attempts_are_actually_bounded(self) -> None:
         """The policy promised a retry ceiling; nothing enforced it."""
@@ -499,6 +537,10 @@ class TestEndToEndFailover(unittest.TestCase):
         for lane in ("claude_subscription", "openrouter", "codex_cloud"):
             state.mark_provider(providers, lane, "AVAILABLE", reason="test")
         state.mark_lane_qualified(providers, "codex_cloud", evidence="test")
+        # A lane whose privacy is enforced on the provider account stays
+        # ineligible until the owner confirms it; this fixture is a fully
+        # configured deployment.
+        providers["lanes"]["openrouter"]["privacy_confirmed"] = True
         state.write_json(state.Paths(self.root).providers, providers)
 
         models = state.read_json(state.Paths(self.root).models)

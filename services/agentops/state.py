@@ -127,10 +127,15 @@ def provider_health(providers: dict[str, Any]) -> dict[str, str]:
         if status == "COOLDOWN" and reset:
             try:
                 if datetime.fromisoformat(reset) <= current:
-                    # The window has legitimately reset. The lane returns to the
-                    # pool only after a health check, so it is DEGRADED, not
-                    # AVAILABLE, until one succeeds.
-                    status = "DEGRADED"
+                    # A cooldown is exhaustion, not failure: the allowance
+                    # refills on a schedule, so the window passing IS the
+                    # recovery and nothing needs to prove it. That is what
+                    # returns a rate-limited lane to the pool by itself.
+                    #
+                    # DEGRADED is the other case -- something failed and has
+                    # not shown it works again -- and that one stays out until
+                    # a real success.
+                    status = DEFAULT_HEALTH
             except ValueError:
                 pass
         out[lane] = status

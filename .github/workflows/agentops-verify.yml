@@ -12,6 +12,9 @@ name: AgentOps Verify
 #   * the coordinator reaches a decision with real state
 #
 # It never implements product work and never enables autonomy.
+#
+# It runs only from the default branch, by explicit dispatch. It holds the
+# provider secrets, so it must never execute code from an unmerged branch.
 
 on:
   workflow_dispatch:
@@ -20,13 +23,6 @@ on:
         description: 'How many candidate models to qualify (costs a few cents)'
         type: string
         default: '4'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'ops/**'
-      - 'services/agentops/**'
-      - '.github/workflows/agentops-*.yml'
-
 concurrency:
   group: agentops-verify-${{ github.ref }}
   cancel-in-progress: true
@@ -46,10 +42,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       QUALIFY_LIMIT: ${{ inputs.qualify_limit || '4' }}
     steps:
+      # No ref: workflow_dispatch only runs from the default branch, so this
+      # is always the trusted revision. Checking out a pull request head here
+      # would run unreviewed code with the provider secrets in scope.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
@@ -156,9 +154,9 @@ jobs:
             exit 0
           fi
           git commit -m 'Record provider qualification from a cloud verify run'
-          git pull --rebase --autostash origin "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git pull --rebase --autostash origin "$GITHUB_REF_NAME"
           uv run --locked python -m services.agentops.cli validate
-          git push origin "HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git push origin "HEAD:$GITHUB_REF_NAME"
 
       - name: Report to the activity feed
         if: always()

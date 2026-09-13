@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import brief as brief_mod
-from . import coordinator, notify, state
+from . import coordinator, leases, notify, state
 
 MENTION = "@codex"
 
@@ -162,6 +162,14 @@ def delegate(
             "reason": f"could not post the mention: {posted.stderr.strip()[:200]}",
             "pull_request": number,
         }
+
+    # The lease was taken by the coordinator. Record what Codex is actually
+    # attached to, so recovery has something real to look at.
+    try:
+        leases.attach_worker(ctx.tasks, task_id, pull_request=number)
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+    except leases.LeaseConflict:
+        pass
 
     if repo:
         issue = notify.ensure_feed(ctx.policy, repo=repo)

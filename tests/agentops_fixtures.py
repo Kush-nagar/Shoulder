@@ -22,6 +22,20 @@ def policy() -> dict[str, Any]:
     return loaded
 
 
+def configured_policy() -> dict[str, Any]:
+    """Policy as it looks once the owner has finished account-level setup.
+
+    Lanes whose privacy is enforced on the provider account start ineligible on
+    purpose, so tests about anything else have to say they are configured.
+    TestAccountLevelPrivacy covers the unconfirmed case.
+    """
+    settings = policy()
+    for lane in settings["lanes"].values():
+        if lane.get("requires_privacy_confirmation"):
+            lane["privacy_confirmed"] = True
+    return settings
+
+
 def real_backlog() -> backlog.Backlog:
     return backlog.load(REPO_ROOT)
 

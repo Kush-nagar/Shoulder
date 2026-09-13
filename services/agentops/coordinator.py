@@ -29,12 +29,26 @@ class Context:
 
     def routing_inputs(self) -> routing.RoutingInputs:
         models = catalog.models_from_state(self.models_state)
+        # Account-level privacy confirmations are recorded per lane in provider
+        # state, so fold them into the policy the router sees.
+        policy = dict(self.policy)
+        policy["lanes"] = {
+            name: {
+                **lane,
+                "privacy_confirmed": bool(
+                    self.providers.get("lanes", {})
+                    .get(name, {})
+                    .get("privacy_confirmed")
+                ),
+            }
+            for name, lane in self.policy["lanes"].items()
+        }
         qualification = {
             model_id: record.get("qualification", "CANDIDATE")
             for model_id, record in self.models_state.get("models", {}).items()
         }
         return routing.RoutingInputs(
-            policy=self.policy,
+            policy=policy,
             models=models,
             qualification=qualification,
             provider_health=state.provider_health(self.providers),

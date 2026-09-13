@@ -28,8 +28,15 @@ def owner_finished(lease: dict[str, Any], *, repo: str | None = None) -> bool:
     ask GitHub. When it does not, or the query fails, fall back to the
     timestamps -- an unanswerable question should not wedge recovery forever.
     """
-    run_id = lease.get("run_id")
+    # The worker's own run, when one was recorded. `run_id` is the
+    # coordinator's, and that ends in seconds regardless of what the worker is
+    # doing, so falling back to it would prove nothing.
+    run_id = lease.get("worker_run_id")
     if not run_id:
+        if lease.get("pull_request") is not None:
+            # Codex Cloud work has no workflow run to inspect. Its liveness is
+            # the pull request, and only the timestamps can speak for it.
+            return True
         return True
     command = ["gh", "run", "view", str(run_id), "--json", "status"]
     if repo:
@@ -74,8 +81,10 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
             }
         )
 
-    # 2. Providers whose cooldown has elapsed. They come back as DEGRADED, so
-    #    the next real call is the health check that promotes them.
+    # 2. Providers whose cooldown has elapsed. A cooldown is exhaustion, not
+    #    failure, and the allowance refills on a schedule, so the window
+    #    passing is itself the recovery. DEGRADED would keep the lane out of
+    #    the pool forever, since nothing else would ever promote it.
     now = datetime.now(UTC)
     for lane, record in ctx.providers.get("lanes", {}).items():
         if record.get("status") != "COOLDOWN":
@@ -89,7 +98,7 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
             continue
         if elapsed:
             state.mark_provider(
-                ctx.providers, lane, "DEGRADED", reason="cooldown window elapsed"
+                ctx.providers, lane, "AVAILABLE", reason="cooldown window elapsed"
             )
             returned.append(lane)
 
