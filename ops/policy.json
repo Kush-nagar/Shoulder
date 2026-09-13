@@ -170,12 +170,7 @@
       "EXTREME": "LONG_HORIZON_AGENT"
     }
   },
-  "effort_ladder": [
-    "low",
-    "medium",
-    "high",
-    "xhigh"
-  ],
+  "effort_ladder": ["low", "medium", "high", "xhigh"],
   "escalation": {
     "max_implementation_attempts": 3,
     "max_effort_escalations": 2,
@@ -199,9 +194,7 @@
     "$comment": "Ceilings for metered lanes only. Subscription lanes (Claude, Codex Cloud) spend an included allowance rather than API money and are never blocked by a dollar ceiling. Raising a ceiling is a deliberate human edit."
   },
   "qualification": {
-    "required_states": [
-      "QUALIFIED"
-    ],
+    "required_states": ["QUALIFIED"],
     "$comment": "A newly discovered model is CANDIDATE until it passes the synthetic suite, then QUALIFIED, or QUARANTINED on failure. Promotion happens only at a task boundary, never mid-task.",
     "requalify_after_days": 30
   },
