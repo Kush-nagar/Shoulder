@@ -47,7 +47,11 @@
       "$comment_namespace": "The fallback lane: any namespace no enabled lane claims routes here.",
       "privacy_enforcement": "account",
       "requires_privacy_confirmation": true,
-      "$comment_privacy": "Because enforcement is account-level and this repository cannot read that setting, the lane stays ineligible until the account owner confirms it with `cli confirm-privacy --lane openrouter`. Failing closed is the point: Shoulder handles minors' data."
+      "$comment_privacy": "Because enforcement is account-level and this repository cannot read that setting, the lane stays ineligible until the account owner confirms it with `cli confirm-privacy --lane openrouter`. Failing closed is the point: Shoulder handles minors' data.",
+      "banned_namespaces": ["anthropic", "openai"],
+      "$comment_banned": "Owner policy: Anthropic models are consumed only through claude_subscription and OpenAI models only through codex_cloud, both subscription-backed. A model in these families is ineligible on this lane at any price, even if the catalogue offers it and it is qualified. Enforced in routing as well as in the catalogue, so a stale or hand-edited state file cannot reintroduce one.",
+      "reject_meta_routers": true,
+      "$comment_meta": "A meta-router such as openrouter/auto picks a model at request time, so it could select an Anthropic or OpenAI model and break the rule above. It also makes the qualification verdict and the privacy contract describe a model that is not the one which runs."
     },
     "codex_cloud": {
       "provider": "openai",

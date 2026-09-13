@@ -41,6 +41,22 @@ EXCLUDED_NAMESPACES = ("openrouter",)
 # qualification, and nothing here can detect such a change.
 EXCLUDED_PREFIXES = ("~",)
 
+# Aliases that do not name one model. `openrouter/auto` is the obvious one, but
+# any `*/auto` or a `:auto` variant has the same problem: the family that
+# actually answers is unknown until the request is made, so it could be one the
+# owner has confined to a subscription lane.
+META_ROUTER_NAMESPACES = ("openrouter",)
+META_ROUTER_MARKERS = ("/auto", ":auto", "/router", "/fusion")
+
+
+def is_meta_router(model_id: str) -> bool:
+    """Whether this id routes to some other model chosen at request time."""
+    lowered = model_id.lower()
+    if lowered.split("/", 1)[0] in META_ROUTER_NAMESPACES:
+        return True
+    return any(marker in lowered for marker in META_ROUTER_MARKERS)
+
+
 QualificationState = Literal["CANDIDATE", "QUALIFIED", "QUARANTINED"]
 
 # Which lane executes a model, by catalogue namespace. Derived from policy so
@@ -128,7 +144,7 @@ def normalise(
     model_id = str(entry.get("id", ""))
     if not model_id or any(model_id.endswith(s) for s in EXCLUDED_SUFFIXES):
         return None
-    if model_id.split("/", 1)[0] in EXCLUDED_NAMESPACES:
+    if model_id.split("/", 1)[0] in EXCLUDED_NAMESPACES or is_meta_router(model_id):
         return None
     if model_id.startswith(EXCLUDED_PREFIXES):
         return None
@@ -138,10 +154,14 @@ def normalise(
     pricing = entry.get("pricing") or {}
     top = entry.get("top_provider") or {}
     family = model_id.split("/", 1)[0]
+    # Which lane may actually run it is decided by the router, which is where
+    # the owner's family bans are enforced; the namespace map only says which
+    # lane owns the family by default.
+    lane = lanes.get(family, DEFAULT_LANE)
 
     return Model(
         id=model_id,
-        lane=lanes.get(family, DEFAULT_LANE),
+        lane=lane,
         family=family,
         harness_model=_harness_model(model_id, family, lanes),
         context_length=int(entry.get("context_length") or 0),
