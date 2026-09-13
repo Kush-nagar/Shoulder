@@ -390,6 +390,22 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         problems.append(
             f"task {args.task} has no active lease; a worker runs only against one"
         )
+    else:
+        # The lease records what was actually assigned. Accepting any lane for
+        # a task that merely has *a* lease would let a manual dispatch run a
+        # different provider than the one the coordinator chose and recorded.
+        leased = held.get("assignment") or {}
+        if leased.get("lane") and leased["lane"] != args.lane:
+            problems.append(f"the lease assigns lane {leased['lane']}, not {args.lane}")
+        leased_model = leased.get("harness_model")
+        if (
+            leased_model
+            and leased.get("model_enforced", True)
+            and leased_model != args.model
+        ):
+            problems.append(
+                f"the lease assigns model {leased_model!r}, not {args.model!r}"
+            )
     lane = ctx.policy["lanes"].get(args.lane)
 
     if lane is None:

@@ -818,23 +818,50 @@ class TestSixthReviewFindings(unittest.TestCase):
             ):
                 self.assertTrue(watchdog.owner_finished(lease, policy=self.policy))
 
-    def test_a_pull_request_lease_waits_far_longer_when_unanswerable(self) -> None:
-        """Two hours is nothing for a Codex task or a review queue."""
+    def test_a_pull_request_lease_is_never_released_on_a_timer(self) -> None:
+        """Releasing because a query keeps failing is guessing work stopped.
+
+        The pull request still exists and can be asked about again, so a longer
+        fuse is the same failure, later.
+        """
+        from unittest import mock
+
         from services.agentops import watchdog
 
-        self.assertGreater(
-            watchdog.UNRESOLVED_PULL_REQUEST_MULTIPLE,
-            watchdog.UNRESOLVED_GRACE_MULTIPLE * 4,
-        )
         settings = self.policy["lease"]
         grace = (
             settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
         )
-        two_hours = grace * watchdog.UNRESOLVED_GRACE_MULTIPLE
-        self.assertFalse(
-            watchdog._long_unresolved(
-                {"heartbeat_at": ago(two_hours + 600)},
-                self.policy,
-                has_pull_request=True,
+        very_old = ago(grace * watchdog.UNRESOLVED_PULL_REQUEST_MULTIPLE * 10)
+        with mock.patch.object(watchdog, "_pull_request_finished", return_value=None):
+            self.assertFalse(
+                watchdog.owner_finished(
+                    {"pull_request": 42, "heartbeat_at": very_old},
+                    policy=self.policy,
+                )
             )
+
+    def test_a_stuck_lease_is_surfaced_rather_than_silently_held(self) -> None:
+        """Held forever and invisible is its own failure."""
+        from services.agentops import watchdog
+
+        settings = self.policy["lease"]
+        grace = (
+            settings["heartbeat_seconds"] * settings["stale_after_missed_heartbeats"]
         )
+        stuck = {
+            "heartbeat_at": ago(grace * watchdog.UNRESOLVED_PULL_REQUEST_MULTIPLE + 600)
+        }
+        fresh = {"heartbeat_at": ago(60)}
+        self.assertTrue(watchdog.unresolved_too_long(stuck, self.policy))
+        self.assertFalse(watchdog.unresolved_too_long(fresh, self.policy))
+
+    def test_the_worker_must_match_the_lane_its_lease_records(self) -> None:
+        """A lease exists for a task; that does not make any lane valid for it."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        verify = source.split("def cmd_verify_assignment", 1)[1]
+        verify = verify.split(chr(10) + "def ", 1)[0]
+        self.assertIn("the lease assigns lane", verify)
+        self.assertIn("the lease assigns model", verify)

@@ -72,25 +72,36 @@ def owner_finished(
     if all(answer is True for answer in answers):
         return True
 
-    # At least one signal was unanswerable. Hold the lease unless holding it
-    # has itself become the problem.
-    return _long_unresolved(lease, policy, has_pull_request=pull_request is not None)
+    # At least one signal was unanswerable.
+    if pull_request is not None:
+        # Never release a pull-request lease on a timer. The pull request still
+        # exists and can be asked about again later, so releasing it means
+        # guessing that work stopped -- and guessing wrong puts a second writer
+        # on the branch. A lease stuck here is surfaced instead; see
+        # unresolved_too_long, which the sweep reports rather than acts on.
+        return False
+    return _long_unresolved(lease, policy)
+
+
+def unresolved_too_long(lease: dict[str, Any], policy: dict[str, Any] | None) -> bool:
+    """Whether a held-but-unanswerable lease has been stuck long enough to
+    deserve a human's attention.
+
+    This is reported, never acted on. Releasing a lease because a query keeps
+    failing is guessing that the work stopped, and guessing wrong puts a second
+    writer on the branch.
+    """
+    return _long_unresolved(lease, policy, UNRESOLVED_PULL_REQUEST_MULTIPLE)
 
 
 def _long_unresolved(
     lease: dict[str, Any],
     policy: dict[str, Any] | None,
-    *,
-    has_pull_request: bool = False,
+    multiple: int = UNRESOLVED_GRACE_MULTIPLE,
 ) -> bool:
     if policy is None:
         return False
     settings = policy["lease"]
-    multiple = (
-        UNRESOLVED_PULL_REQUEST_MULTIPLE
-        if has_pull_request
-        else UNRESOLVED_GRACE_MULTIPLE
-    )
     window = (
         int(settings["heartbeat_seconds"])
         * int(settings["stale_after_missed_heartbeats"])
@@ -192,9 +203,22 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     if returned:
         state.write_json(ctx.paths.providers, ctx.providers)
 
+    stuck = [
+        {
+            "task_id": lease.get("task_id", key),
+            "pull_request": lease.get("pull_request"),
+            "last_heartbeat": lease.get("heartbeat_at"),
+        }
+        for key, lease in ctx.tasks.get("leases", {}).items()
+        if lease.get("state") in leases.ACTIVE_STATES
+        and leases.is_stale(lease, ctx.policy)
+        and unresolved_too_long(lease, ctx.policy)
+    ]
+
     active = leases.active_leases(ctx.tasks, ctx.policy)
     result = {
         "checked_at": state.now(),
+        "stuck_unresolved": stuck,
         "autonomy_enabled": state.autonomy_enabled(ctx.policy),
         "recovered": recovered,
         "providers_returned": returned,

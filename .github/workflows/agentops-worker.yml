@@ -370,9 +370,16 @@ jobs:
           git add ops/state
           if ! git diff --cached --quiet; then
             git commit -m "Record spend and the pull request for task ${TASK_ID}"
-            git pull --rebase --autostash origin "$DEFAULT_BRANCH"
-            uv run --locked python -m services.agentops.cli validate || exit 0
-            git push origin "HEAD:$DEFAULT_BRANCH"
+            # Same race as the other ledger writes: another state writer can
+            # land between the pull and the push.
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase --autostash origin "$DEFAULT_BRANCH" || true
+              uv run --locked python -m services.agentops.cli validate || break
+              if git push origin "HEAD:$DEFAULT_BRANCH"; then
+                break
+              fi
+              sleep $((attempt * 5))
+            done
           fi
 
       - name: Report to the activity feed
