@@ -373,3 +373,18 @@ class TestWorkerChangeDetection(unittest.TestCase):
         """A ledger write is not the worker having done the task."""
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         self.assertIn("':!ops/state'", text)
+
+
+class TestSpendRecording(unittest.TestCase):
+    """Budgets only bind if something actually records what was spent."""
+
+    def test_the_worker_records_harness_reported_cost(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("cli spend", text)
+        self.assertIn("total_cost_usd", text)
+        self.assertIn('--task "$TASK_ID"', text)
+
+    def test_the_codex_lane_is_excluded_rather_than_guessed_at(self) -> None:
+        """openai/codex-action reports no usage, so nothing is invented."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("inputs.lane != 'codex_api'", text)

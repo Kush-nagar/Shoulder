@@ -144,6 +144,7 @@ jobs:
 
       # --- Claude lane: the Claude subscription pays for this one -----------
       - name: Implement with Claude
+        id: claude
         if: inputs.lane == 'claude_subscription'
         uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
         with:
@@ -153,6 +154,7 @@ jobs:
 
       # --- OpenRouter lane: same harness, Anthropic-compatible endpoint -----
       - name: Implement with an OpenRouter model
+        id: openrouter
         if: inputs.lane == 'openrouter'
         uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
         env:
@@ -175,6 +177,32 @@ jobs:
           prompt-file: brief.md
           permission-profile: ':workspace'
           safety-strategy: drop-sudo
+
+      - name: Record what the run cost
+        # Only the Claude Code harness reports usage, through its execution
+        # file. openai/codex-action exposes just its final message, so the
+        # Codex lane's spend cannot be recorded from the action and is left
+        # unrecorded rather than guessed at.
+        if: always() && inputs.lane != 'codex_api'
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: >-
+            ${{ steps.claude.outputs.execution_file
+            || steps.openrouter.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          if [ -z "${EXECUTION_FILE:-}" ] || [ ! -s "$EXECUTION_FILE" ]; then
+            echo 'no execution file; nothing to record'
+            exit 0
+          fi
+          cost="$(jq -r '[.. | objects | .total_cost_usd? // empty] | first // 0' \
+            "$EXECUTION_FILE")"
+          if [ "$cost" = '0' ] || [ "$cost" = 'null' ]; then
+            echo 'the harness reported no cost'
+            exit 0
+          fi
+          uv run --locked python -m services.agentops.cli spend \
+            --lane "$LANE" --usd "$cost" --task "$TASK_ID"
 
       - name: Run the repository quality gate
         id: gate
