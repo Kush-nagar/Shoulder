@@ -679,3 +679,55 @@ class TestFifthReviewFindings(unittest.TestCase):
         source = Path(watchdog.__file__).read_text(encoding="utf-8")
         self.assertIn("Fails closed", source)
         self.assertGreater(watchdog.UNRESOLVED_GRACE_MULTIPLE, 1)
+
+
+class TestSeventhReviewFindings(unittest.TestCase):
+    """Regressions for the seventh review round."""
+
+    def test_the_worker_branch_is_bound_to_the_lease(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn('--branch "$BRANCH"', text)
+
+    def test_ledger_retries_redo_the_mutation(self) -> None:
+        """Rebasing replays a commit built from state someone else replaced.
+
+        The losing side's content survives and theirs is dropped, so each
+        attempt must re-read the remote state and re-apply the change.
+        """
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        for block in text.split("- name:"):
+            if 'git push origin "HEAD:$DEFAULT_BRANCH"' not in block:
+                continue
+            with self.subTest(block.splitlines()[0].strip()[:50]):
+                self.assertIn(
+                    'git checkout "origin/$DEFAULT_BRANCH" -- ops/state', block
+                )
+                self.assertNotIn("git pull --rebase", block)
+
+    def test_repeated_spend_cannot_double_count(self) -> None:
+        """A retry re-applies the charge, so it must be idempotent."""
+        from services.agentops import state as state_mod
+
+        budget: dict[str, Any] = {}
+        for _ in range(4):
+            state_mod.record_spend(
+                budget, "openrouter", 0.25, task_id=14, once_key="run-1"
+            )
+        self.assertEqual(state_mod.task_spend(budget, 14), 0.25)
+
+    def test_a_different_run_still_records(self) -> None:
+        from services.agentops import state as state_mod
+
+        budget: dict[str, Any] = {}
+        state_mod.record_spend(budget, "openrouter", 0.25, task_id=14, once_key="run-1")
+        state_mod.record_spend(budget, "openrouter", 0.25, task_id=14, once_key="run-2")
+        self.assertEqual(state_mod.task_spend(budget, 14), 0.5)
+
+    def test_subscription_usage_never_touches_the_dollar_ledger(self) -> None:
+        """An allowance is not money; charging it would block a task on a
+        per-task ceiling nobody actually spent."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        spend = source.split("def cmd_spend", 1)[1].split(chr(10) + "def ", 1)[0]
+        self.assertIn('lane.get("billing") != "api"', spend)

@@ -291,8 +291,25 @@ def cmd_spend(args: argparse.Namespace) -> int:
     root = _root(args)
     paths = state.Paths(root)
     policy = state.load_policy(paths)
+
+    # A subscription lane spends an allowance, not money. Adding it to a dollar
+    # ledger would block a task on a per-task ceiling nobody actually spent,
+    # and would make the OpenRouter ceilings meaningless.
+    lane = policy["lanes"].get(args.lane, {})
+    if lane.get("billing") != "api":
+        return _emit(
+            {
+                "ok": True,
+                "lane": args.lane,
+                "recorded_usd": 0.0,
+                "skipped": "subscription lanes spend an allowance, not the budget",
+            }
+        )
+
     budget = state.read_json(paths.budget, {"spend": {}})
-    state.record_spend(budget, args.lane, args.usd, task_id=args.task)
+    state.record_spend(
+        budget, args.lane, args.usd, task_id=args.task, once_key=args.once_key
+    )
     state.write_json(paths.budget, budget)
     return _emit(
         {
@@ -397,6 +414,10 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         leased = held.get("assignment") or {}
         if leased.get("lane") and leased["lane"] != args.lane:
             problems.append(f"the lease assigns lane {leased['lane']}, not {args.lane}")
+        if args.branch and held.get("branch") and held["branch"] != args.branch:
+            problems.append(
+                f"the lease is on branch {held['branch']!r}, not {args.branch!r}"
+            )
         leased_model = leased.get("harness_model")
         if (
             leased_model
@@ -793,6 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--task", type=int, required=True)
     verify.add_argument("--lane", required=True)
     verify.add_argument("--model", required=True)
+    verify.add_argument("--branch")
     verify.set_defaults(func=cmd_verify_assignment)
 
     reviewer = sub.add_parser(
@@ -843,6 +865,11 @@ def build_parser() -> argparse.ArgumentParser:
     spend.add_argument("--lane", required=True)
     spend.add_argument("--usd", type=float, required=True)
     spend.add_argument("--task", type=int)
+    spend.add_argument(
+        "--once-key",
+        dest="once_key",
+        help="apply this charge at most once, so a retry cannot double count",
+    )
     spend.set_defaults(func=cmd_spend)
 
     feed = sub.add_parser("notify", help="post one milestone to the activity feed")

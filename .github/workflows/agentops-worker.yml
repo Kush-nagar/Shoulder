@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli verify-assignment \
-            --task "$TASK_ID" --lane "$LANE" --model "$MODEL"
+            --task "$TASK_ID" --lane "$LANE" --model "$MODEL" --branch "$BRANCH"
 
       - name: Attach this run to the lease
         # The lease was taken by the coordinator, whose run is already over.
@@ -155,31 +155,36 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          uv run --locked python -m services.agentops.cli attach             --task "$TASK_ID" --run-id "$GITHUB_RUN_ID"
-          # Push it: an attachment that lives only in this runner cannot tell
-          # the watchdog that this worker is alive, and a job queued past the
-          # grace window would have its branch reclaimed.
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
-          git stash push --include-untracked -- ops/state || true
-          git fetch origin "$DEFAULT_BRANCH"
-          git checkout -B agentops-attach "origin/$DEFAULT_BRANCH"
-          git stash pop || true
-          uv run --locked python -m services.agentops.cli validate
-          git add ops/state
-          if ! git diff --cached --quiet; then
+
+          # An attachment that lives only in this runner cannot tell the
+          # watchdog that this worker is alive, so it has to reach the default
+          # branch. Each attempt starts from the current remote state and
+          # re-applies the change, rather than rebasing a commit built from
+          # state another writer has since replaced -- that would keep this
+          # side's stale content and silently drop theirs. Safe to repeat
+          # because attach sets a field rather than accumulating.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            git checkout -B agentops-attach "origin/$DEFAULT_BRANCH"
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+
+            uv run --locked python -m services.agentops.cli attach \
+              --task "$TASK_ID" --run-id "$GITHUB_RUN_ID"
+            uv run --locked python -m services.agentops.cli validate || break
+
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'the attachment is already recorded'
+              break
+            fi
             git commit -m "Attach worker run ${GITHUB_RUN_ID} to task ${TASK_ID}"
-            # Another state writer may land between the pull and the push, so
-            # retry the whole rebase-and-push rather than failing the worker.
-            for attempt in 1 2 3 4 5; do
-              git pull --rebase --autostash origin "$DEFAULT_BRANCH" || true
-              uv run --locked python -m services.agentops.cli validate || break
-              if git push origin "HEAD:$DEFAULT_BRANCH"; then
-                break
-              fi
-              sleep $((attempt * 5))
-            done
-          fi
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Check out the task branch
         run: |
@@ -263,8 +268,10 @@ jobs:
             echo 'the harness reported no cost'
             exit 0
           fi
-          uv run --locked python -m services.agentops.cli spend \
-            --lane "$LANE" --usd "$cost" --task "$TASK_ID"
+          # Captured here, recorded later by the step that carries state back
+          # to the default branch, so the write happens once against fresh
+          # state rather than on this task branch where it would be lost.
+          echo "RECORDED_COST=$cost" >> "$GITHUB_ENV"
 
       - name: Record a provider failure
         # Only when the provider's own harness failed. `failure()` alone fires
@@ -275,36 +282,40 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
-          uv run --locked python -m services.agentops.cli health             --lane "$LANE" --status DEGRADED             --reason "worker run ${GITHUB_RUN_ID} failed"
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+
           # DEGRADED keeps the lane out of the pool until something proves it
           # works again, so the next coordinator run takes the fallback chain
           # instead of choosing the lane that just failed.
           #
           # This job is already failing, so no later step will commit anything.
           # A failure recorded only in this runner's checkout is not recorded
-          # at all: the durable coordinator would never see it and would pick
-          # the same lane again. Push it to the default branch here.
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-          git stash push --include-untracked -- ops/state || true
-          git fetch origin "$DEFAULT_BRANCH"
-          git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH"
-          git stash pop || true
-          uv run --locked python -m services.agentops.cli validate
-          git add ops/state
-          if ! git diff --cached --quiet; then
+          # at all. As with the other ledger writes, each attempt re-reads the
+          # remote state and re-applies the change rather than rebasing a
+          # commit built from state another writer has since replaced. Safe to
+          # repeat: marking health sets a value rather than accumulating.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH"
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+
+            uv run --locked python -m services.agentops.cli health \
+              --lane "$LANE" --status DEGRADED \
+              --reason "worker run ${GITHUB_RUN_ID} failed"
+            uv run --locked python -m services.agentops.cli validate || break
+
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'the failure is already recorded'
+              break
+            fi
             git commit -m "Record a provider failure from worker run ${GITHUB_RUN_ID}"
-            # Another state writer may land between the pull and the push, so
-            # retry the whole rebase-and-push rather than failing the worker.
-            for attempt in 1 2 3 4 5; do
-              git pull --rebase --autostash origin "$DEFAULT_BRANCH" || true
-              uv run --locked python -m services.agentops.cli validate || break
-              if git push origin "HEAD:$DEFAULT_BRANCH"; then
-                break
-              fi
-              sleep $((attempt * 5))
-            done
-          fi
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Run the repository quality gate
         id: gate
@@ -359,28 +370,39 @@ jobs:
         run: |
           set -uo pipefail
           number="$(gh pr view "$BRANCH" --json number --jq '.number' 2>/dev/null || true)"
-          if [ -n "$number" ]; then
-            uv run --locked python -m services.agentops.cli attach               --task "$TASK_ID" --pull-request "$number" || true
-          fi
-          git stash push --include-untracked -- ops/state || true
-          git fetch origin "$DEFAULT_BRANCH"
-          git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH"
-          git stash pop || true
-          uv run --locked python -m services.agentops.cli validate || exit 0
-          git add ops/state
-          if ! git diff --cached --quiet; then
+          cost="${RECORDED_COST:-0}"
+
+          # Same pattern as the attachment: each attempt re-reads the current
+          # remote state and re-applies the change. Spend is additive, so it
+          # carries a key that makes re-applying it a no-op; without that a
+          # retry would double-count the run against the per-task ceiling.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH"
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+
+            if [ -n "$number" ]; then
+              uv run --locked python -m services.agentops.cli attach \
+                --task "$TASK_ID" --pull-request "$number" || true
+            fi
+            if [ "$cost" != '0' ] && [ "$cost" != 'null' ]; then
+              uv run --locked python -m services.agentops.cli spend \
+                --lane "$LANE" --usd "$cost" --task "$TASK_ID" \
+                --once-key "run-${GITHUB_RUN_ID}" || true
+            fi
+
+            uv run --locked python -m services.agentops.cli validate || break
+            git add ops/state
+            if git diff --cached --quiet; then
+              echo 'nothing further to record'
+              break
+            fi
             git commit -m "Record spend and the pull request for task ${TASK_ID}"
-            # Same race as the other ledger writes: another state writer can
-            # land between the pull and the push.
-            for attempt in 1 2 3 4 5; do
-              git pull --rebase --autostash origin "$DEFAULT_BRANCH" || true
-              uv run --locked python -m services.agentops.cli validate || break
-              if git push origin "HEAD:$DEFAULT_BRANCH"; then
-                break
-              fi
-              sleep $((attempt * 5))
-            done
-          fi
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Report to the activity feed
         if: always()

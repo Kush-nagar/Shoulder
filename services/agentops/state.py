@@ -222,7 +222,12 @@ def budget_blocked(policy: dict[str, Any], budget: dict[str, Any]) -> frozenset[
 
 
 def record_spend(
-    budget: dict[str, Any], lane: str, usd: float, *, task_id: int | None = None
+    budget: dict[str, Any],
+    lane: str,
+    usd: float,
+    *,
+    task_id: int | None = None,
+    once_key: str | None = None,
 ) -> dict[str, Any]:
     """Add spend to the daily, monthly, and per-task buckets.
 
@@ -234,6 +239,15 @@ def record_spend(
     if not math.isfinite(amount) or amount < 0:
         raise ValueError(f"refusing to record a spend of {usd!r}")
     usd = amount
+
+    # Adding is not idempotent, and a push race makes the caller retry. A key
+    # lets the same charge be applied repeatedly without double counting.
+    if once_key is not None:
+        applied = budget.setdefault("applied", {})
+        if once_key in applied:
+            return budget
+        applied[once_key] = {"lane": lane, "usd": usd, "at": now()}
+
     day, month = _period_keys()
     spend = budget.setdefault("spend", {})
     for bucket, key in (("daily", day), ("monthly", month)):
