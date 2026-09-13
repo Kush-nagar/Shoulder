@@ -196,6 +196,7 @@ def qualify_model(
     results = []
     cost = 0.0
     passed = 0
+    unreachable = 0
 
     for probe in probes:
         try:
@@ -207,10 +208,15 @@ def qualify_model(
                 policy=policy,
             )
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+            # The model never answered. That says nothing about how it behaves,
+            # so it is counted separately from a probe the model actually got
+            # wrong; see the verdict below.
+            unreachable += 1
             results.append(
                 {
                     "probe": probe.name,
                     "passed": False,
+                    "unreachable": True,
                     "detail": f"{type(exc).__name__}: {exc}",
                 }
             )
@@ -227,10 +233,21 @@ def qualify_model(
             }
         )
 
-    verdict = "QUALIFIED" if passed >= required else "QUARANTINED"
+    if passed >= required:
+        verdict = "QUALIFIED"
+    elif unreachable == len(probes):
+        # Every probe failed to reach the model. Quarantining on that would let
+        # one outage, or one endpoint the privacy filter excludes, permanently
+        # blacklist a model that behaves perfectly well. It stays a candidate
+        # and can be retried.
+        verdict = "CANDIDATE"
+    else:
+        verdict = "QUARANTINED"
+
     return {
         "model": model_id,
         "qualification": verdict,
+        "unreachable_probes": unreachable,
         "passed": passed,
         "required": required,
         "total": len(probes),

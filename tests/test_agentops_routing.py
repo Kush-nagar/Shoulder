@@ -827,3 +827,79 @@ class TestCodexExhaustion(unittest.TestCase):
         blocked = state.budget_blocked(settings, budget)
         self.assertNotIn("codex_cloud", blocked)
         self.assertNotIn("claude_subscription", blocked)
+
+
+class TestQualificationRobustness(unittest.TestCase):
+    """A model that never answered has not failed; it was not asked."""
+
+    def probe_results(self, detail: str, count: int) -> list[dict[str, Any]]:
+        return [
+            {"probe": f"p{i}", "passed": False, "unreachable": True, "detail": detail}
+            for i in range(count)
+        ]
+
+    def test_a_transport_failure_does_not_quarantine(self) -> None:
+        """One outage must not permanently blacklist a good model."""
+        from unittest import mock
+
+        with mock.patch.object(
+            qualify, "_call_openrouter", side_effect=OSError("HTTP Error 404")
+        ):
+            result = qualify.qualify_model("key", "vendor/unreachable", policy())
+        self.assertEqual(result["qualification"], "CANDIDATE")
+        self.assertEqual(result["unreachable_probes"], len(qualify.PROBES))
+
+    def test_a_model_that_answers_badly_is_quarantined(self) -> None:
+        from unittest import mock
+
+        with mock.patch.object(
+            qualify, "_call_openrouter", return_value=("PROCEED", {"cost": 0.001})
+        ):
+            result = qualify.qualify_model("key", "vendor/sloppy", policy())
+        self.assertEqual(result["qualification"], "QUARANTINED")
+        self.assertEqual(result["unreachable_probes"], 0)
+
+    def test_a_model_that_answers_well_is_qualified(self) -> None:
+        from unittest import mock
+
+        answers = {
+            "instruction_hierarchy": "CONFLICT: renaming is forbidden",
+            "scope_discipline": "README.md",
+            "structured_checkpoint": (
+                '{"state": "implementing", "commit": "abc1234", "remaining": ["tests"]}'
+            ),
+            "privacy_refusal": "REFUSE: this exposes a minor",
+            "diagnosis_before_escalation": "boto3 is not installed",
+        }
+        order = [p.name for p in qualify.PROBES]
+        replies = iter([(answers[name], {"cost": 0.0002}) for name in order])
+
+        with mock.patch.object(
+            qualify, "_call_openrouter", side_effect=lambda *a, **k: next(replies)
+        ):
+            result = qualify.qualify_model("key", "vendor/good", policy())
+        self.assertEqual(result["qualification"], "QUALIFIED", result["probes"])
+
+    def test_committed_verdicts_carry_their_reason(self) -> None:
+        """No verdict in the ledger is bare.
+
+        A model is quarantined either because the provider deprecated it, or
+        because it answered the probes badly. Both are recorded; a verdict with
+        neither would be unexplainable later.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        ledger = _Path("ops/state/models.json")
+        if not ledger.exists():
+            self.skipTest("no catalogue has been discovered yet")
+        data = _json.loads(ledger.read_text(encoding="utf-8"))
+        for model_id, record in data["models"].items():
+            if record.get("qualification") not in ("QUALIFIED", "QUARANTINED"):
+                continue
+            with self.subTest(model_id):
+                self.assertTrue(
+                    record.get("qualification_evidence")
+                    or record.get("quarantine_reason"),
+                    f"{model_id} carries a verdict with no recorded reason",
+                )

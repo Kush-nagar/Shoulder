@@ -86,12 +86,25 @@ def cmd_qualify(args: argparse.Namespace) -> int:
     models_state = catalog.load_state(paths.models)
     targets: list[str] = list(args.model or [])
     if not targets:
-        targets = [
-            model_id
+        # Qualify what routing would actually reach for: candidates that clear
+        # a real capability class, cheapest first. Taking whatever the
+        # catalogue happens to list first spends the budget proving nothing
+        # about the models the router would pick.
+        spec = policy["capability_classes"][args.against]
+        eligible = [
+            (record.get("input_usd_per_mtok", 0.0), model_id)
             for model_id, record in models_state.get("models", {}).items()
             if record.get("qualification") == "CANDIDATE"
+            and not record.get("absent")
+            and not record.get("deprecated")
             and (args.lane is None or record.get("lane") == args.lane)
-        ][: args.limit]
+            and record.get("supports_tools")
+            and record.get("context_length", 0) >= spec["min_context"]
+            and record.get("input_usd_per_mtok", 1e9) <= spec["max_input_usd_per_mtok"]
+            and (not spec["needs_reasoning"] or record.get("supports_reasoning"))
+            and (not spec["needs_vision"] or record.get("supports_vision"))
+        ]
+        targets = [model_id for _, model_id in sorted(eligible)][: args.limit]
 
     results = []
     for model_id in targets:
@@ -498,6 +511,11 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_cmd.add_argument("--model", action="append")
     qualify_cmd.add_argument("--lane")
     qualify_cmd.add_argument("--limit", type=int, default=3)
+    qualify_cmd.add_argument(
+        "--against",
+        default="ROUTINE_CODING",
+        help="capability class the candidates must already clear",
+    )
     qualify_cmd.set_defaults(func=cmd_qualify)
 
     health = sub.add_parser("health", help="read or set provider health")
