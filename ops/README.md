@@ -36,10 +36,24 @@ All commands are safe except `dispatch`, which refuses while autonomy is off.
 python -m services.agentops.cli status      # ledger, health, qualified models
 python -m services.agentops.cli plan        # dry-run the next task selection
 python -m services.agentops.cli discover    # refresh the model catalogue
+python -m services.agentops.cli health --probe   # lift lanes whose secret exists
 python -m services.agentops.cli qualify --lane openrouter
+python -m services.agentops.cli verify-assignment --task 14 --lane codex_api --model gpt-5-mini
+python -m services.agentops.cli spend --lane openrouter --usd 0.02 --task 14
 python -m services.agentops.brief --task 14 # see exactly what a worker receives
 python -m services.agentops.watchdog        # recovery sweep
 ```
+
+`health --probe` is what lifts a lane out of its seeded `UNAVAILABLE` state: it
+promotes a lane only when that lane's secret is actually present in the
+environment. The coordinator runs it before planning, so adding a secret is
+enough — no state file needs editing by hand.
+
+`verify-assignment` is the worker's own check. Dispatch inputs are
+caller-controlled, so before doing any work the worker re-derives the policy
+decision and exits non-zero if what it was handed disagrees. A hand-dispatched
+run cannot route frontend work to a forbidden lane or name an unqualified
+model.
 
 ## Lanes
 
@@ -70,6 +84,10 @@ Ceilings live in `ops/policy.json` under `budget` and start at $5/day and
 $40/month per API lane. The orchestrator never raises a ceiling by itself. On
 exhaustion it checkpoints, marks the lane `BUDGET_EXHAUSTED`, and routes to
 another authorised lane or blocks.
+
+Spend is recorded per lane per day, per month, and per task. A task that has
+used its `per_task_usd` ceiling stops being an eligible candidate, so a task
+cannot burn the monthly budget across repeated attempts.
 
 The Claude subscription lane is never blocked by a budget ceiling, because it
 does not spend API money.

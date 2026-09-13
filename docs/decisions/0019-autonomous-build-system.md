@@ -90,6 +90,27 @@ Task 23 carries the gate flag, so the coordinator cannot start machine-learning
 work however the backlog is edited. `AGENTS.md` rule 5 is enforced in code, not
 by convention.
 
+## What review changed
+
+Independent review of the bootstrap found that several stated guarantees were
+not actually enforced, which is worse than not stating them. The repairs are
+part of this decision rather than a footnote to it:
+
+- **The control plane must not trigger itself.** The coordinator commits the
+  state ledger to `main`, and a catalogue refresh rewrites timestamps every
+  run, so its own commit started another coordinator without bound. Workflows
+  that write state ignore that path on their own trigger.
+- **State has one writer at a time.** The coordinator and the watchdog both
+  push `ops/state`, so they share a serialised concurrency group and rebase
+  before pushing.
+- **A worker does not trust what it is handed.** Dispatch inputs are
+  caller-controlled, so the worker re-derives the policy decision itself and
+  refuses when the two disagree. The hard policies are enforced at the point
+  of use, not only at the point of dispatch.
+- **A declared guarantee is enforced or dropped.** Privacy eligibility and the
+  spend ceilings were described in policy and asserted in tests but never
+  checked at runtime. Both are now filters in the code paths that matter.
+
 ## Alternatives considered
 
 **A separate DeepSeek API key.** Rejected. OpenRouter already serves the current

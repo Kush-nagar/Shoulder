@@ -65,9 +65,18 @@ against Git and GitHub before editing anything.
   Task 23 carries the gate flag, so `AGENTS.md` rule 5 is enforced in code.
 - Coordinator dry run selects **Task 14 — Manual clip marking** (block-04,
   prerequisites 7 and 13 satisfied), classified `mixed`/`COMPLEX`.
-- Open limitation: this workstation's `uv` is 0.11.28 while `pyproject.toml`
-  pins 0.12.10, so `uv run` refuses locally. The pinned `ruff` and `mypy` in
-  `.venv` were used directly instead; CI installs 0.12.10 and is unaffected.
+- Independent review (Copilot, PR #16) found eleven real defects, all repaired
+  in `2dc4957`. Three were severe: the coordinator's own state commit
+  retriggered it in an unbounded loop; the coordinator and watchdog raced on
+  `ops/state` pushes; and the worker trusted caller-controlled dispatch inputs,
+  so a hand-dispatched run could have paired frontend work with a forbidden
+  lane and still received the provider secrets. Two more were claims the tests
+  asserted the shape of but nothing enforced: per-lane privacy and the spend
+  ceilings. Each repair carries a regression test.
+- Open limitation: the `uv` on PATH for this workstation is 0.11.28 while
+  `pyproject.toml` pins 0.12.10. `scripts/check.ps1` uses the vendored
+  `.tools/uv.exe`, which is 0.12.10, so the gate itself is unaffected; only an
+  ad-hoc `uv` invocation from PATH fails.
 
 ## Current state
 
