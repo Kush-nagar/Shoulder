@@ -935,3 +935,70 @@ class TestNinthReviewFindings(unittest.TestCase):
         self.assertIn("steps.lease.outputs.acquired == 'true'", text)
         handoff = text.split("Hand the task to its lane", 1)[1]
         self.assertNotIn("steps.plan.outputs.dispatched", handoff)
+
+
+class TestTenthReviewFindings(unittest.TestCase):
+    """Regressions for the tenth review round."""
+
+    def setUp(self) -> None:
+        self.policy = policy()
+
+    def test_the_committed_status_file_already_has_its_markers(self) -> None:
+        """Without them the first reconciliation appends a second status block
+        beside the human one, leaving two sources of truth."""
+        from agentops_fixtures import REPO_ROOT as root
+
+        from services.agentops import reconcile
+
+        text = (root / "STATUS.md").read_text(encoding="utf-8")
+        self.assertEqual(text.count(reconcile.STATUS_BEGIN), 1)
+        self.assertEqual(text.count(reconcile.STATUS_END), 1)
+        self.assertIn("## Supervisor checkpoint", text)
+
+    def test_a_blocked_task_leaves_the_candidate_pool(self) -> None:
+        """A lease released as blocked is not active, so the active-lease check
+        let the task straight back in and the attempt bound meant nothing."""
+        import shutil
+        import tempfile
+
+        from agentops_fixtures import REPO_ROOT as source
+
+        tmp = tempfile.mkdtemp()
+        root = Path(tmp)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(source / relative, root / relative)
+
+        ctx = coordinator.load_context(root)
+        before = coordinator.next_eligible(ctx)
+        assert before is not None
+        blocked_id = before.task.id
+
+        ctx.tasks.setdefault("leases", {})[str(blocked_id)] = {
+            "task_id": blocked_id,
+            "state": "blocked",
+            "branch": "block-04-t14",
+        }
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+
+        fresh = coordinator.load_context(root)
+        candidate = coordinator.evaluate(fresh, fresh.backlog.tasks[blocked_id])
+        self.assertFalse(candidate.eligible)
+        self.assertTrue(
+            any("BLOCKED_AUTOMATION" in r for r in candidate.reasons),
+            candidate.reasons,
+        )
+        # And the coordinator moves past it rather than stalling.
+        following = coordinator.next_eligible(fresh)
+        if following is not None:
+            self.assertNotEqual(following.task.id, blocked_id)
+
+    def test_the_worker_identity_includes_the_attempt(self) -> None:
+        """GITHUB_RUN_ID is unchanged on a re-run; only the attempt increments."""
+        from agentops_fixtures import REPO_ROOT as root
+
+        text = (root / ".github/workflows/agentops-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('--run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', text)
+        self.assertNotIn('--run-id "$GITHUB_RUN_ID"', text)

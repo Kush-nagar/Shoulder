@@ -418,6 +418,8 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         # would otherwise pass. Once a worker has attached its run, the lease
         # belongs to that run, and the branch concurrency group queues a second
         # same-branch run rather than rejecting it.
+        # The run id alone is stable across a re-run of the same workflow, so
+        # a replay would match it. The attempt is what distinguishes them.
         attached = held.get("worker_run_id")
         if attached and args.run_id and str(attached) != str(args.run_id):
             problems.append(

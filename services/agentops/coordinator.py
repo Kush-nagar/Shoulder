@@ -112,6 +112,19 @@ def evaluate(
                 [f"already leased by {lease.get('owner')}"],
             )
 
+    # A lease released as blocked is not active, so the active-lease check
+    # above lets the task straight back into the pool. That would redispatch it
+    # forever and make max_implementation_attempts mean nothing.
+    lease = ctx.tasks.get("leases", {}).get(str(task.id)) or {}
+    if lease.get("state") == "blocked":
+        return Candidate(
+            task,
+            block,
+            False,
+            [],
+            ["BLOCKED_AUTOMATION: attempts exhausted; clear the lease to try again"],
+        )
+
     satisfied, missing = state.dependencies_satisfied(ctx.progress, task.prerequisites)
     if not satisfied:
         reasons.append(f"prerequisites not complete: {missing}")

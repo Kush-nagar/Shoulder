@@ -118,6 +118,20 @@ against Git and GitHub before editing anything.
   `.tools/uv.exe`, which is 0.12.10, so the gate itself is unaffected; only an
   ad-hoc `uv` invocation from PATH fails.
 
+<!-- agentops:progress:begin -->
+
+### Autonomous progress
+
+- Updated: 2026-09-12T00:00:00+00:00
+- Completed tasks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+- Completed blocks: [1, 2, 3]
+- Next eligible task: Task 14 - Manual clip marking
+
+Maintained by `services/agentops/reconcile.py`. Edit around this
+block, not inside it.
+
+<!-- agentops:progress:end -->
+
 ## Current state
 
 - Current phase: Phase B — Video; Tasks 8–13 are complete and merged, so Phase B

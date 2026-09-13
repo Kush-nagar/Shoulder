@@ -147,7 +147,7 @@ jobs:
           set -euo pipefail
           uv run --locked python -m services.agentops.cli verify-assignment \
             --task "$TASK_ID" --lane "$LANE" --model "$MODEL" \
-            --branch "$BRANCH" --run-id "$GITHUB_RUN_ID"
+            --branch "$BRANCH" --run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Attach this run to the lease
         # The lease was taken by the coordinator, whose run is already over.
@@ -185,7 +185,7 @@ jobs:
             fi
 
             uv run --locked python -m services.agentops.cli attach \
-              --task "$TASK_ID" --run-id "$GITHUB_RUN_ID"
+              --task "$TASK_ID" --run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             uv run --locked python -m services.agentops.cli validate || break
 
             git add ops/state
