@@ -89,6 +89,12 @@ Spend is recorded per lane per day, per month, and per task. A task that has
 used its `per_task_usd` ceiling stops being an eligible candidate, so a task
 cannot burn the monthly budget across repeated attempts.
 
+**The Codex lane's spend is not tracked.** `openai/codex-action` reports only
+its final message, with no usage or cost, so there is nothing to record. The
+Claude Code harness does report usage, so the Claude and OpenRouter lanes are
+tracked accurately. Until that changes, watch OpenAI API spend in the
+provider's own dashboard, and keep `max_parallel_writers` low.
+
 The Claude subscription lane is never blocked by a budget ceiling, because it
 does not spend API money.
 
