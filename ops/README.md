@@ -153,3 +153,26 @@ continuation event.
 - Raise a spend ceiling.
 - Send production footage, player reflections, real rows, or credentials to any
   model. Agents get source, synthetic fixtures, and sanitised logs.
+
+## Verified in the cloud
+
+These were proven by real runs, not asserted. The provider credentials exist
+only inside Actions, so `agentops-verify.yml` is where the proof happens.
+
+| What | How it was proven |
+|---|---|
+| Live catalogue | A discovery run parses the real OpenRouter catalogue. |
+| OpenRouter lane | Real probe requests under the privacy contract, with recorded cost. |
+| Claude lane | A real `claude-code-action` run authenticating with the subscription token. |
+| Codex Cloud lane | A real `@codex review` on a pull request, answered by Codex. |
+| Activity feed | The cloud run posts its own result to the feed issue. |
+| Coordinator | A dry run against real state, asserting autonomy is still off. |
+
+Re-run it any time with:
+
+```
+gh workflow run agentops-verify.yml
+```
+
+It costs a fraction of a cent, records that spend against the ceilings, and
+cannot open a pull request, merge anything, or enable autonomy.
