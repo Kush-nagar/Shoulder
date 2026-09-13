@@ -86,6 +86,64 @@ def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool
     return False
 
 
+STATUS_BEGIN = "<!-- agentops:progress:begin -->"
+STATUS_END = "<!-- agentops:progress:end -->"
+
+
+def render_status_block(progress: dict[str, Any], next_task: str) -> str:
+    """The orchestrator-owned region of STATUS.md.
+
+    AGENTS.md makes STATUS.md the human checkpoint, and every worker brief
+    tells the worker to read it. Marking tasks complete only in progress.json
+    would leave that file saying work is outstanding after it merged, so a
+    worker would start from a false picture of the repository.
+
+    Only the text between the markers is rewritten; everything a human wrote
+    around it is left alone.
+    """
+    done = sorted(state.completed_tasks(progress))
+    blocks = sorted(int(b) for b in progress.get("completed_blocks", []))
+    return chr(10).join(
+        [
+            STATUS_BEGIN,
+            "",
+            "### Autonomous progress",
+            "",
+            f"- Updated: {progress.get('updated_at', state.now())}",
+            f"- Completed tasks: {done}",
+            f"- Completed blocks: {blocks}",
+            f"- Next eligible task: {next_task}",
+            "",
+            "Maintained by `services/agentops/reconcile.py`. Edit around this",
+            "block, not inside it.",
+            "",
+            STATUS_END,
+        ]
+    )
+
+
+def update_status_file(root: Path, progress: dict[str, Any], next_task: str) -> bool:
+    path = root / "STATUS.md"
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8")
+    block = render_status_block(progress, next_task)
+
+    if STATUS_BEGIN in text and STATUS_END in text:
+        head, rest = text.split(STATUS_BEGIN, 1)
+        _, tail = rest.split(STATUS_END, 1)
+        updated = head + block + tail
+    else:
+        # First time: append rather than guessing where a human would want it.
+        updated = text.rstrip(chr(10)) + chr(10) * 2 + block + chr(10)
+
+    if updated == text:
+        return False
+    with path.open("w", encoding="utf-8", newline=chr(10)) as handle:
+        handle.write(updated)
+    return True
+
+
 def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     """Mark merged tasks complete, release their leases, and record it."""
     ctx = coordinator.load_context(root)
@@ -128,9 +186,21 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
 
         completed.append({"task_id": task_id, "branch": branch, "how": how})
 
+    status_updated = False
     if completed:
         state.write_json(ctx.paths.tasks, ctx.tasks)
         state.write_json(ctx.paths.progress, ctx.progress)
+
+        # Keep the human checkpoint honest. A worker told to read STATUS.md
+        # would otherwise see merged work still listed as outstanding.
+        fresh = coordinator.load_context(root)
+        candidate = coordinator.next_eligible(fresh)
+        next_task = (
+            f"Task {candidate.task.id} - {candidate.task.title}"
+            if candidate
+            else "none eligible"
+        )
+        status_updated = update_status_file(root, ctx.progress, next_task)
         if repo:
             issue = notify.ensure_feed(ctx.policy, repo=repo)
             for entry in completed:
@@ -147,6 +217,7 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         "checked_at": state.now(),
         "completed": completed,
         "completed_tasks": sorted(state.completed_tasks(ctx.progress)),
+        "status_file_updated": status_updated,
     }
 
 

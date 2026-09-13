@@ -414,6 +414,15 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         leased = held.get("assignment") or {}
         if leased.get("lane") and leased["lane"] != args.lane:
             problems.append(f"the lease assigns lane {leased['lane']}, not {args.lane}")
+        # A manual replay with the exact leased task, lane, model and branch
+        # would otherwise pass. Once a worker has attached its run, the lease
+        # belongs to that run, and the branch concurrency group queues a second
+        # same-branch run rather than rejecting it.
+        attached = held.get("worker_run_id")
+        if attached and args.run_id and str(attached) != str(args.run_id):
+            problems.append(
+                f"the lease is held by worker run {attached}, not {args.run_id}"
+            )
         if args.branch and held.get("branch") and held["branch"] != args.branch:
             problems.append(
                 f"the lease is on branch {held['branch']!r}, not {args.branch!r}"
@@ -815,6 +824,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--lane", required=True)
     verify.add_argument("--model", required=True)
     verify.add_argument("--branch")
+    verify.add_argument("--run-id", dest="run_id")
     verify.set_defaults(func=cmd_verify_assignment)
 
     reviewer = sub.add_parser(

@@ -865,3 +865,73 @@ class TestSixthReviewFindings(unittest.TestCase):
         verify = verify.split(chr(10) + "def ", 1)[0]
         self.assertIn("the lease assigns lane", verify)
         self.assertIn("the lease assigns model", verify)
+
+
+class TestNinthReviewFindings(unittest.TestCase):
+    """Regressions for the ninth review round."""
+
+    def setUp(self) -> None:
+        self.policy = policy()
+
+    def test_status_md_is_kept_current_by_reconciliation(self) -> None:
+        """AGENTS.md makes STATUS.md the human checkpoint.
+
+        Every worker brief tells the worker to read it, so leaving merged work
+        listed as outstanding there would start the next worker from a false
+        picture of the repository.
+        """
+        import shutil
+        import tempfile
+
+        from services.agentops import reconcile
+
+        tmp = tempfile.mkdtemp()
+        root = Path(tmp)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with (root / "STATUS.md").open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write("# Shoulder status\n\nHuman prose.\n")
+
+        progress = {"completed_tasks": [1, 14], "completed_blocks": [1]}
+        self.assertTrue(reconcile.update_status_file(root, progress, "Task 15"))
+        text = (root / "STATUS.md").read_text(encoding="utf-8")
+        self.assertIn("Task 15", text)
+        self.assertIn("Human prose.", text)
+
+    def test_rewriting_it_is_idempotent(self) -> None:
+        import shutil
+        import tempfile
+
+        from services.agentops import reconcile
+
+        tmp = tempfile.mkdtemp()
+        root = Path(tmp)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with (root / "STATUS.md").open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write("# Shoulder status\n")
+
+        progress = {"completed_tasks": [1], "completed_blocks": []}
+        reconcile.update_status_file(root, progress, "Task 2")
+        first = (root / "STATUS.md").read_text(encoding="utf-8")
+        self.assertFalse(reconcile.update_status_file(root, progress, "Task 2"))
+        self.assertEqual(first, (root / "STATUS.md").read_text(encoding="utf-8"))
+        self.assertEqual(first.count(reconcile.STATUS_BEGIN), 1)
+
+    def test_a_replay_cannot_reuse_an_attached_lease(self) -> None:
+        """A manual rerun with the exact leased values would otherwise pass."""
+        from services.agentops import cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        verify = source.split("def cmd_verify_assignment", 1)[1]
+        verify = verify.split(chr(10) + "def ", 1)[0]
+        self.assertIn("is held by worker run", verify)
+
+    def test_the_hand_off_follows_acquisition_not_the_plan(self) -> None:
+        """Acquisition can decline and still exit zero."""
+        from agentops_fixtures import REPO_ROOT as root
+
+        text = (root / ".github/workflows/agentops-coordinator.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("steps.lease.outputs.acquired == 'true'", text)
+        handoff = text.split("Hand the task to its lane", 1)[1]
+        self.assertNotIn("steps.plan.outputs.dispatched", handoff)

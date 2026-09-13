@@ -56,7 +56,7 @@ jobs:
           # A rebase between two state writers can leave conflict markers in a
           # generated file nobody reads by hand. Never commit one.
           uv run --locked python -m services.agentops.cli validate
-          git add ops/state
+          git add ops/state STATUS.md
           if git diff --cached --quiet; then
             echo 'nothing to recover'
             exit 0
