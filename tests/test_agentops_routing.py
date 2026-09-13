@@ -956,3 +956,37 @@ class TestCatalogueHygiene(unittest.TestCase):
                 model_id.startswith("openrouter/"),
                 f"{model_id} is a meta-router, not a model",
             )
+
+
+class TestFloatingAliases(unittest.TestCase):
+    """A qualification verdict must name a fixed model."""
+
+    def test_a_latest_alias_is_not_discoverable(self) -> None:
+        """The model behind `~vendor/x-latest` changes without notice.
+
+        A verdict records behaviour measured once. Letting an alias carry one
+        means the gate can later be satisfied by a model nobody tested. A real
+        run qualified `~deepseek/deepseek-v4-flash-latest` before this rule.
+        """
+        for model_id in (
+            "~deepseek/deepseek-v4-flash-latest",
+            "~anthropic/claude-sonnet-latest",
+        ):
+            with self.subTest(model_id):
+                self.assertIsNone(catalog.normalise({"id": model_id}))
+
+    def test_the_pinned_model_behind_it_is_still_discoverable(self) -> None:
+        pinned = catalog.normalise({"id": "deepseek/deepseek-v4-flash-0731"})
+        self.assertIsNotNone(pinned)
+
+    def test_the_committed_catalogue_holds_no_floating_alias(self) -> None:
+        import json as _json
+        from pathlib import Path as _Path
+
+        ledger = _Path("ops/state/models.json")
+        if not ledger.exists():
+            self.skipTest("no catalogue has been discovered yet")
+        for model_id in _json.loads(ledger.read_text(encoding="utf-8"))["models"]:
+            self.assertFalse(
+                model_id.startswith("~"), f"{model_id} is a floating alias"
+            )

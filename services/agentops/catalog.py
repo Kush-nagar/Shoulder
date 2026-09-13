@@ -33,6 +33,13 @@ EXCLUDED_SUFFIXES = (":batch", ":free", ":extended", ":thinking", ":online")
 # Routing to one would mean the capability class, the qualification verdict and
 # the privacy contract all describe a model that is not the one which runs.
 EXCLUDED_NAMESPACES = ("openrouter",)
+# A `~vendor/model-latest` entry is a floating alias: the model behind it
+# changes when the vendor ships a new one. A qualification verdict names a
+# behaviour that was measured once, so letting an alias carry one means the
+# gate can be satisfied by a model that was never tested. Policy already says
+# an alias may only be used when a change cannot silently violate
+# qualification, and nothing here can detect such a change.
+EXCLUDED_PREFIXES = ("~",)
 
 QualificationState = Literal["CANDIDATE", "QUALIFIED", "QUARANTINED"]
 
@@ -122,6 +129,8 @@ def normalise(
     if not model_id or any(model_id.endswith(s) for s in EXCLUDED_SUFFIXES):
         return None
     if model_id.split("/", 1)[0] in EXCLUDED_NAMESPACES:
+        return None
+    if model_id.startswith(EXCLUDED_PREFIXES):
         return None
 
     params = set(entry.get("supported_parameters") or ())

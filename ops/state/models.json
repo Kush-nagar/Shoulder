@@ -6332,6 +6332,7 @@
       "supports_structured_output": false,
       "supports_tools": true,
       "supports_vision": true
+<<<<<<< HEAD
     },
     "~anthropic/claude-fable-latest": {
       "context_length": 1000000,
@@ -6662,6 +6663,8 @@
       "supports_structured_output": true,
       "supports_tools": true,
       "supports_vision": false
+=======
+>>>>>>> 3e06c46 (Keep floating aliases out, and qualify both selecting lanes)
     }
   },
   "source": "https://openrouter.ai/api/v1/models"
