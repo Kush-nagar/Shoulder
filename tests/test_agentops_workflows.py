@@ -731,3 +731,31 @@ class TestSeventhReviewFindings(unittest.TestCase):
         source = Path(cli.__file__).read_text(encoding="utf-8")
         spend = source.split("def cmd_spend", 1)[1].split(chr(10) + "def ", 1)[0]
         self.assertIn('lane.get("billing") != "api"', spend)
+
+
+class TestEighthReviewFindings(unittest.TestCase):
+    """Regressions for the eighth review round."""
+
+    def test_no_ledger_block_pushes_from_an_unverified_branch(self) -> None:
+        """`set -uo pipefail` has no -e, so a failed checkout kept going.
+
+        The run would stay on the task branch and the push would send that
+        branch's content to the default branch.
+        """
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        for block in text.split("- name:"):
+            if 'git push origin "HEAD:$DEFAULT_BRANCH"' not in block:
+                continue
+            with self.subTest(block.splitlines()[0].strip()[:50]):
+                self.assertIn("refusing to push", block)
+                self.assertIn("git rev-parse --abbrev-ref HEAD", block)
+
+    def test_spend_is_keyed_by_attempt_not_only_by_run(self) -> None:
+        """A re-run keeps GITHUB_RUN_ID and increments GITHUB_RUN_ATTEMPT.
+
+        Keying on the run alone made every attempt after the first look like a
+        duplicate, so a real new provider charge was silently dropped.
+        """
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("GITHUB_RUN_ATTEMPT", text)
+        self.assertNotIn('--once-key "run-${GITHUB_RUN_ID}"', text)

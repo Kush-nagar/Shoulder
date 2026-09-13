@@ -167,8 +167,21 @@ jobs:
           # because attach sets a field rather than accumulating.
           for attempt in 1 2 3 4 5; do
             git fetch origin "$DEFAULT_BRANCH"
-            git checkout -B agentops-attach "origin/$DEFAULT_BRANCH"
+            if ! git checkout -B agentops-attach "origin/$DEFAULT_BRANCH"; then
+              # Usually a dirty tree left by a failed harness. Continuing here
+              # would leave the run on the task branch and push its content to
+              # the default branch.
+              echo 'could not switch to a clean state branch; discarding local edits' >&2
+              git reset --hard
+              git clean -fd -- ops/state
+              git checkout -B agentops-attach "origin/$DEFAULT_BRANCH" || break
+            fi
             git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-attach' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              break
+            fi
 
             uv run --locked python -m services.agentops.cli attach \
               --task "$TASK_ID" --run-id "$GITHUB_RUN_ID"
@@ -297,8 +310,21 @@ jobs:
           # repeat: marking health sets a value rather than accumulating.
           for attempt in 1 2 3 4 5; do
             git fetch origin "$DEFAULT_BRANCH"
-            git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH"
+            if ! git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH"; then
+              # Usually a dirty tree left by a failed harness. Continuing here
+              # would leave the run on the task branch and push its content to
+              # the default branch.
+              echo 'could not switch to a clean state branch; discarding local edits' >&2
+              git reset --hard
+              git clean -fd -- ops/state
+              git checkout -B agentops-state-push "origin/$DEFAULT_BRANCH" || break
+            fi
             git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-state-push' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              break
+            fi
 
             uv run --locked python -m services.agentops.cli health \
               --lane "$LANE" --status DEGRADED \
@@ -378,8 +404,21 @@ jobs:
           # retry would double-count the run against the per-task ceiling.
           for attempt in 1 2 3 4 5; do
             git fetch origin "$DEFAULT_BRANCH"
-            git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH"
+            if ! git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH"; then
+              # Usually a dirty tree left by a failed harness. Continuing here
+              # would leave the run on the task branch and push its content to
+              # the default branch.
+              echo 'could not switch to a clean state branch; discarding local edits' >&2
+              git reset --hard
+              git clean -fd -- ops/state
+              git checkout -B agentops-state-return "origin/$DEFAULT_BRANCH" || break
+            fi
             git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # Belt and braces: never push from anywhere but the branch just made.
+            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-state-return' ]; then
+              echo 'not on the expected state branch; refusing to push' >&2
+              break
+            fi
 
             if [ -n "$number" ]; then
               uv run --locked python -m services.agentops.cli attach \
@@ -388,7 +427,7 @@ jobs:
             if [ "$cost" != '0' ] && [ "$cost" != 'null' ]; then
               uv run --locked python -m services.agentops.cli spend \
                 --lane "$LANE" --usd "$cost" --task "$TASK_ID" \
-                --once-key "run-${GITHUB_RUN_ID}" || true
+                --once-key "run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}" || true
             fi
 
             uv run --locked python -m services.agentops.cli validate || break
