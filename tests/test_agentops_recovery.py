@@ -1138,3 +1138,62 @@ class TestFourteenthReviewFindings(unittest.TestCase):
             ],
             "blocked",
         )
+
+    def test_recovering_a_lease_refreshes_the_human_checkpoint(self) -> None:
+        """The sibling of the blocked-task finding. Recovery puts a task back
+        in the pool, and the watchdog workflow already commits STATUS.md, so
+        without this it commits a checkpoint naming a task a dead worker holds.
+        """
+        import shutil
+        import tempfile
+
+        from agentops_fixtures import REPO_ROOT as source
+
+        from services.agentops import reconcile, watchdog
+
+        tmp = tempfile.mkdtemp()
+        root = Path(tmp)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(source / relative, root / relative)
+        shutil.copy(source / "STATUS.md", root / "STATUS.md")
+
+        ctx = coordinator.load_context(root)
+        candidate = coordinator.next_eligible(ctx)
+        assert candidate is not None
+        # Nothing was ever attached, so liveness is answerable: the owner is
+        # provably gone and the sweep may reclaim the lease.
+        ctx.tasks.setdefault("leases", {})[str(candidate.task.id)] = {
+            "task_id": candidate.task.id,
+            "state": "implementing",
+            "branch": "block-04-t14",
+            "owner": "worker-gone",
+            "attempts": 1,
+            "expires_at": ago(9999),
+            "heartbeat_at": ago(9999),
+        }
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+
+        # Leave the checkpoint saying something recovery must correct.
+        status = root / "STATUS.md"
+        text = status.read_text(encoding="utf-8")
+        head, rest = text.split(reconcile.STATUS_BEGIN, 1)
+        _, tail = rest.split(reconcile.STATUS_END, 1)
+        status.write_text(
+            head
+            + reconcile.STATUS_BEGIN
+            + chr(10)
+            + "- Next eligible task: none eligible"
+            + chr(10)
+            + reconcile.STATUS_END
+            + tail,
+            encoding="utf-8",
+            newline=chr(10),
+        )
+
+        result = watchdog.sweep(root)
+        self.assertTrue(result["recovered"])
+        self.assertTrue(result["status_file_updated"])
+
+        after = status.read_text(encoding="utf-8")
+        self.assertIn(f"Next eligible task: Task {candidate.task.id} ", after)
