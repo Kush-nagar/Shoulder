@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import catalog, coordinator, leases, notify, qualify, routing, state
+from . import catalog, classify, coordinator, leases, notify, qualify, routing, state
 
 
 def _root(args: argparse.Namespace) -> Path:
@@ -93,9 +93,7 @@ def cmd_qualify(args: argparse.Namespace) -> int:
 
     results = []
     for model_id in targets:
-        result = qualify.qualify_model(
-            api_key, model_id, policy, min_pass=args.min_pass
-        )
+        result = qualify.qualify_model(api_key, model_id, policy)
         record = models_state.setdefault("models", {}).setdefault(model_id, {})
         record["qualification"] = result["qualification"]
         record["qualification_evidence"] = {
@@ -115,11 +113,39 @@ def cmd_qualify(args: argparse.Namespace) -> int:
 
 
 def cmd_health(args: argparse.Namespace) -> int:
-    """Mark a lane's health. Used by workers and the watchdog."""
+    """Read lane health, or set it explicitly.
+
+    With --probe, a lane is promoted only when its secret is actually present
+    in the environment. Without this the seeded UNAVAILABLE state would never
+    lift and routing would reject every lane forever.
+    """
     root = _root(args)
     paths = state.Paths(root)
+    policy = state.load_policy(paths)
     providers = state.read_json(paths.providers, {"lanes": {}})
-    if args.lane:
+    changed = False
+
+    if args.probe:
+        for lane_name, lane in policy["lanes"].items():
+            if args.lane and lane_name != args.lane:
+                continue
+            secret = lane["secret"]
+            if os.environ.get(secret):
+                state.mark_provider(
+                    providers,
+                    lane_name,
+                    "AVAILABLE",
+                    reason=f"{secret} is configured",
+                )
+            else:
+                state.mark_provider(
+                    providers,
+                    lane_name,
+                    "UNAVAILABLE",
+                    reason=f"{secret} is not configured",
+                )
+            changed = True
+    elif args.lane:
         state.mark_provider(
             providers,
             args.lane,
@@ -127,8 +153,121 @@ def cmd_health(args: argparse.Namespace) -> int:
             reason=args.reason or "",
             reset_at=args.reset_at,
         )
+        changed = True
+
+    if changed:
         state.write_json(paths.providers, providers)
     return _emit({"provider_health": state.provider_health(providers)})
+
+
+def cmd_spend(args: argparse.Namespace) -> int:
+    """Record API spend against a lane and, when given, a task."""
+    root = _root(args)
+    paths = state.Paths(root)
+    policy = state.load_policy(paths)
+    budget = state.read_json(paths.budget, {"spend": {}})
+    state.record_spend(budget, args.lane, args.usd, task_id=args.task)
+    state.write_json(paths.budget, budget)
+    return _emit(
+        {
+            "lane": args.lane,
+            "recorded_usd": args.usd,
+            "task_total_usd": state.task_spend(budget, args.task)
+            if args.task
+            else None,
+            "budget_blocked": sorted(state.budget_blocked(policy, budget)),
+            "task_budget_exceeded": (
+                state.task_budget_exceeded(policy, budget, args.task)
+                if args.task
+                else False
+            ),
+        }
+    )
+
+
+def cmd_verify_assignment(args: argparse.Namespace) -> int:
+    """Re-derive the policy decision for a task and compare it to the dispatch.
+
+    A worker is handed a lane and a model as workflow inputs, and workflow
+    inputs are caller-controlled. Without this, a hand-dispatched run could
+    pair frontend work with a lane forbidden to write it, or name an
+    unqualified model, and would still be given the secrets. The worker
+    therefore re-checks the hard policies itself rather than trusting what it
+    was told. Exit code 1 means refuse to run.
+    """
+    root = _root(args)
+    ctx = coordinator.load_context(root)
+    task = ctx.backlog.tasks.get(args.task)
+    if task is None:
+        _emit({"ok": False, "reason": f"task {args.task} is not canonical"})
+        return 1
+
+    problems: list[str] = []
+    candidate = coordinator.evaluate(ctx, task)
+    classification = classify.classify(task)
+    lane = ctx.policy["lanes"].get(args.lane)
+
+    if lane is None:
+        problems.append(f"lane {args.lane!r} is not defined in policy")
+    else:
+        if not routing._lane_may_write(lane, classification.category, "implement"):
+            problems.append(
+                f"lane {args.lane} may not implement {classification.category} work"
+            )
+        breach = routing.privacy_violation(ctx.policy, lane)
+        if breach:
+            problems.append(f"lane {args.lane} {breach}")
+
+    if task.gated and not state.gate_passed(ctx.progress):
+        problems.append("task is behind the mandatory real-use gate")
+    if (
+        any(p in task.phase for p in ("Phase D", "Phase E", "Phase F"))
+        and not ctx.policy["autonomy"]["allow_phase_d_and_later"]
+    ):
+        problems.append(f"{task.phase} is not enabled for autonomous execution")
+
+    satisfied, missing = state.dependencies_satisfied(ctx.progress, task.prerequisites)
+    if not satisfied:
+        problems.append(f"prerequisites not complete: {missing}")
+
+    # The model must be one the catalogue actually qualified for this lane.
+    qualified = {
+        model_id
+        for model_id, record in ctx.models_state.get("models", {}).items()
+        if record.get("qualification") in ctx.policy["qualification"]["required_states"]
+        and record.get("lane") == args.lane
+        and not record.get("absent")
+    }
+    harness_names = {
+        record.get("harness_model")
+        for model_id, record in ctx.models_state.get("models", {}).items()
+        if model_id in qualified
+    }
+    if args.model not in qualified and args.model not in harness_names:
+        problems.append(
+            f"model {args.model!r} is not a qualified model of lane {args.lane}"
+        )
+
+    if state.task_budget_exceeded(ctx.policy, ctx.budget, task.id):
+        problems.append("per-task budget is already exhausted")
+
+    if not state.autonomy_enabled(ctx.policy):
+        problems.append("AUTONOMY_ENABLED is false")
+
+    _emit(
+        {
+            "ok": not problems,
+            "task": task.id,
+            "title": task.title,
+            "category": classification.category,
+            "complexity": classification.complexity,
+            "lane": args.lane,
+            "model": args.model,
+            "eligible": candidate.eligible,
+            "problems": problems,
+        }
+    )
+    return 0 if not problems else 1
 
 
 def cmd_dispatch(args: argparse.Namespace) -> int:
@@ -219,10 +358,14 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_cmd.add_argument("--model", action="append")
     qualify_cmd.add_argument("--lane")
     qualify_cmd.add_argument("--limit", type=int, default=3)
-    qualify_cmd.add_argument("--min-pass", type=int, default=None)
     qualify_cmd.set_defaults(func=cmd_qualify)
 
     health = sub.add_parser("health", help="read or set provider health")
+    health.add_argument(
+        "--probe",
+        action="store_true",
+        help="promote lanes whose secret is present, demote those without",
+    )
     health.add_argument("--lane")
     health.add_argument("--status", default="AVAILABLE")
     health.add_argument("--reason")
@@ -232,6 +375,21 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch = sub.add_parser("dispatch", help="assign the next task to a worker")
     dispatch.add_argument("--owner", default="coordinator")
     dispatch.set_defaults(func=cmd_dispatch)
+
+    verify = sub.add_parser(
+        "verify-assignment",
+        help="re-check a dispatched assignment against policy; exit 1 to refuse",
+    )
+    verify.add_argument("--task", type=int, required=True)
+    verify.add_argument("--lane", required=True)
+    verify.add_argument("--model", required=True)
+    verify.set_defaults(func=cmd_verify_assignment)
+
+    spend = sub.add_parser("spend", help="record API spend for a lane")
+    spend.add_argument("--lane", required=True)
+    spend.add_argument("--usd", type=float, required=True)
+    spend.add_argument("--task", type=int)
+    spend.set_defaults(func=cmd_spend)
 
     feed = sub.add_parser("notify", help="post one milestone to the activity feed")
     feed.add_argument("kind")

@@ -6,11 +6,19 @@ name: AgentOps Coordinator
 # Continuation is event-driven: a merge to main runs the coordinator
 # immediately, so healthy tasks follow one another without waiting for a cron
 # tick. The watchdog exists only for recovery.
+#
+# As in the worker, nothing reaches a shell through ${{ }}. Every value a
+# run: block uses arrives as an environment variable.
 
 on:
   push:
     branches: [main]
     paths-ignore:
+      # This workflow commits ops/state to main. Without ignoring it, its own
+      # state commit retriggers it, and because the catalogue refresh rewrites
+      # timestamps on every run, each run would push again and start another
+      # coordinator -- an unbounded loop, even with autonomy disabled.
+      - 'ops/state/**'
       - 'docs/**'
       - '**/*.md'
   workflow_dispatch:
@@ -23,9 +31,11 @@ on:
     types: [agentops-continue]
 
 concurrency:
-  # One coordinator at a time. Two coordinators could hand the same task to two
-  # writers before either lease is written.
-  group: agentops-coordinator
+  # One writer of ops/state at a time. This group is shared with the watchdog:
+  # both push the ledger to main, and interleaving them loses a lease recovery
+  # or fails the push outright. It also keeps two coordinators from handing the
+  # same task to two workers before either lease is written.
+  group: agentops-state
   cancel-in-progress: false
 
 permissions: {}
@@ -34,12 +44,15 @@ jobs:
   coordinate:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write      # commit the orchestrator state ledger
-      issues: write        # post to the activity feed
-      actions: write       # dispatch the worker workflow
-    outputs:
-      dispatched: ${{ steps.plan.outputs.dispatched }}
-      task_id: ${{ steps.plan.outputs.task_id }}
+      contents: write # commit the orchestrator state ledger
+      issues: write # post to the activity feed
+      actions: write # dispatch the worker workflow
+    env:
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+      FORCE_PLAN_ONLY: ${{ inputs.force_plan_only }}
+      RUN_ID: ${{ github.run_id }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -51,13 +64,20 @@ jobs:
           python-version: '3.11.16'
 
       - name: Refresh the model catalogue
+        continue-on-error: true
         run: uv run --locked python -m services.agentops.cli discover
+
+      - name: Probe provider health
+        # Lanes are seeded UNAVAILABLE. This is what lifts one once its secret
+        # exists, so routing has something to choose from.
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: uv run --locked python -m services.agentops.cli health --probe
 
       - name: Plan the next task
         id: plan
-        env:
-          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli plan > plan.json
@@ -68,21 +88,19 @@ jobs:
           enabled="$(jq -r '.autonomy_enabled' plan.json)"
 
           echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
-          if [ "$enabled" != "true" ] || [ -n "$blocked" ] || [ -z "$task_id" ] \
-             || [ "${{ inputs.force_plan_only }}" = "true" ]; then
-            echo "dispatched=false" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != 'true' ] || [ -n "$blocked" ] || [ -z "$task_id" ] \
+             || [ "${FORCE_PLAN_ONLY:-false}" = 'true' ]; then
+            echo 'dispatched=false' >> "$GITHUB_OUTPUT"
           else
-            echo "dispatched=true" >> "$GITHUB_OUTPUT"
+            echo 'dispatched=true' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Take the task lease
         if: steps.plan.outputs.dispatched == 'true'
-        env:
-          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli dispatch \
-            --owner "run-${{ github.run_id }}" > dispatch.json
+            --owner "run-${RUN_ID}" > dispatch.json
           cat dispatch.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit the state ledger
@@ -97,12 +115,12 @@ jobs:
             exit 0
           fi
           git commit -m 'Update the agentops state ledger'
+          # Another state writer may have landed while this run worked.
+          git pull --rebase --autostash origin main
           git push origin HEAD:main
 
       - name: Dispatch the worker
         if: steps.plan.outputs.dispatched == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh workflow run agentops-worker.yml \
@@ -116,21 +134,23 @@ jobs:
         # Runs even when planning failed, so it must not assume plan.json exists.
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
+          DISPATCHED: ${{ steps.plan.outputs.dispatched }}
+          TASK_ID: ${{ steps.plan.outputs.task_id }}
         run: |
           set -uo pipefail
           kind=blocked
           headline='Coordinator did not dispatch'
           details='{}'
-          if [ "${{ steps.plan.outputs.dispatched }}" = 'true' ]; then
+          if [ "${DISPATCHED:-false}" = 'true' ]; then
             kind=start
-            headline="Task ${{ steps.plan.outputs.task_id }} dispatched"
+            headline="Task ${TASK_ID} dispatched"
           fi
           if [ -s plan.json ]; then
-            details="$(jq -c '{task: .task_id, title: .task_title, lane: .writer.lane,
-              model: .writer.model, effort: .writer.effort, reviewer: .reviewer.lane,
-              reason: .blocked_reason}' plan.json)" || details='{}'
+            details="$(jq -c '{task: .task_id, title: .task_title,
+              lane: .writer.lane, model: .writer.model, effort: .writer.effort,
+              reviewer: .reviewer.lane, reason: .blocked_reason}' plan.json)" \
+              || details='{}'
           fi
           uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
-            --details "$details" \
-            --repo '${{ github.repository }}' || echo 'activity feed unavailable'
+            --details "$details" --repo "$REPO" \
+            || echo 'activity feed unavailable'

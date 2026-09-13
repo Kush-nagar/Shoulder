@@ -75,12 +75,30 @@ def evaluate(ctx: Context, task: backlog_mod.Task) -> Candidate:
     if task.id in done:
         return Candidate(task, block, False, [], ["already complete"])
 
+    # A task someone is already working on is not a candidate. Without this,
+    # planning and dispatch disagree and the lease conflict is what surfaces
+    # the problem, one step too late.
+    for lease in leases.active_leases(ctx.tasks, ctx.policy):
+        if int(lease.get("task_id", -1)) == task.id:
+            return Candidate(
+                task,
+                block,
+                False,
+                [],
+                [f"already leased by {lease.get('owner')}"],
+            )
+
     satisfied, missing = state.dependencies_satisfied(ctx.progress, task.prerequisites)
     if not satisfied:
         reasons.append(f"prerequisites not complete: {missing}")
 
     if task.gated and not state.gate_passed(ctx.progress):
         reasons.append("mandatory real-use gate has not passed")
+
+    if state.task_budget_exceeded(ctx.policy, ctx.budget, task.id):
+        spent = state.task_spend(ctx.budget, task.id)
+        ceiling = ctx.policy["budget"]["per_task_usd"]
+        reasons.append(f"per-task budget exhausted: ${spent} of ${ceiling}")
 
     # Phase D and later contain the machine-learning work that AGENTS.md rule 5
     # forbids before the gate. The coordinator never starts them on its own.

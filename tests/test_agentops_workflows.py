@@ -123,13 +123,82 @@ class TestWorkflowPermissions(unittest.TestCase):
         self.assertIn("concurrency:", text)
         self.assertIn("group: agentops-worker-${{ inputs.branch }}", text)
 
-    def test_coordinator_is_serialised(self) -> None:
+    def test_state_writers_share_one_serialised_group(self) -> None:
+        """Coordinator and watchdog both push ops/state to main.
+
+        Separate groups let them interleave, which loses a lease recovery or
+        fails the push outright.
+        """
+        for name in ("agentops-coordinator.yml", "agentops-watchdog.yml"):
+            with self.subTest(name):
+                text = read(WORKFLOW_DIR / name)
+                self.assertIn("group: agentops-state", text)
+                self.assertIn("cancel-in-progress: false", text)
+
+    def test_the_coordinator_does_not_retrigger_itself(self) -> None:
+        """It commits ops/state to main; without ignoring that path it loops."""
         text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
-        self.assertIn("group: agentops-coordinator", text)
-        self.assertIn("cancel-in-progress: false", text)
+        self.assertIn("- 'ops/state/**'", text)
+
+    def test_state_pushes_rebase_before_pushing(self) -> None:
+        for name in ("agentops-coordinator.yml", "agentops-watchdog.yml"):
+            with self.subTest(name):
+                self.assertIn("git pull --rebase", read(WORKFLOW_DIR / name))
+
+    def test_the_worker_rechecks_its_assignment(self) -> None:
+        """Dispatch inputs are caller-controlled, so policy is re-derived."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("verify-assignment", text)
+
+    def test_provider_health_is_probed_before_planning(self) -> None:
+        """Lanes are seeded UNAVAILABLE; something has to lift them."""
+        text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
+        self.assertIn("health --probe", text)
+
+
+def shell_interpolations(text: str) -> list[tuple[int, str]]:
+    """Lines inside a `run:` block that contain a ${{ }} expression."""
+    found: list[tuple[int, str]] = []
+    inside = False
+    indent = 0
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if re.match(r"^-?\s*run:\s*\|?", stripped) and "run:" in stripped:
+            inside = True
+            indent = len(line) - len(line.lstrip())
+            continue
+        if not inside:
+            continue
+        if stripped and (len(line) - len(line.lstrip())) <= indent:
+            inside = False
+        elif "${{" in line:
+            found.append((number, stripped))
+    return found
 
 
 class TestWorkflowSecretHygiene(unittest.TestCase):
+    def test_no_expression_is_interpolated_into_a_shell(self) -> None:
+        """44. Uncontrolled shell interpolation.
+
+        GitHub substitutes ${{ }} textually before the shell sees it, so a
+        crafted input could inject a command. Every value a run: block uses
+        must arrive as an environment variable instead. Checking the rule
+        rather than each case keeps it verifiable at a glance.
+        """
+        for path in AGENTOPS_WORKFLOWS:
+            with self.subTest(path.name):
+                self.assertEqual(
+                    shell_interpolations(read(path)),
+                    [],
+                    "pass these through env: instead",
+                )
+
+    def test_dispatch_inputs_are_validated_before_use(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("Validate the dispatch inputs", text)
+        for guarded in ("$TASK_ID", "$BRANCH", "$MODEL"):
+            self.assertIn(guarded, text)
+
     def test_secrets_are_referenced_only_through_the_secrets_context(self) -> None:
         literal = re.compile(r"(sk-or-v1-|sk-proj-|ghp_|github_pat_)")
         for path in AGENTOPS_WORKFLOWS:

@@ -9,6 +9,10 @@ name: AgentOps Worker
 #                        endpoint, for cheap backend overflow
 #   codex_api            Codex CLI, the only lane permitted to write frontend
 #                        code under project policy
+#
+# Dispatch inputs never reach a shell through ${{ }}. That substitution is
+# textual, so a crafted branch name would inject a command; every run: block
+# reads a job-level environment variable, and the inputs are validated first.
 
 on:
   workflow_dispatch:
@@ -43,8 +47,8 @@ permissions: {}
 jobs:
   guard:
     runs-on: ubuntu-24.04
-    # No checkout and no permissions: this job only reads a repository variable.
-    # Granting it nothing means the kill switch cannot be the thing that leaks.
+    # No checkout and no permissions: this job only reads a repository
+    # variable, so the kill switch itself cannot be what leaks access.
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
     steps:
@@ -53,7 +57,7 @@ jobs:
           AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
         run: |
           set -euo pipefail
-          if [ "${AUTONOMY_ENABLED:-false}" = "true" ]; then
+          if [ "${AUTONOMY_ENABLED:-false}" = 'true' ]; then
             echo 'allowed=true' >> "$GITHUB_OUTPUT"
           else
             echo 'allowed=false' >> "$GITHUB_OUTPUT"
@@ -74,39 +78,69 @@ jobs:
       actions: read
     env:
       NEXT_TELEMETRY_DISABLED: '1'
+      TASK_ID: ${{ inputs.task_id }}
+      LANE: ${{ inputs.lane }}
+      MODEL: ${{ inputs.model }}
+      EFFORT: ${{ inputs.effort }}
+      BRANCH: ${{ inputs.branch }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+
+      - name: Validate the dispatch inputs
+        run: |
+          set -euo pipefail
+          case "$TASK_ID" in
+            ''|*[!0-9]*) echo 'task_id must be a number' >&2; exit 1 ;;
+          esac
+          case "$BRANCH" in
+            ''|-*|*[!A-Za-z0-9._/-]*)
+              echo 'branch name contains something unsafe' >&2; exit 1 ;;
+          esac
+          case "$MODEL" in
+            ''|-*|*[!A-Za-z0-9._/:-]*)
+              echo 'model slug contains something unsafe' >&2; exit 1 ;;
+          esac
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Re-check the assignment against policy
+        # Dispatch inputs are caller-controlled. The worker re-derives the
+        # policy decision itself rather than trusting what it was handed, so a
+        # hand-dispatched run cannot pair frontend work with a lane forbidden
+        # to write it, name an unqualified model, or reach past the gate.
+        run: |
+          set -euo pipefail
+          uv run --locked python -m services.agentops.cli verify-assignment \
+            --task "$TASK_ID" --lane "$LANE" --model "$MODEL"
 
       - name: Create the task branch
         run: |
           set -euo pipefail
           git config user.name 'shoulder-agentops[bot]'
           git config user.email 'shoulder-agentops@users.noreply.github.com'
-          git checkout -B '${{ inputs.branch }}'
+          git checkout -B "$BRANCH"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          version: '0.12.10'
-          python-version: '3.11.16'
 
       - name: Install locked dependencies
         run: |
+          set -euo pipefail
           npm install --global pnpm@11.25.0
           pnpm install --frozen-lockfile
           uv sync --locked
 
       - name: Build the task brief
-        id: brief
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.brief \
-            --task '${{ inputs.task_id }}' --out brief.md
-          echo "path=brief.md" >> "$GITHUB_OUTPUT"
+            --task "$TASK_ID" --out brief.md
 
       # --- Claude lane: the Claude subscription pays for this one -----------
       - name: Implement with Claude
@@ -151,38 +185,43 @@ jobs:
       - name: Push the branch and open a pull request
         env:
           GH_TOKEN: ${{ github.token }}
+          GATE: ${{ steps.gate.outcome }}
         run: |
           set -euo pipefail
+          rm -f brief.md
           if git diff --quiet HEAD -- . ':!ops/state'; then
             echo 'The worker produced no change.' >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          rm -f brief.md
           git add -A
-          git commit -m 'Task ${{ inputs.task_id }}: autonomous implementation' || true
-          git push --force-with-lease origin '${{ inputs.branch }}'
-          gh pr create \
-            --base main \
-            --head '${{ inputs.branch }}' \
-            --title 'Task ${{ inputs.task_id }}: autonomous implementation' \
-            --body "$(printf '%s\n' \
-              'Autonomous implementation of canonical Task ${{ inputs.task_id }}.' \
-              '' \
-              '- lane: `${{ inputs.lane }}`' \
-              '- model: `${{ inputs.model }}`' \
-              '- effort: `${{ inputs.effort }}`' \
-              '- quality gate: `${{ steps.gate.outcome }}`' \
-              '' \
-              'Independent review and green CI are required before merge.')" \
+          git commit -m "Task $TASK_ID: autonomous implementation" || true
+          git push --force-with-lease origin "$BRANCH"
+          body="$(printf '%s\n' \
+            "Autonomous implementation of canonical Task $TASK_ID." \
+            '' \
+            "- lane: $LANE" \
+            "- model: $MODEL" \
+            "- effort: $EFFORT" \
+            "- quality gate: $GATE" \
+            '' \
+            'Independent review and green CI are required before merge.')"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Task $TASK_ID: autonomous implementation" \
+            --body "$body" \
             || echo 'a pull request already exists for this branch'
 
-      - name: Record the checkpoint and report
+      - name: Report to the activity feed
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          GATE: ${{ steps.gate.outcome }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          details="$(jq -nc \
+            --arg lane "$LANE" --arg model "$MODEL" --arg effort "$EFFORT" \
+            --arg branch "$BRANCH" --arg gate "$GATE" \
+            '{lane: $lane, model: $model, effort: $effort, branch: $branch, gate: $gate}')"
           uv run --locked python -m services.agentops.cli notify verify \
-            'Task ${{ inputs.task_id }} worker finished' \
-            --details '{"lane":"${{ inputs.lane }}","model":"${{ inputs.model }}","effort":"${{ inputs.effort }}","gate":"${{ steps.gate.outcome }}","branch":"${{ inputs.branch }}"}' \
-            --repo '${{ github.repository }}' || echo 'activity feed unavailable'
+            "Task $TASK_ID worker finished" \
+            --details "$details" \
+            --repo "$GITHUB_REPOSITORY" || echo 'activity feed unavailable'

@@ -140,6 +140,24 @@ def eligible_models(
     )
 
 
+def privacy_violation(policy: dict[str, Any], lane: dict[str, Any]) -> str | None:
+    """Why this lane fails the privacy contract, or None if it satisfies it.
+
+    Shoulder handles minors' data, so the contract is a filter rather than a
+    preference: a lane that does not declare it is ineligible at any price. A
+    lane missing the declaration fails closed, which is why the default is
+    False rather than "assume fine".
+    """
+    required = policy["privacy"]
+    if required.get("require_zero_data_retention") and not lane.get(
+        "zero_data_retention", False
+    ):
+        return "does not declare zero data retention"
+    if required.get("deny_data_collection") and lane.get("data_collection") != "deny":
+        return "does not deny provider data collection"
+    return None
+
+
 def _ordered_lanes(policy: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     return sorted(policy["lanes"].items(), key=lambda kv: kv[1]["priority"])
 
@@ -172,6 +190,10 @@ def select(
             continue
         if exclude_family and lane["provider"] == exclude_family:
             rejections.append(f"{lane_name}: same provider family as the writer")
+            continue
+        privacy_failure = privacy_violation(inputs.policy, lane)
+        if privacy_failure:
+            rejections.append(f"{lane_name}: {privacy_failure}")
             continue
         health = inputs.provider_health.get(lane_name, "AVAILABLE")
         if health not in USABLE_HEALTH:

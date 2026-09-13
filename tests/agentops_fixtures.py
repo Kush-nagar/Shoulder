@@ -42,7 +42,7 @@ def model(
         id=model_id,
         lane=lane,
         family=model_id.split("/", 1)[0],
-        harness_model=model_id.split("/", 1)[-1],
+        harness_model=catalog._harness_model(model_id, model_id.split("/", 1)[0]),
         context_length=context,
         max_output_tokens=32_000,
         input_usd_per_mtok=price_in,

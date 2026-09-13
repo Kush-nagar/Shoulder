@@ -186,11 +186,37 @@ def budget_blocked(policy: dict[str, Any], budget: dict[str, Any]) -> frozenset[
     return frozenset(blocked)
 
 
-def record_spend(budget: dict[str, Any], lane: str, usd: float) -> dict[str, Any]:
+def record_spend(
+    budget: dict[str, Any], lane: str, usd: float, *, task_id: int | None = None
+) -> dict[str, Any]:
+    """Add spend to the daily, monthly, and per-task buckets."""
     day, month = _period_keys()
     spend = budget.setdefault("spend", {})
     for bucket, key in (("daily", day), ("monthly", month)):
         period = spend.setdefault(bucket, {}).setdefault(key, {})
         period[lane] = round(float(period.get(lane, 0.0)) + float(usd), 6)
+    if task_id is not None:
+        tasks = spend.setdefault("per_task", {}).setdefault(str(task_id), {})
+        tasks[lane] = round(float(tasks.get(lane, 0.0)) + float(usd), 6)
     budget["updated_at"] = now()
     return budget
+
+
+def task_spend(budget: dict[str, Any], task_id: int) -> float:
+    """Total recorded across every lane for one task."""
+    recorded = budget.get("spend", {}).get("per_task", {}).get(str(task_id), {})
+    return round(sum(float(v) for v in recorded.values()), 6)
+
+
+def task_budget_exceeded(
+    policy: dict[str, Any], budget: dict[str, Any], task_id: int
+) -> bool:
+    """Whether this task has already used its own ceiling.
+
+    Checked before dispatch as well as during a run, so a task that burned its
+    allowance across several attempts is not handed another worker.
+    """
+    ceiling = float(policy["budget"].get("per_task_usd", 0.0))
+    if ceiling <= 0:
+        return False
+    return task_spend(budget, task_id) >= ceiling

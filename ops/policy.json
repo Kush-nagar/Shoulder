@@ -18,7 +18,10 @@
       "$comment": "AGENTS-level project policy: Claude is never the frontend implementation writer.",
       "may_write_backend": true,
       "may_review": true,
-      "priority": 1
+      "priority": 1,
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "Anthropic commercial terms: prompts are not used for training."
     },
     "codex_api": {
       "provider": "openai",
@@ -29,7 +32,10 @@
       "may_write_backend": true,
       "may_review": true,
       "priority": 2,
-      "$comment": "openai/codex-action@v1 authenticates with an API key only; ChatGPT subscription auth is not available to GitHub Actions. This lane therefore bills the OpenAI API."
+      "$comment": "openai/codex-action@v1 authenticates with an API key only; ChatGPT subscription auth is not available to GitHub Actions. This lane therefore bills the OpenAI API.",
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "OpenAI API platform terms: API data is not used for training by default."
     },
     "openrouter": {
       "provider": "openrouter",
@@ -41,7 +47,10 @@
       "$comment": "DeepSeek and other OpenRouter models are not permitted to write Shoulder frontend code under current project policy.",
       "may_write_backend": true,
       "may_review": true,
-      "priority": 3
+      "priority": 3,
+      "zero_data_retention": true,
+      "data_collection": "deny",
+      "privacy_basis": "Enforced per request via provider.zdr and provider.data_collection=deny."
     }
   },
   "capability_classes": {
@@ -155,7 +164,7 @@
     "openai_daily_usd": 5.0,
     "openai_monthly_usd": 40.0,
     "per_task_usd": 3.0,
-    "$comment": "Conservative starting ceilings chosen because the repository had no prior value. Raising them is a deliberate human edit; the orchestrator never raises a ceiling by itself."
+    "$comment": "Conservative starting ceilings chosen because the repository had no prior value. Raising them is a deliberate human edit; the orchestrator never raises a ceiling by itself. per_task_usd is checked before dispatch and again as spend is recorded."
   },
   "qualification": {
     "required_states": ["QUALIFIED"],

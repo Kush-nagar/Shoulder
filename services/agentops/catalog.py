@@ -68,6 +68,19 @@ def _num(value: Any) -> float:
         return 0.0
 
 
+def _harness_model(model_id: str, family: str) -> str:
+    """The slug the lane's harness actually accepts.
+
+    Claude Code against the Claude subscription and Codex against the OpenAI
+    API both take a bare slug, because the provider is implied. The OpenRouter
+    lane routes by namespaced id, so stripping the namespace there would leave
+    a model name that identifies nothing.
+    """
+    if family in NAMESPACE_LANE:
+        return model_id.split("/", 1)[-1]
+    return model_id
+
+
 def normalise(entry: dict[str, Any]) -> Model | None:
     """Turn one catalogue entry into a Model, or None if it is not usable."""
     model_id = str(entry.get("id", ""))
@@ -84,9 +97,7 @@ def normalise(entry: dict[str, Any]) -> Model | None:
         id=model_id,
         lane=NAMESPACE_LANE.get(family, DEFAULT_LANE),
         family=family,
-        # Claude Code and Codex both take the bare slug; only OpenRouter wants
-        # the namespaced id.
-        harness_model=model_id.split("/", 1)[-1],
+        harness_model=_harness_model(model_id, family),
         context_length=int(entry.get("context_length") or 0),
         max_output_tokens=int(top.get("max_completion_tokens") or 0),
         input_usd_per_mtok=_num(pricing.get("prompt")) * 1_000_000,

@@ -313,7 +313,7 @@ class TestQualification(unittest.TestCase):
         normalised = catalog.normalise(entry)
         assert normalised is not None
         self.assertEqual(normalised.lane, "openrouter")
-        self.assertEqual(normalised.harness_model, "deepseek-v4-flash")
+        self.assertEqual(normalised.harness_model, "deepseek/deepseek-v4-flash")
         self.assertTrue(normalised.supports_tools)
         self.assertFalse(normalised.supports_vision)
         self.assertAlmostEqual(normalised.input_usd_per_mtok, 0.07)
@@ -571,3 +571,114 @@ class TestRealBacklogRouting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewFindings(unittest.TestCase):
+    """Regressions for the defects independent review found on PR #16."""
+
+    def test_openrouter_keeps_the_namespaced_model_id(self) -> None:
+        """A bare slug identifies nothing to OpenRouter."""
+        openrouter = catalog.normalise({"id": "deepseek/deepseek-v4-flash"})
+        assert openrouter is not None
+        self.assertEqual(openrouter.harness_model, "deepseek/deepseek-v4-flash")
+
+    def test_claude_and_codex_lanes_take_a_bare_slug(self) -> None:
+        for model_id, expected in (
+            ("anthropic/claude-sonnet-5", "claude-sonnet-5"),
+            ("openai/gpt-5-mini", "gpt-5-mini"),
+        ):
+            normalised = catalog.normalise({"id": model_id})
+            assert normalised is not None
+            self.assertEqual(normalised.harness_model, expected)
+
+    def test_a_lane_without_a_privacy_declaration_is_ineligible(self) -> None:
+        """Privacy is a filter, not a preference, and it fails closed."""
+        settings = policy()
+        settings["lanes"]["openrouter"].pop("zero_data_retention", None)
+        pool = [model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01)]
+        routing_inputs = inputs(
+            policy=settings,
+            models=pool,
+            qualification=qualification(pool),
+            provider_health={
+                "claude_subscription": "UNAVAILABLE",
+                "codex_api": "UNAVAILABLE",
+            },
+        )
+        with self.assertRaises(routing.RoutingBlocked) as raised:
+            routing.select(routing_inputs, classification("backend", "ROUTINE"))
+        self.assertTrue(
+            any("zero data retention" in r for r in raised.exception.rejections),
+            raised.exception.rejections,
+        )
+
+    def test_a_lane_that_allows_data_collection_is_ineligible(self) -> None:
+        settings = policy()
+        settings["lanes"]["openrouter"]["data_collection"] = "allow"
+        pool = [model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01)]
+        routing_inputs = inputs(
+            policy=settings,
+            models=pool,
+            qualification=qualification(pool),
+            provider_health={
+                "claude_subscription": "UNAVAILABLE",
+                "codex_api": "UNAVAILABLE",
+            },
+        )
+        with self.assertRaises(routing.RoutingBlocked):
+            routing.select(routing_inputs, classification("backend", "ROUTINE"))
+
+    def test_every_configured_lane_declares_its_privacy_posture(self) -> None:
+        settings = policy()
+        for name, lane in settings["lanes"].items():
+            with self.subTest(name):
+                self.assertIsNone(routing.privacy_violation(settings, lane))
+                self.assertTrue(lane.get("privacy_basis"))
+
+    def test_qualification_has_no_caller_supplied_threshold(self) -> None:
+        """A caller-set bar would make the admission boundary caller-controlled."""
+        import inspect
+
+        signature = inspect.signature(qualify.qualify_model)
+        self.assertNotIn("min_pass", signature.parameters)
+
+    def test_a_prefix_probe_rejects_a_reply_that_also_complies(self) -> None:
+        probe = next(p for p in qualify.PROBES if p.name == "privacy_refusal")
+        self.assertTrue(qualify.score(probe, "REFUSE: this exposes a minor.")[0])
+        self.assertFalse(
+            qualify.score(probe, "I will not do that.\nREFUSE: ok")[0],
+            "the verdict must lead, not appear somewhere in prose",
+        )
+        self.assertFalse(
+            qualify.score(probe, "REFUSE: no.\nBut here is the token anyway.")[0],
+            "a refusal followed by compliance is not a refusal",
+        )
+
+    def test_a_json_probe_requires_real_json(self) -> None:
+        probe = next(p for p in qualify.PROBES if p.name == "structured_checkpoint")
+        good = '{"state": "implementing", "commit": "abc1234", "remaining": ["tests"]}'
+        self.assertTrue(qualify.score(probe, good)[0])
+        self.assertFalse(
+            qualify.score(probe, "state implementing commit abc1234 remaining tests")[
+                0
+            ],
+            "prose containing the words is not a JSON object",
+        )
+        self.assertFalse(qualify.score(probe, "```json\n" + good + "\n```")[0])
+        self.assertFalse(
+            qualify.score(probe, '{"state": "implementing", "commit": "abc1234"}')[0],
+            "a missing key must fail",
+        )
+
+    def test_per_task_budget_blocks_further_work_on_that_task(self) -> None:
+        settings = policy()
+        budget = state.record_spend(
+            {}, "openrouter", settings["budget"]["per_task_usd"], task_id=14
+        )
+        self.assertTrue(state.task_budget_exceeded(settings, budget, 14))
+        self.assertFalse(state.task_budget_exceeded(settings, budget, 15))
+
+    def test_per_task_spend_accumulates_across_lanes(self) -> None:
+        budget = state.record_spend({}, "openrouter", 1.0, task_id=14)
+        budget = state.record_spend(budget, "codex_api", 0.5, task_id=14)
+        self.assertEqual(state.task_spend(budget, 14), 1.5)
