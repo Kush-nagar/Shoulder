@@ -13,12 +13,12 @@ against Git and GitHub before editing anything.
 | Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11–13, PR #13, `dab524f`) |
 | Current block | none active; Block 03 is merged |
 | Current worker / branch | none active |
-| Open PRs | this status sync only |
+| Open PRs | none |
 | Database revision | `0006_media_playback` locally; `Shoulder Dev` is still on `0005_video_ingest` |
 | Last full verification | 2026-09-12 on `dab524f`: PR #13 CI green on its final HEAD (`af2d782`), all three browser engines passing locally including Firefox, 340 Python tests, 36 Node tests, migration `0006` up/down/up, and the full-length playback budgets measured as passing |
 | Blockers | none that require a human |
-| Bootstrap blocker | **Owner credentials and account connections.** Everything automatable is done; see "Autonomous build system" below for the exact four items. |
-| Next action | **`AGENTOPS_BOOTSTRAP` is implemented and awaiting owner setup.** Autonomy is disabled (`AUTONOMY_ENABLED=false`); the coordinator dry-runs to Task 14 but dispatches nothing. Do not start Block 04 by hand. |
+| Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
+| Next action | **`AGENTOPS_BOOTSTRAP` is verified and merged; the system is ready for autonomy but idle.** Autonomy is disabled (`AUTONOMY_ENABLED=false`), so the coordinator dry-runs to Task 14 and dispatches nothing. Release evidence: `docs/agentops-bootstrap-verification.md`. Starting Block 04 needs one deliberate action by the owner; do not start it by hand. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
