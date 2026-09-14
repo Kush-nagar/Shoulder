@@ -19,6 +19,7 @@ export type GamePage = Schema["GamePage"];
 export type VideoSummary = Schema["VideoSummary"];
 export type PlaybackUrl = Schema["PlaybackUrl"];
 export type Timeline = Schema["Timeline"];
+export type Observation = Schema["Observation"];
 export type InviteResult = Schema["InviteResult"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */
@@ -132,6 +133,19 @@ export async function fetchGoals(
   playerId: string,
 ): Promise<Goal[] | null> {
   return (await request<Goal[]>(token, `/v1/players/${playerId}/goals`)).data;
+}
+
+export async function fetchObservations(
+  token: string,
+  videoId: string,
+  playerId: string,
+): Promise<Observation[] | null> {
+  return (
+    await request<Observation[]>(
+      token,
+      `/v1/videos/${videoId}/observations?player_id=${encodeURIComponent(playerId)}`,
+    )
+  ).data;
 }
 
 export function apiWrite<T>(

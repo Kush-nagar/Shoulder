@@ -11,14 +11,14 @@ against Git and GitHub before editing anything.
 |---|---|
 | Last verified `main` | `dab524f9c75c3e8dfac430422f717e57ef61985f` |
 | Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11–13, PR #13, `dab524f`) |
-| Current block | none active; Block 03 is merged |
-| Current worker / branch | none active |
-| Open PRs | none |
-| Database revision | `0006_media_playback` locally; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-12 on `dab524f`: PR #13 CI green on its final HEAD (`af2d782`), all three browser engines passing locally including Firefox, 340 Python tests, 36 Node tests, migration `0006` up/down/up, and the full-length playback budgets measured as passing |
+| Current block | Block 04, Task 14 implementation complete; awaiting review and merge |
+| Current worker / branch | Codex / `block-04-t14-manual-clip-marking` |
+| Open PRs | #21 — Task 14: Manual clip marking |
+| Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | 2026-09-13 on the Task 14 branch: `scripts/check.ps1` passed; 672 database-enabled Python tests passed (one intentional 2 GB skip); 41 Node tests passed; 6 Task 14 marking and 12 coach-playback regression cases passed across Chromium, Firefox, and WebKit; PR CI pending the final push |
 | Blockers | none that require a human |
 | Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | **`AGENTOPS_BOOTSTRAP` is verified and merged; the system is ready for autonomy but idle.** Autonomy is disabled (`AUTONOMY_ENABLED=false`), so the coordinator dry-runs to Task 14 and dispatches nothing. Release evidence: `docs/agentops-bootstrap-verification.md`. Starting Block 04 needs one deliberate action by the owner; do not start it by hand. |
+| Next action | Review and merge PR #21 after its final checks pass. Do not begin Task 15 from this branch. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
@@ -137,11 +137,10 @@ block, not inside it.
 
 ## Current state
 
-- Current phase: Phase B — Video; Tasks 8–13 are complete and merged, so Phase B
-  is finished. Phase A (Tasks 1–7) is complete and merged. The next action is
-  `AGENTOPS_BOOTSTRAP`, not Task 14.
+- Current phase: Phase C — Coach review. Task 14 is implemented on PR #21 and
+  awaits review and merge. Task 15 has not started.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: `D:\Shoulder`, branch `main`; one writer.
+- Checkout: `D:\Shoulder`, branch `block-04-t14-manual-clip-marking`; one writer.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
 - Last verified: 2026-09-08; Task 5 local migration cycle, 75 database tests, 6 auth browser tests and full check passed. Hosted isolation was independently verified. All review verification blockers are resolved; see `docs/task-5-verification.md`.

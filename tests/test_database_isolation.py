@@ -91,6 +91,11 @@ EXPECTED_POLICIES = {
     ("processing_job", "processing_job_coach_insert", "INSERT", "{shoulder_api}"),
     ("processing_job", "processing_job_worker_select", "SELECT", "{shoulder_worker}"),
     ("processing_job", "processing_job_worker_update", "UPDATE", "{shoulder_worker}"),
+    # 0007: coach-authored, append-only manual observations. Players have no
+    # policy and therefore no direct read or write path.
+    ("observation", "observation_owner_maintenance", "ALL", "{shoulder_migration}"),
+    ("observation", "observation_coach_select", "SELECT", "{shoulder_api}"),
+    ("observation", "observation_coach_insert", "INSERT", "{shoulder_api}"),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -103,6 +108,7 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "link_player_account",
     "is_game_coach",
     "is_video_coach",
+    "valid_manual_observation",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.

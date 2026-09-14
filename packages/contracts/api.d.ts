@@ -308,6 +308,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/videos/{video_id}/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Observations */
+        get: operations["list_observations_v1_videos__video_id__observations_get"];
+        put?: never;
+        /** Create Observation */
+        post: operations["create_observation_v1_videos__video_id__observations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/videos/{video_id}/playback-url": {
         parameters: {
             query?: never;
@@ -713,6 +731,57 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /** Observation */
+        Observation: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /** Event Type */
+            event_type: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /**
+             * Source
+             * @constant
+             */
+            source: "coach_manual";
+            /** T End Ms */
+            t_end_ms: number;
+            /** T Start Ms */
+            t_start_ms: number;
+            /**
+             * Video Id
+             * Format: uuid
+             */
+            video_id: string;
+        };
+        /** ObservationCreate */
+        ObservationCreate: {
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** T End Ms */
+            t_end_ms: number;
+            /** T Start Ms */
+            t_start_ms: number;
         };
         /**
          * PlaybackUrl
@@ -1644,6 +1713,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VideoSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_observations_v1_videos__video_id__observations_get: {
+        parameters: {
+            query: {
+                player_id: string;
+            };
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Observation"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_observation_v1_videos__video_id__observations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Observation"];
                 };
             };
             /** @description Validation Error */

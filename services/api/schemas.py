@@ -353,3 +353,30 @@ class Timeline(BaseModel):
     interval_ms: int
     tile_count: int
     sheets: list[SpriteSheet]
+
+
+# --- Manual observations ------------------------------------------------------
+
+
+class ObservationCreate(BaseModel):
+    player_id: UUID
+    t_start_ms: int = Field(ge=0)
+    t_end_ms: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> Self:
+        if self.t_end_ms <= self.t_start_ms:
+            raise ValueError("t_end_ms must be greater than t_start_ms")
+        return self
+
+
+class Observation(BaseModel):
+    id: UUID
+    video_id: UUID
+    player_id: UUID
+    t_start_ms: int
+    t_end_ms: int
+    source: Literal["coach_manual"]
+    event_type: str | None
+    created_by: UUID
+    created_at: datetime

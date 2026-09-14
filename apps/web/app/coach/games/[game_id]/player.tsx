@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PlaybackUrl, Timeline } from "../../../../lib/api";
+import type { Observation, PlaybackUrl, Timeline } from "../../../../lib/api";
+import {
+  isTextEntryTarget,
+  reviewShortcut,
+  validClipBounds,
+} from "../../../../lib/marking";
 import {
   formatClock,
   type SpriteLayout,
@@ -33,17 +38,33 @@ async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
 export function CoachPlayer({
   videoId,
   label,
+  playerId,
+  initialObservations = [],
 }: {
   videoId: string;
   label: string;
+  playerId?: string;
+  initialObservations?: Observation[];
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const requestedTimeSeconds = useRef(0);
+  const seekingToSeconds = useRef<number | null>(null);
+  const savingClip = useRef(false);
   const [playback, setPlayback] = useState<PlaybackUrl | null>(null);
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [message, setMessage] = useState("");
   const [currentMs, setCurrentMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
+  const [inMs, setInMs] = useState<number | null>(null);
+  const [observations, setObservations] =
+    useState<Observation[]>(initialObservations);
+  const [pendingClip, setPendingClip] = useState<{
+    startMs: number;
+    endMs: number;
+  } | null>(null);
+  const [saveState, setSaveState] = useState("Ready");
+  const [markingMessage, setMarkingMessage] = useState("");
 
   const load = useCallback(async (): Promise<void> => {
     const [next, line] = await Promise.all([
@@ -64,6 +85,8 @@ export function CoachPlayer({
         const wasPlaying = !element.paused;
         queueMicrotask(() => {
           if (!video.current) return;
+          requestedTimeSeconds.current = at;
+          seekingToSeconds.current = at;
           video.current.currentTime = at;
           if (wasPlaying) void video.current.play().catch(() => undefined);
         });
@@ -106,10 +129,17 @@ export function CoachPlayer({
   const seekBy = useCallback((deltaSeconds: number) => {
     const element = video.current;
     if (!element) return;
-    element.currentTime = Math.max(
+    const next = Math.max(
       0,
-      Math.min(element.duration || 0, element.currentTime + deltaSeconds),
+      Math.min(
+        element.duration || 0,
+        requestedTimeSeconds.current + deltaSeconds,
+      ),
     );
+    requestedTimeSeconds.current = next;
+    seekingToSeconds.current = next;
+    element.currentTime = next;
+    setCurrentMs(next * 1000);
   }, []);
 
   const toggle = useCallback(() => {
@@ -119,43 +149,84 @@ export function CoachPlayer({
     else element.pause();
   }, []);
 
+  const markIn = useCallback(() => {
+    if (!video.current || !playerId || savingClip.current) return;
+    const at = Math.round(video.current.currentTime * 1000);
+    requestedTimeSeconds.current = at / 1000;
+    setInMs(at);
+    setSaveState("Ready");
+    setMarkingMessage(`In point ${formatClock(at)}`);
+  }, [playerId]);
+
+  const markOut = useCallback(async () => {
+    if (savingClip.current) return;
+    if (!video.current || !playerId || inMs === null) {
+      setSaveState("Needs attention");
+      setMarkingMessage("Set an in point first.");
+      return;
+    }
+    const outMs = Math.round(video.current.currentTime * 1000);
+    if (!validClipBounds(inMs, outMs, durationMs)) {
+      setSaveState("Needs attention");
+      setMarkingMessage("Choose an out point after the in point.");
+      return;
+    }
+    savingClip.current = true;
+    setSaveState("Saving");
+    setPendingClip({ startMs: inMs, endMs: outMs });
+    try {
+      const saved = await readJson<Observation>(
+        `/api/videos/${videoId}/observations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            player_id: playerId,
+            t_start_ms: inMs,
+            t_end_ms: outMs,
+          }),
+        },
+      );
+      setObservations((current) => [...current, saved]);
+      setPendingClip(null);
+      setInMs(null);
+      setSaveState("Saved");
+      setMarkingMessage("");
+    } catch {
+      setPendingClip(null);
+      setSaveState("Needs attention");
+      setMarkingMessage("Clip was not saved. Try again.");
+    } finally {
+      savingClip.current = false;
+    }
+  }, [durationMs, inMs, playerId, videoId]);
+
   // `docs/05-ui.md` keyboard map. Text fields keep their own keys.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.isContentEditable ||
-          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-      )
-        return;
-      switch (event.key) {
-        case " ":
-          event.preventDefault();
+      const action = reviewShortcut(
+        event.key,
+        event.shiftKey,
+        isTextEntryTarget(target),
+      );
+      if (!action) return;
+      event.preventDefault();
+      switch (action.type) {
+        case "toggle-playback":
           toggle();
           break;
-        case "ArrowLeft":
-          event.preventDefault();
-          seekBy(event.shiftKey ? -10 : -1);
+        case "seek":
+          seekBy(action.seconds);
           break;
-        case "ArrowRight":
-          event.preventDefault();
-          seekBy(event.shiftKey ? 10 : 1);
+        case "mark-in":
+          markIn();
           break;
-        case "j":
-        case "J":
-          event.preventDefault();
-          seekBy(-10);
+        case "mark-out":
+          void markOut();
           break;
-        case "k":
-        case "K":
-          event.preventDefault();
-          toggle();
-          break;
-        case "l":
-        case "L":
-          event.preventDefault();
-          seekBy(10);
+        case "focus-video":
+          video.current?.focus();
           break;
         default:
           break;
@@ -163,7 +234,7 @@ export function CoachPlayer({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [seekBy, toggle]);
+  }, [markIn, markOut, seekBy, toggle]);
 
   const preview =
     layout && hover !== null && timeline ? tileOffset(hover, layout) : null;
@@ -194,14 +265,33 @@ export function CoachPlayer({
           <div className="mt-4 aspect-video w-full bg-ink">
             <video
               ref={video}
+              tabIndex={0}
               src={playback.url}
               preload="metadata"
               playsInline
               controls={false}
               className="size-full"
-              onTimeUpdate={(event) =>
-                setCurrentMs(event.currentTarget.currentTime * 1000)
-              }
+              onTimeUpdate={(event) => {
+                if (seekingToSeconds.current === null)
+                  requestedTimeSeconds.current =
+                    event.currentTarget.currentTime;
+                setCurrentMs(event.currentTarget.currentTime * 1000);
+              }}
+              onSeeked={(event) => {
+                const desired = seekingToSeconds.current;
+                if (
+                  desired !== null &&
+                  Math.abs(event.currentTarget.currentTime - desired) > 0.05
+                ) {
+                  // WebKit can finish an older seek after a newer keyboard
+                  // seek. Re-apply the latest requested position once.
+                  event.currentTarget.currentTime = desired;
+                  return;
+                }
+                seekingToSeconds.current = null;
+                requestedTimeSeconds.current = event.currentTarget.currentTime;
+                setCurrentMs(event.currentTarget.currentTime * 1000);
+              }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
             >
@@ -237,32 +327,73 @@ export function CoachPlayer({
             <p className={`${metadata} tabular-nums`} aria-live="off">
               {formatClock(currentMs)} / {formatClock(durationMs)}
             </p>
+            {playerId ? (
+              <>
+                <button type="button" onClick={markIn} className={secondary}>
+                  Set clip in (I)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void markOut()}
+                  className={secondary}
+                >
+                  Set clip out (O)
+                </button>
+                <p role="status" aria-live="polite" className={metadata}>
+                  {saveState}
+                </p>
+              </>
+            ) : null}
           </div>
 
-          <label htmlFor="scrubber" className="sr-only">
-            Seek through the match
-          </label>
-          <input
-            id="scrubber"
-            type="range"
-            min={0}
-            max={Math.max(0, Math.round(durationMs))}
-            step={100}
-            value={Math.round(currentMs)}
-            aria-valuetext={formatClock(currentMs)}
-            onChange={(event) => {
-              const at = Number(event.target.value);
-              setCurrentMs(at);
-              if (video.current) video.current.currentTime = at / 1000;
-            }}
-            onMouseMove={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-              const ratio = (event.clientX - box.left) / box.width;
-              setHover(Math.max(0, Math.min(1, ratio)) * durationMs);
-            }}
-            onMouseLeave={() => setHover(null)}
-            className={`mt-3 w-full ${focus}`}
-          />
+          <div className="relative mt-3">
+            {playerId ? (
+              <div aria-hidden="true" className="absolute inset-x-0 top-0 h-1">
+                {observations.map((observation) => (
+                  <span
+                    key={observation.id}
+                    className="absolute h-1 min-w-px bg-ink"
+                    style={{
+                      left: `${(observation.t_start_ms / durationMs) * 100}%`,
+                      width: `${((observation.t_end_ms - observation.t_start_ms) / durationMs) * 100}%`,
+                    }}
+                  />
+                ))}
+                {inMs !== null ? (
+                  <span
+                    className="absolute h-2 w-0.5 bg-ink"
+                    style={{ left: `${(inMs / durationMs) * 100}%` }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            <label htmlFor="scrubber" className="sr-only">
+              Seek through the match
+            </label>
+            <input
+              id="scrubber"
+              type="range"
+              min={0}
+              max={Math.max(0, Math.round(durationMs))}
+              step={100}
+              value={Math.round(currentMs)}
+              aria-valuetext={formatClock(currentMs)}
+              onChange={(event) => {
+                const at = Number(event.target.value);
+                requestedTimeSeconds.current = at / 1000;
+                seekingToSeconds.current = at / 1000;
+                setCurrentMs(at);
+                if (video.current) video.current.currentTime = at / 1000;
+              }}
+              onMouseMove={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                const ratio = (event.clientX - box.left) / box.width;
+                setHover(Math.max(0, Math.min(1, ratio)) * durationMs);
+              }}
+              onMouseLeave={() => setHover(null)}
+              className={`w-full ${focus}`}
+            />
+          </div>
 
           {previewSheet && preview && timeline ? (
             <div
@@ -280,7 +411,42 @@ export function CoachPlayer({
           <p className={`${metadata} mt-2`}>
             Space plays and pauses. J and L jump ten seconds. Arrow keys step
             one second, or ten with Shift.
+            {playerId ? " I sets the clip in; O saves the clip out." : ""}
           </p>
+
+          {playerId ? (
+            <section className="mt-5 border-t border-line pt-4">
+              <h3 className="text-[15px] font-semibold">Marked clips</h3>
+              {markingMessage ? (
+                <p className={`${metadata} mt-2`}>{markingMessage}</p>
+              ) : null}
+              {observations.length || pendingClip ? (
+                <ul aria-label="Marked clips" className="mt-2 space-y-2">
+                  {observations.map((observation) => (
+                    <li
+                      key={observation.id}
+                      className={`${metadata} rounded-lg border border-line px-3 py-2 tabular-nums`}
+                    >
+                      {formatClock(observation.t_start_ms)}–
+                      {formatClock(observation.t_end_ms)} · Manual
+                    </li>
+                  ))}
+                  {pendingClip ? (
+                    <li
+                      className={`${metadata} rounded-lg border border-line px-3 py-2 tabular-nums`}
+                    >
+                      {formatClock(pendingClip.startMs)}–
+                      {formatClock(pendingClip.endMs)} · Manual · Saving
+                    </li>
+                  ) : null}
+                </ul>
+              ) : (
+                <p className={`${metadata} mt-2`}>
+                  No clips marked for this player yet.
+                </p>
+              )}
+            </section>
+          ) : null}
         </>
       ) : message ? null : (
         <p className={`${metadata} mt-4`}>Opening the match video…</p>

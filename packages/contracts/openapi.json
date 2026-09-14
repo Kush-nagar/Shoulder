@@ -650,6 +650,98 @@
         "title": "Me",
         "type": "object"
       },
+      "Observation": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "source": {
+            "const": "coach_manual",
+            "title": "Source",
+            "type": "string"
+          },
+          "t_end_ms": {
+            "title": "T End Ms",
+            "type": "integer"
+          },
+          "t_start_ms": {
+            "title": "T Start Ms",
+            "type": "integer"
+          },
+          "video_id": {
+            "format": "uuid",
+            "title": "Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "video_id",
+          "player_id",
+          "t_start_ms",
+          "t_end_ms",
+          "source",
+          "event_type",
+          "created_by",
+          "created_at"
+        ],
+        "title": "Observation",
+        "type": "object"
+      },
+      "ObservationCreate": {
+        "properties": {
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "t_end_ms": {
+            "exclusiveMinimum": 0.0,
+            "title": "T End Ms",
+            "type": "integer"
+          },
+          "t_start_ms": {
+            "minimum": 0.0,
+            "title": "T Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id",
+          "t_start_ms",
+          "t_end_ms"
+        ],
+        "title": "ObservationCreate",
+        "type": "object"
+      },
       "PlaybackUrl": {
         "description": "One short-lived, object-specific coach playback URL.\n\n`docs/10-security-privacy.md` caps a coach URL at fifteen minutes. The\nobject is the coach-only `playback/{video_id}/coach-720p.mp4`; no player\nendpoint ever returns it, and no request value chooses it.",
         "properties": {
@@ -2375,6 +2467,118 @@
           }
         ],
         "summary": "Read Video"
+      }
+    },
+    "/v1/videos/{video_id}/observations": {
+      "get": {
+        "operationId": "list_observations_v1_videos__video_id__observations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Observation"
+                  },
+                  "title": "Response List Observations V1 Videos  Video Id  Observations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Observations"
+      },
+      "post": {
+        "operationId": "create_observation_v1_videos__video_id__observations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Observation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Observation"
       }
     },
     "/v1/videos/{video_id}/playback-url": {

@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchGame, type VideoSummary } from "../../../../lib/api";
+import { fetchGame, fetchRoster, type VideoSummary } from "../../../../lib/api";
 import { PageHeader } from "../../shell";
 import { requireCoach } from "../../session";
 import { metadata, panel, sectionTitle } from "../../ui";
@@ -58,13 +59,41 @@ export default async function GamePage({
   if (!game) notFound();
 
   const ready = game.videos.find((video) => video.status === "ready");
+  const roster = ready ? await fetchRoster(token, game.team_id) : null;
 
   return (
     <>
       <PageHeader title="Match" description={gameLabel(game)} />
       <div className="grid gap-6 px-5 py-6 md:px-6 lg:px-8">
         {ready ? (
-          <CoachPlayer videoId={ready.id} label={gameLabel(game)} />
+          <>
+            <CoachPlayer videoId={ready.id} label={gameLabel(game)} />
+            <section className={`${panel} p-5`}>
+              <h2 className={sectionTitle}>Mark clips for a player</h2>
+              {roster?.length ? (
+                <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {roster.map((player) => (
+                    <li key={player.id}>
+                      <Link
+                        href={`/coach/games/${game.id}/review/${player.id}`}
+                        className="block rounded-lg border border-line px-4 py-3 text-[15px] font-medium hover:bg-line/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                      >
+                        {player.display_name}
+                        <span className={`${metadata} mt-1 block font-normal`}>
+                          {player.active_goal?.title ??
+                            "No active development goal"}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={`${metadata} mt-2`}>
+                  Add an active player before marking clips.
+                </p>
+              )}
+            </section>
+          </>
         ) : (
           <section className={`${panel} p-5`}>
             <h2 className={sectionTitle}>Video</h2>

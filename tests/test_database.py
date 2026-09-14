@@ -44,6 +44,8 @@ TABLES = (
     "video",
     "video_upload_part",
     "processing_job",
+    # 0007 — Task 14 manual marking.
+    "observation",
 )
 
 
@@ -878,9 +880,9 @@ class ZMigrationTests(unittest.TestCase):
             command.upgrade(config, "head")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
-                # 0001 six, the three `0004` roster and goal helpers, and the
-                # two `0005` game and video membership helpers.
-                self.assertEqual(self.function_count(connection), 11)
+                # 0001 six, three `0004` roster/goal helpers, two `0005`
+                # media membership helpers, and the `0007` bounds helper.
+                self.assertEqual(self.function_count(connection), 12)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")
