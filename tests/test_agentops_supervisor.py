@@ -32,6 +32,15 @@ def read(name: str) -> str:
     return (WORKFLOW_DIR / name).read_text(encoding="utf-8")
 
 
+def only_branch(wanted: str) -> Any:
+    """Merged is asked per branch now, so a blanket True completes everything."""
+
+    def answer(branch: str, **_: Any) -> bool:
+        return branch == wanted
+
+    return answer
+
+
 def a_lease(**overrides: Any) -> dict[str, Any]:
     lease = {
         "task_id": 15,
@@ -68,8 +77,8 @@ class TestLeaseFreeReconciliation(unittest.TestCase):
         with (
             mock.patch.object(
                 reconcile,
-                "merged_branches",
-                return_value={"block-04-t15-coach-judgments"},
+                "pull_request_merged",
+                side_effect=only_branch("block-04-t15-coach-judgments"),
             ),
             mock.patch.object(reconcile, "branch_is_merged", return_value=False),
         ):
@@ -88,7 +97,7 @@ class TestLeaseFreeReconciliation(unittest.TestCase):
 
     def test_a_branch_nobody_merged_is_left_alone(self) -> None:
         with (
-            mock.patch.object(reconcile, "merged_branches", return_value=set()),
+            mock.patch.object(reconcile, "pull_request_merged", return_value=False),
             mock.patch.object(reconcile, "branch_is_merged", return_value=False),
         ):
             ctx = coordinator.load_context(REPO_ROOT)
@@ -99,11 +108,11 @@ class TestLeaseFreeReconciliation(unittest.TestCase):
         self.assertEqual(found, [])
         self.assertEqual(set(state.completed_tasks(ctx.progress)), before)
 
-    def test_an_unanswerable_listing_completes_nothing(self) -> None:
+    def test_an_unanswerable_query_completes_nothing(self) -> None:
         """Fail closed. Inventing completion releases dependent work early."""
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="")
-            self.assertEqual(reconcile.merged_branches(repo="o/r"), set())
+            self.assertIsNone(reconcile.pull_request_merged("b", repo="o/r"))
 
     def test_it_closes_a_lease_left_open_against_its_own_completion(self) -> None:
         """A lease released as blocked before the work in fact landed.
@@ -114,8 +123,8 @@ class TestLeaseFreeReconciliation(unittest.TestCase):
         with (
             mock.patch.object(
                 reconcile,
-                "merged_branches",
-                return_value={"block-04-t15-coach-judgments"},
+                "pull_request_merged",
+                side_effect=only_branch("block-04-t15-coach-judgments"),
             ),
             mock.patch.object(reconcile, "branch_is_merged", return_value=False),
         ):
@@ -674,6 +683,190 @@ class TestIndependentReviewFindings(unittest.TestCase):
         text = read("agentops-pr.yml")
         self.assertIn("--once-key", text)
         self.assertIn("FAILED_RUN_ID", text)
+
+
+class TestSecondRoundReviewFindings(unittest.TestCase):
+    """The second round of independent review, on the fixes for the first.
+
+    Mostly one theme: a branch name is not evidence. Prefixes, task numbers and
+    head refs are all attacker- or human-controlled, and three separate places
+    were treating them as proof that this system wrote the branch.
+    """
+
+    def verdict_for(self, stdout: str, **kwargs: Any) -> dict[str, Any]:
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout=stdout)
+            return review.verdict("o/r", 42, **kwargs)
+
+    # A branch prefix is not proof of authorship.
+
+    def test_repair_requires_the_lease_to_name_exactly_this_branch(self) -> None:
+        """A person may open `task-15-whatever` too, and repair is looked up by
+        task number, so a prefix alone would move the canonical task's lease
+        and point a credentialed worker at a branch it does not name."""
+        text = read("agentops-pr.yml")
+        self.assertIn('if [ "$leased" != "$BRANCH" ]', text)
+
+    def test_the_merge_rearm_only_touches_leased_branches(self) -> None:
+        """The verdict context deliberately succeeds on a non-autonomous pull
+        request, so arming on prefix would merge someone's work for them."""
+        text = read("agentops-watchdog.yml")
+        self.assertIn("ops/state/tasks.json", text)
+        self.assertIn("grep -qxF", text)
+
+    def test_completion_requires_the_branch_to_live_in_this_repository(self) -> None:
+        """A merged fork pull request can carry a canonical branch name. Taking
+        that as completion marks the task done and releases everything waiting
+        on code main never received."""
+        merged = {
+            "number": 1,
+            "headRepositoryOwner": {"login": "someone"},
+            "headRepository": {"name": "Shoulder"},
+        }
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout=json.dumps([merged]))
+            self.assertFalse(
+                reconcile.pull_request_merged(
+                    "block-04-t15", repo="Kush-nagar/Shoulder"
+                )
+            )
+            merged["headRepositoryOwner"] = {"login": "Kush-nagar"}
+            run.return_value = mock.Mock(returncode=0, stdout=json.dumps([merged]))
+            self.assertTrue(
+                reconcile.pull_request_merged(
+                    "block-04-t15", repo="Kush-nagar/Shoulder"
+                )
+            )
+
+    def test_a_deleted_fork_is_not_this_repository(self) -> None:
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(
+                returncode=0, stdout=json.dumps([{"number": 1}])
+            )
+            self.assertFalse(reconcile.pull_request_merged("b", repo="o/r"))
+
+    def test_completion_is_asked_per_branch_not_from_a_listing(self) -> None:
+        """A bounded listing silently forgets older merges, and a task whose
+        pull request fell outside the window looks outstanding and is
+        dispatched again."""
+        source = Path(reconcile.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("def merged_branches", source)
+        self.assertIn("pull_request_merged(branch, repo=repo", source)
+
+    # The gate must not evaluate a truncated picture.
+
+    def test_more_threads_than_the_window_fails_closed(self) -> None:
+        payload = json.loads(graphql([], []))
+        payload["data"]["repository"]["pullRequest"]["reviewThreads"]["totalCount"] = (
+            review.THREAD_WINDOW + 1
+        )
+        result = self.verdict_for(json.dumps(payload))
+        self.assertEqual(result["verdict"], "unknown")
+        self.assertFalse(result["ok"])
+
+    def test_more_reviews_than_the_window_fails_closed(self) -> None:
+        payload = json.loads(graphql([], []))
+        payload["data"]["repository"]["pullRequest"]["reviews"]["totalCount"] = (
+            review.REVIEW_WINDOW + 1
+        )
+        self.assertEqual(self.verdict_for(json.dumps(payload))["verdict"], "unknown")
+
+    def test_a_normal_pull_request_is_inside_the_window(self) -> None:
+        self.assertEqual(self.verdict_for(graphql([], []))["verdict"], "pass")
+
+    # The awaited review must be the chosen reviewer's.
+
+    def test_someone_elses_review_does_not_end_the_wait(self) -> None:
+        """Another integration commenting first would otherwise let the branch
+        merge without the independent reviewer ever answering."""
+        other = a_review("COMMENTED", author="some-other-bot")
+        result = self.verdict_for(
+            graphql([], [other]),
+            require_submitted_review=True,
+            reviewer_login="chatgpt-codex-connector",
+        )
+        self.assertEqual(result["verdict"], "pending")
+
+    def test_the_chosen_reviewers_review_does_end_it(self) -> None:
+        mine = a_review("COMMENTED", author="chatgpt-codex-connector[bot]")
+        result = self.verdict_for(
+            graphql([], [mine]),
+            require_submitted_review=True,
+            reviewer_login="chatgpt-codex-connector",
+        )
+        self.assertEqual(result["verdict"], "pass")
+
+    def test_the_reviewer_identity_is_configured_not_hardcoded(self) -> None:
+        lane = policy()["lanes"]["codex_cloud"]
+        self.assertTrue(lane.get("review_bot_login"))
+
+    def test_the_reviewer_command_reports_what_the_gate_needs(self) -> None:
+        """The gate reads both out of `cli reviewer`. Without them it either
+        cannot wait at all, or waits for anyone."""
+        from services.agentops import cli
+
+        assert cli.__file__ is not None
+        text = Path(cli.__file__).read_text(encoding="utf-8")
+        self.assertIn('"mechanism": reviewer.mechanism', text)
+        self.assertIn('"review_bot_login"', text)
+
+    # An intentional pending verdict is not a reviewer failure.
+
+    def test_a_pending_verdict_is_left_to_answer(self) -> None:
+        """`gh run rerun --failed` reruns dependencies, so rerunning a pending
+        review reposts the mention and fails again until it answers."""
+        text = read("agentops-pr.yml")
+        self.assertIn("if [ \"$decision\" = 'pending' ]", text)
+
+    def test_triage_asks_the_verdict_the_same_way_the_gate_does(self) -> None:
+        text = read("agentops-pr.yml")
+        self.assertIn("--require-submitted-review", text)
+        self.assertIn("--reviewer-login", text)
+
+    # Failures must be visible, not swallowed.
+
+    def test_a_failed_reviewer_rerun_is_not_reported_as_success(self) -> None:
+        """This completed run is the only reaction that will fire for that
+        failed review; nothing else retries one."""
+        text = read("agentops-pr.yml")
+        rerun = text.split("- name: Run the reviewer again", 1)[1].split("- name:", 1)[
+            0
+        ]
+        self.assertIn("set -euo pipefail", rerun)
+        self.assertNotIn("|| echo", rerun)
+
+    def test_a_repair_that_was_never_recorded_does_not_dispatch(self) -> None:
+        """Otherwise the cycle is invisible to the ceiling and the next failure
+        is charged as the first, so repairs run past the bound indefinitely."""
+        text = read("agentops-pr.yml")
+        self.assertIn("pushed=false", text)
+        self.assertIn("if [ \"$pushed\" != 'true' ]", text)
+        self.assertIn("refusing to dispatch", text)
+
+    # Orchestrator code must not run from the branch under review.
+
+    def test_the_brief_is_built_before_the_task_branch_is_checked_out(self) -> None:
+        """It runs orchestrator code with a repository token, and on a repair
+        the branch under repair is agent-written."""
+        text = read("agentops-worker.yml")
+        self.assertLess(
+            text.index("- name: Build the task brief"),
+            text.index("- name: Check out the task branch"),
+        )
+
+    def test_the_control_center_refresh_runs_from_trusted_code(self) -> None:
+        """Checking out only the state files leaves services/agentops on the
+        task branch, so a worker could edit it and run it with the token."""
+        text = read("agentops-worker.yml")
+        report = text.split("\n  report:", 1)[1]
+        self.assertIn("ref: ${{ github.event.repository.default_branch }}", report)
+        self.assertIn("persist-credentials: false", report)
+        self.assertNotIn("contents: write", report)
+
+    def test_no_step_in_the_work_job_refreshes_the_control_center(self) -> None:
+        text = read("agentops-worker.yml")
+        work = text.split("  work:", 1)[1].split("\n  report:", 1)[0]
+        self.assertNotIn("cli control-center", work)
 
 
 class TestShellOutputIsDecodedExplicitly(unittest.TestCase):

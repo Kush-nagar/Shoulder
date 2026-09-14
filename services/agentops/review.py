@@ -24,6 +24,7 @@ query($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       headRefOid
       reviewThreads(first: 100) {
+        totalCount
         nodes {
           isResolved
           isOutdated
@@ -33,6 +34,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 50) {
+        totalCount
         nodes {
           state
           submittedAt
@@ -90,8 +92,29 @@ def latest_review_states(reviews: list[dict[str, Any]]) -> dict[str, str]:
     return {author: state for author, (_, state) in latest.items()}
 
 
+THREAD_WINDOW = 100
+REVIEW_WINDOW = 50
+
+
+def _is_reviewer(review: dict[str, Any], reviewer_login: str | None) -> bool:
+    """Whether this review came from the reviewer that was asked.
+
+    Matched as a prefix because an app posts as `name` through GraphQL and
+    `name[bot]` through REST, and the configured value should not have to know
+    which surface produced the record.
+    """
+    if not reviewer_login:
+        return True
+    author = str((review.get("author") or {}).get("login") or "").lower()
+    return author.startswith(reviewer_login.lower())
+
+
 def verdict(
-    repo: str, pull_request: int, *, require_submitted_review: bool = False
+    repo: str,
+    pull_request: int,
+    *,
+    require_submitted_review: bool = False,
+    reviewer_login: str | None = None,
 ) -> dict[str, Any]:
     """Whether this pull request is clear to merge on review grounds.
 
@@ -132,6 +155,27 @@ def verdict(
         }
 
     pr = payload["data"]["repository"]["pullRequest"]
+
+    # Both connections are windowed, and a window is a silent truncation: an
+    # unresolved thread or a changes-requested review outside it would be
+    # invisible and the gate would report pass. Fail closed instead. The
+    # windows are far above anything a real task produces, so reaching one is
+    # itself worth stopping for.
+    threads_total = int(pr["reviewThreads"].get("totalCount") or 0)
+    reviews_total = int(pr["reviews"].get("totalCount") or 0)
+    if threads_total > THREAD_WINDOW or reviews_total > REVIEW_WINDOW:
+        return {
+            "ok": False,
+            "verdict": "unknown",
+            "blocking": 1,
+            "reason": (
+                f"{threads_total} threads and {reviews_total} reviews exceed the "
+                f"{THREAD_WINDOW}/{REVIEW_WINDOW} window this can read; "
+                "refusing to call it clean"
+            ),
+            "findings": [],
+        }
+
     head = str(pr.get("headRefOid") or "")
     findings = []
     for thread in pr["reviewThreads"]["nodes"]:
@@ -158,8 +202,15 @@ def verdict(
 
     # Any review of the current head, advisory ones included: what this answers
     # is "has the reviewer looked at this commit", not "did it approve".
+    #
+    # It must be THE reviewer, though. Another integration or a person leaving
+    # a passing remark first would otherwise satisfy the wait, and the pull
+    # request would merge without the independent reviewer that was chosen for
+    # it ever answering.
     reviewed_head = any(
-        str((review.get("commit") or {}).get("oid") or "") == head for review in reviews
+        str((review.get("commit") or {}).get("oid") or "") == head
+        and _is_reviewer(review, reviewer_login)
+        for review in reviews
     )
 
     blocking = len(findings) + changes_requested

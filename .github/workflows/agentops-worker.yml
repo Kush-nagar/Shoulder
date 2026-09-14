@@ -215,6 +215,38 @@ jobs:
             sleep $((attempt * 5))
           done
 
+      - name: Build the task brief
+        # Deliberately before the task branch is checked out. This runs
+        # orchestrator code with a repository token, and on a repair the branch
+        # under repair is agent-written -- running it from that worktree would
+        # let a branch edit services/agentops and execute it with the token
+        # before anyone had reviewed the edit. Here the worktree is still the
+        # default branch.
+        #
+        # brief.md is untracked, and `git checkout -B` keeps untracked files,
+        # so it survives into the task branch where the harness reads it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${MODE:-implement}" = 'repair' ]; then
+            # A repair brief names what failed instead of restating the task,
+            # so the writer fixes the branch rather than reimplementing it.
+            # Review findings come from the same deterministic verdict the
+            # merge gate uses, not from a model re-reading the thread.
+            findings=()
+            if [ "${REPAIR_REASON:-ci}" = 'review' ]; then
+              pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main                 --state open --json number --jq '.[0].number // empty' || true)"
+              if [ -n "$pr" ]; then
+                uv run --locked python -m services.agentops.cli review-verdict                   --repo "$REPO" --pull-request "$pr" > findings.json || true
+                findings=(--findings findings.json)
+              fi
+            fi
+            uv run --locked python -m services.agentops.brief               --task "$TASK_ID" --repair "${REPAIR_REASON:-ci}"               "${findings[@]}" --out brief.md
+          else
+            uv run --locked python -m services.agentops.brief               --task "$TASK_ID" --out brief.md
+          fi
+
       - name: Check out the task branch
         run: |
           set -euo pipefail
@@ -243,34 +275,6 @@ jobs:
           npm install --global pnpm@11.25.0
           pnpm install --frozen-lockfile
           uv sync --locked
-
-      - name: Build the task brief
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [ "${MODE:-implement}" = 'repair' ]; then
-            # A repair brief names what failed instead of restating the task,
-            # so the writer fixes the branch rather than reimplementing it.
-            # Review findings come from the same deterministic verdict the
-            # merge gate uses, not from a model re-reading the thread.
-            findings=()
-            if [ "${REPAIR_REASON:-ci}" = 'review' ]; then
-              pr="$(gh pr view "$BRANCH" --repo "$REPO" --json number \
-                --jq '.number' 2>/dev/null || true)"
-              if [ -n "$pr" ]; then
-                uv run --locked python -m services.agentops.cli review-verdict \
-                  --repo "$REPO" --pull-request "$pr" > findings.json || true
-                findings=(--findings findings.json)
-              fi
-            fi
-            uv run --locked python -m services.agentops.brief \
-              --task "$TASK_ID" --repair "${REPAIR_REASON:-ci}" \
-              "${findings[@]}" --out brief.md
-          else
-            uv run --locked python -m services.agentops.brief \
-              --task "$TASK_ID" --out brief.md
-          fi
 
       # --- Claude lane: the Claude subscription pays for this one -----------
       - name: Implement with Claude
@@ -508,17 +512,39 @@ jobs:
             --details "$details" \
             --repo "$GITHUB_REPOSITORY" || echo 'activity feed unavailable'
 
+      # The Control Center refresh used to live here. It was moved to its own
+      # job below: this worktree holds the agent-written task branch, so
+      # running `services.agentops` from it hands a repository token to code a
+      # branch may have edited and nobody has reviewed. A separate job gets a
+      # fresh runner and checks out the default branch.
+
+  report:
+    # Trusted code only. Nothing here touches the task branch.
+    needs: work
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The default branch, where the ledger the worker just pushed lives.
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
       - name: Refresh the Control Center
-        # Reads the ledger this run just pushed, so it runs last and from the
-        # default branch rather than from whatever the harness left on the
-        # task branch.
-        if: always()
         continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          git fetch origin "$DEFAULT_BRANCH"
-          git checkout "origin/$DEFAULT_BRANCH" -- ops/state STATUS.md || true
           uv run --locked python -m services.agentops.cli control-center \
             --repo "$REPO" || echo 'control center unavailable'

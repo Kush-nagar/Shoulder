@@ -220,10 +220,18 @@ jobs:
           uv run --locked python -m services.agentops.cli reviewer \
             --task "$task" > reviewer.json
           mechanism="$(jq -r '.mechanism // empty' reviewer.json)"
+          login="$(jq -r '.review_bot_login // empty' reviewer.json)"
           if [ "$mechanism" = 'github-mention' ]; then
+            # And it must be that reviewer's answer. A passing remark from any
+            # other integration would otherwise end the wait and let the branch
+            # merge without the chosen reviewer ever looking at it.
+            if [ -z "$login" ]; then
+              echo 'a mention reviewer with no configured identity cannot be waited for' >&2
+              exit 1
+            fi
             uv run --locked python -m services.agentops.cli review-verdict \
               --repo "$REPO" --pull-request "$PR" --require-submitted-review \
-              > verdict.json
+              --reviewer-login "$login" > verdict.json
           else
             uv run --locked python -m services.agentops.cli review-verdict \
               --repo "$REPO" --pull-request "$PR" > verdict.json

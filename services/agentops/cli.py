@@ -418,6 +418,14 @@ def cmd_reviewer(args: argparse.Namespace) -> int:
             "model": reviewer.harness_model,
             "effort": reviewer.effort,
             "capability_class": reviewer.capability_class,
+            # The merge gate needs both. `mechanism` says whether this reviewer
+            # answers inside its own job or asynchronously afterwards, and the
+            # login says whose answer to wait for. Without them the gate either
+            # cannot wait or waits for anyone at all.
+            "mechanism": reviewer.mechanism,
+            "review_bot_login": ctx.policy["lanes"][reviewer.lane].get(
+                "review_bot_login"
+            ),
         }
     )
     return 0
@@ -886,6 +894,7 @@ def cmd_review_verdict(args: argparse.Namespace) -> int:
         args.repo,
         args.pull_request,
         require_submitted_review=args.require_submitted_review,
+        reviewer_login=args.reviewer_login,
     )
     _emit(result)
     return 0 if result.get("verdict") == "pass" else 1
@@ -1065,6 +1074,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="require_submitted_review",
         action="store_true",
         help="the reviewer answers asynchronously; wait for a review of this head",
+    )
+    verdict.add_argument(
+        "--reviewer-login",
+        dest="reviewer_login",
+        help="whose review satisfies the wait; anyone else's does not",
     )
     verdict.set_defaults(func=cmd_review_verdict)
 

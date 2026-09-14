@@ -91,10 +91,17 @@ jobs:
           fi
           echo "pr=${pr}" >> "$GITHUB_OUTPUT"
 
+          # A branch prefix is not proof that this system wrote the branch: a
+          # person may name a branch `task-15-...` too, and repair is looked up
+          # by task number alone. Without this, such a pull request would spend
+          # the canonical task's repair budget, move its lease, and point a
+          # credentialed worker at a branch the lease does not name. The lease
+          # must exist AND name exactly this branch.
           leased="$(jq -r --arg t "$task" '.leases[$t].branch // empty' \
             ops/state/tasks.json)"
-          if [ -n "$leased" ] && [ "$leased" != "$BRANCH" ]; then
-            echo "task $task is leased on $leased, not $BRANCH; not repairing"
+          if [ "$leased" != "$BRANCH" ]; then
+            echo "task $task is not leased on $BRANCH (lease: ${leased:-none});"
+            echo 'not an autonomous branch; not repairing'
             echo 'action=none' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -111,17 +118,39 @@ jobs:
             exit 0
           fi
 
-          # Review failing is two different events wearing one face. Either the
-          # reviewer found something -- a code problem, repair it -- or the
-          # reviewer itself failed to run, in which case there is nothing for a
-          # writer to fix. Sending the second case to the writer spends a
-          # review cycle, produces no commit, and therefore emits no
-          # `synchronize` to rerun the review: the pull request sticks forever.
-          uv run --locked python -m services.agentops.cli review-verdict \
-            --repo "$REPO" --pull-request "$pr" > verdict.json || true
+          # Review failing is three different events wearing one face:
+          #   - the reviewer found something          -> repair the branch
+          #   - the reviewer has not answered yet     -> wait, do nothing
+          #   - the reviewer itself could not run     -> rerun the reviewer
+          #
+          # Sending the second or third to the writer spends a review cycle,
+          # produces no commit, and therefore emits no `synchronize` to rerun
+          # the review: the pull request sticks forever. Rerunning the second
+          # is worse still -- `gh run rerun --failed` reruns dependencies, so
+          # it reposts the mention and fails again until the review lands.
+          #
+          # The verdict is asked exactly as the gate asks it, flags included,
+          # or the intentional `pending` reads as a clean-but-failed run.
+          uv run --locked python -m services.agentops.cli reviewer \
+            --task "$task" > reviewer.json
+          mechanism="$(jq -r '.mechanism // empty' reviewer.json)"
+          login="$(jq -r '.review_bot_login // empty' reviewer.json)"
+          if [ "$mechanism" = 'github-mention' ] && [ -n "$login" ]; then
+            uv run --locked python -m services.agentops.cli review-verdict \
+              --repo "$REPO" --pull-request "$pr" --require-submitted-review \
+              --reviewer-login "$login" > verdict.json || true
+          else
+            uv run --locked python -m services.agentops.cli review-verdict \
+              --repo "$REPO" --pull-request "$pr" > verdict.json || true
+          fi
           blocking="$(jq -r '.blocking // 0' verdict.json)"
           readable="$(jq -r '.ok // false' verdict.json)"
-          if [ "$readable" = 'true' ] && [ "$blocking" -gt 0 ]; then
+          decision="$(jq -r '.verdict // "unknown"' verdict.json)"
+
+          if [ "$decision" = 'pending' ]; then
+            echo 'the reviewer has not answered yet; leaving it to answer'
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+          elif [ "$readable" = 'true' ] && [ "$blocking" -gt 0 ]; then
             echo 'reason=review' >> "$GITHUB_OUTPUT"
             echo 'action=repair' >> "$GITHUB_OUTPUT"
           else
@@ -136,9 +165,15 @@ jobs:
         # spent, because nothing was wrong with the branch.
         if: steps.triage.outputs.action == 'rerun-review'
         run: |
-          set -uo pipefail
-          gh run rerun "$FAILED_RUN_ID" --repo "$REPO" --failed \
-            || echo 'could not rerun the reviewer; the watchdog will retry'
+          set -euo pipefail
+          # Deliberately not swallowed. This completed `workflow_run` is the
+          # only reaction that will ever fire for that failed review, and
+          # nothing else retries one -- the watchdog sweeps leases, re-arms
+          # merges, and restarts an idle coordinator, none of which reach a
+          # stranded pull request. Failing here makes the run red and puts the
+          # branch on the Control Center as the latest error, which is a thing
+          # a person can see, rather than a silent stall.
+          gh run rerun "$FAILED_RUN_ID" --repo "$REPO" --failed
 
       - name: Take a repair cycle and record it
         id: repair
@@ -161,6 +196,7 @@ jobs:
           # Re-applying is safe because the repair carries the triggering run as
           # a once-key: a retry cannot spend two cycles for one failure.
           granted=false
+          pushed=false
           for attempt in 1 2 3 4 5; do
             git fetch origin "$DEFAULT_BRANCH"
             git checkout -B agentops-repair "origin/$DEFAULT_BRANCH"
@@ -179,16 +215,29 @@ jobs:
             git add ops/state STATUS.md
             if git diff --cached --quiet; then
               echo 'the repair is already recorded'
+              pushed=true
               break
             fi
             git commit -m "Record a repair cycle for branch ${BRANCH}"
             if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              pushed=true
               break
             fi
             sleep $((attempt * 5))
           done
 
           cat repair.json >> "$GITHUB_STEP_SUMMARY"
+          if [ "$pushed" != 'true' ]; then
+            # The cycle and its once-key never reached the default branch, so
+            # nothing recorded that this repair happened. Dispatching anyway
+            # would run a writer whose cost is invisible to the ceiling, and
+            # the next failure would be charged as if it were the first --
+            # repairs could then run past the bound indefinitely. The failing
+            # run emits no replacement event, so this stops visibly instead.
+            echo 'could not record the repair on the ledger; refusing to dispatch' >&2
+            echo 'granted=false' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
           echo "granted=${granted}" >> "$GITHUB_OUTPUT"
           echo "lane=$(jq -r '.lane // empty' repair.json)" >> "$GITHUB_OUTPUT"
           echo "model=$(jq -r '.model // empty' repair.json)" >> "$GITHUB_OUTPUT"

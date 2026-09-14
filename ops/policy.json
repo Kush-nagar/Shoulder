@@ -57,6 +57,8 @@
       "provider": "openai",
       "harness": "codex-cloud-github",
       "mechanism": "github-mention",
+      "review_bot_login": "chatgpt-codex-connector",
+      "$comment_review_bot": "A mention reviewer answers minutes after the job that asked it has finished, so the merge gate has to wait for the review rather than for the job. It waits for THIS author: another integration or a person leaving a passing remark first would otherwise satisfy the wait and the branch would merge without the chosen independent reviewer ever answering. Matched as a prefix, because an app posts as `name` through GraphQL and `name[bot]` through REST.",
       "billing": "subscription",
       "secret": null,
       "enabled": true,

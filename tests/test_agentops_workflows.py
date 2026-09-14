@@ -117,8 +117,23 @@ class TestWorkflowPermissions(unittest.TestCase):
             self.assertNotIn(harness, text)
 
     def test_watchdog_cannot_write_pull_requests(self) -> None:
+        """Asserted per job, which is where a token is actually scoped.
+
+        The sweep job pushes the default branch and dispatches workflows.
+        Adding merge rights to that same token is the concentration this
+        exists to prevent, so re-arming a stranded merge lives in its own job
+        that can do nothing else. That is stricter than the single blanket
+        grant this test used to check for.
+        """
         text = read(WORKFLOW_DIR / "agentops-watchdog.yml")
-        self.assertNotIn("pull-requests: write", text)
+        sweep = text.split("  sweep:", 1)[1].split("\n  rearm:", 1)[0]
+        self.assertNotIn("pull-requests: write", sweep)
+
+        rearm = text.split("  rearm:", 1)[1]
+        self.assertIn("pull-requests: write", rearm)
+        self.assertNotIn("contents: write", rearm)
+        self.assertNotIn("actions: write", rearm)
+        self.assertNotIn("issues: write", rearm)
 
     def test_verify_cannot_open_or_merge_pull_requests(self) -> None:
         """It proves lanes work; it must not be able to land anything."""

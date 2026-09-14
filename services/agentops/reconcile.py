@@ -48,9 +48,9 @@ def pull_request_merged(
         "--state",
         "merged",
         "--json",
-        "number,mergedAt",
+        "number,mergedAt,headRepositoryOwner,headRepository",
         "--limit",
-        "1",
+        "10",
     ]
     if repo:
         command += ["--repo", repo]
@@ -68,53 +68,24 @@ def pull_request_merged(
         found = json.loads(result.stdout or "[]")
     except json.JSONDecodeError:
         return None
+    if repo:
+        # A fork may open a pull request whose head branch carries a canonical
+        # task name. Merging that is not the task landing from this
+        # repository's own branch, and counting it would mark the task
+        # complete and release everything waiting on code main never received.
+        found = [pr for pr in found if _from_repository(pr, repo)]
     return bool(found)
 
 
-def merged_branches(*, repo: str | None = None, base: str = "main") -> set[str]:
-    """Head branches of every pull request already merged into `base`.
-
-    Reconciliation used to read leases only. A task whose lease was swept,
-    released, or never written -- a worker that pushed and died before the
-    ledger write, a branch a human merged, a Codex Cloud hand-off whose lease
-    expired -- then merged with nothing left to reconcile against, so it was
-    never marked complete and the coordinator handed the finished task to
-    another writer. Branch names are derived from the canonical backlog, so
-    the merged branch itself is sufficient evidence without any lease.
-
-    An empty set means "could not answer", which is the same as "nothing
-    merged" here: both leave completion unchanged rather than inventing it.
-    """
-    command = [
-        "gh",
-        "pr",
-        "list",
-        "--base",
-        base,
-        "--state",
-        "merged",
-        "--json",
-        "headRefName",
-        "--limit",
-        "100",
-    ]
-    if repo:
-        command += ["--repo", repo]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode != 0:
-        return set()
-    try:
-        found = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError:
-        return set()
-    return {str(pr["headRefName"]) for pr in found if pr.get("headRefName")}
+def _from_repository(pull_request: dict[str, Any], repo: str) -> bool:
+    """Whether a pull request's head branch lives in `repo` itself."""
+    owner = (pull_request.get("headRepositoryOwner") or {}).get("login")
+    name = (pull_request.get("headRepository") or {}).get("name")
+    if not owner or not name:
+        # The fields exist on every pull request whose head repository still
+        # exists. Missing means a deleted fork, which is not this repository.
+        return False
+    return f"{owner}/{name}".lower() == repo.lower()
 
 
 def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool:
@@ -237,12 +208,16 @@ def _reconcile_unleased(
     if not outstanding:
         return []
 
-    remote = merged_branches(repo=repo, base="main")
     found: list[dict[str, Any]] = []
     for task_id in outstanding:
         task = ctx.backlog.tasks[task_id]
         branch = coordinator.branch_name(task, ctx.backlog.block_for_task(task_id))
-        if branch in remote:
+        # Asked per branch rather than by listing recent merges. A listing has
+        # to be bounded, and a canonical task whose pull request fell outside
+        # that window would silently look outstanding and be dispatched again;
+        # `--head` is exact however much unrelated traffic the repository has.
+        # It also proves the head repository, which a branch name cannot.
+        if pull_request_merged(branch, repo=repo, base="main"):
             how = "pull request for the canonical task branch was merged into main"
         elif branch_is_merged(root, branch):
             how = "canonical task branch is an ancestor of main"

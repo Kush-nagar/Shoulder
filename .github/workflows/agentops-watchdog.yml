@@ -66,31 +66,6 @@ jobs:
           uv run --locked python -m services.agentops.cli validate
           git push origin HEAD:main
 
-      - name: Re-arm auto-merge on open autonomous pull requests
-        # Recovery for a worker that pushed and opened its pull request but
-        # died before enabling auto-merge. Without this the branch is finished,
-        # green, and waits forever for a human -- the loop stops on a success.
-        # Enabling it merges nothing by itself: the required contexts still
-        # have to pass.
-        if: vars.AUTONOMY_ENABLED == 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          gh pr list --repo "$REPO" --state open --base main \
-            --json number,headRefName,autoMergeRequest \
-            --jq '.[] | select(.autoMergeRequest == null)
-                  | select(.headRefName | test("^(block|task)-"))
-                  | .number' \
-          | while read -r pr; do
-              [ -n "$pr" ] || continue
-              echo "re-arming auto-merge on #${pr}"
-              gh pr merge "$pr" --repo "$REPO" --auto --squash --delete-branch \
-                || echo "could not enable auto-merge on #${pr}"
-            done
-
       - name: Refresh the Control Center
         if: always()
         continue-on-error: true
@@ -110,3 +85,57 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run agentops-coordinator.yml
+
+  rearm:
+    # Recovery for a worker that opened its pull request and died before
+    # arming the merge. Without it the branch is finished, green, and waits
+    # forever for a human -- the loop stopping on a success, which no failure
+    # path would ever notice.
+    #
+    # Its own job on purpose. The sweep above can push the default branch and
+    # dispatch workflows; this can only arm a merge, and holds neither of
+    # those. Arming merges nothing by itself: the required contexts still have
+    # to pass.
+    if: vars.AUTONOMY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Re-arm auto-merge on stranded autonomous pull requests
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # Only branches the ledger actually names. A branch prefix is not
+          # proof of authorship -- a person may name a branch `task-15-...`
+          # too, and the verdict context deliberately succeeds on a
+          # non-autonomous pull request, so arming a merge on prefix alone
+          # would merge someone's work for them the moment Quality went green.
+          leased="$(jq -r '[.leases[] | select(.state != "merged"
+                    and .state != "abandoned") | .branch] | join("\n")' \
+                    ops/state/tasks.json)"
+          if [ -z "$leased" ]; then
+            echo 'no leased branch to re-arm'
+            exit 0
+          fi
+          gh pr list --repo "$REPO" --state open --base main \
+            --json number,headRefName,autoMergeRequest \
+            --jq '.[] | select(.autoMergeRequest == null)
+                  | "\(.number) \(.headRefName)"' \
+          | while read -r pr branch; do
+              [ -n "$pr" ] || continue
+              if ! printf '%s\n' "$leased" | grep -qxF "$branch"; then
+                continue
+              fi
+              echo "re-arming auto-merge on #${pr} (${branch})"
+              gh pr merge "$pr" --repo "$REPO" --auto --squash --delete-branch \
+                || echo "could not enable auto-merge on #${pr}"
+            done
