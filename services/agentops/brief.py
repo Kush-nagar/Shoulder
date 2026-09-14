@@ -12,6 +12,7 @@ repository will read the whole repository.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from . import classify, coordinator
@@ -53,7 +54,82 @@ DISCIPLINE = """## Working rules
 """
 
 
-def render(root: Path, task_id: int) -> str:
+FRONTEND_SCOPE = """## What "done" means for the user interface
+
+This task includes interface work, and the interface is in scope: the task is
+not complete until a user can actually carry out what it describes against the
+real backend. Build it.
+
+Build it to be correct, not decorated. In scope: real data flow, correct
+states including loading, empty and error, keyboard operation, focus order,
+labels and roles, sensible behaviour at phone width, and the tests this task
+names. Out of scope, and deliberately deferred to a later dedicated pass:
+visual redesign, brand work, animation, motion, typographic refinement, and
+component abstraction nothing yet needs.
+
+Follow `docs/09-frontend-design-system.md` for the tokens and components that
+already exist rather than inventing a parallel set. Never invent player-facing
+wording: `applied` renders as "You did this.", `opportunity` as "Chance to do
+this.", and `not_relevant` is never shown to a player.
+"""
+
+REPAIR_HEADER = """# Repair brief
+
+A previous attempt at this task is already on the branch and has opened a pull
+request. It did not pass. Your job is to fix what is listed below and nothing
+else.
+
+- Do not restart the task or rewrite working code.
+- Read the existing diff first (`git log`, `git diff origin/main...HEAD`).
+- Treat each finding on its merit. A finding that is wrong, or that asks for
+  something this canonical task explicitly excludes, should be answered in the
+  pull request rather than implemented -- say why, and leave the code alone.
+- Add regression coverage for anything that was genuinely broken.
+- Re-run the verification this task owes before you finish.
+"""
+
+
+def _repair_section(reason: str, findings_path: Path | None) -> str:
+    """What failed, in the smallest form a repairer can act on."""
+    lines = ["## What failed"]
+    if reason == "ci":
+        lines.append(
+            "A required check failed on the pull request. Read the failing "
+            "job's log through `gh run view --log-failed`, find the cause, "
+            "and fix it. Do not disable, skip, or weaken the check."
+        )
+    else:
+        lines.append("Independent review left unresolved findings on the pull request.")
+
+    if findings_path and findings_path.exists():
+        try:
+            payload = json.loads(findings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+        found = payload.get("findings") or []
+        if found:
+            lines.append("")
+            lines.append("### Review findings")
+            for item in found:
+                where = item.get("path") or "unknown file"
+                line_no = item.get("line")
+                at = f"{where}:{line_no}" if line_no else where
+                lines.append(f"- `{at}` -- {item.get('summary', '').strip()}")
+            lines.append(
+                "The full thread for each is on the pull request. Resolve "
+                "each thread you act on, and reply to each one you decline."
+            )
+    lines.append("")
+    return "\n\n".join(lines)
+
+
+def render(
+    root: Path,
+    task_id: int,
+    *,
+    repair: str | None = None,
+    findings: Path | None = None,
+) -> str:
     ctx = coordinator.load_context(root)
     task = ctx.backlog.tasks.get(task_id)
     if task is None:
@@ -64,7 +140,9 @@ def render(root: Path, task_id: int) -> str:
     result = classify.classify(task)
     block = ctx.backlog.block_for_task(task_id)
 
-    lines: list[str] = [HEADER]
+    lines: list[str] = [REPAIR_HEADER if repair else HEADER]
+    if repair:
+        lines.append(_repair_section(repair, findings))
     lines.append(f"## Task {task.id} — {task.title}\n")
     lines.append(f"- Phase: {task.phase}")
     if block:
@@ -136,6 +214,9 @@ def render(root: Path, task_id: int) -> str:
             "it, then continue from there rather than starting over.\n"
         )
 
+    if result.category in ("frontend", "mixed"):
+        lines.append(FRONTEND_SCOPE)
+
     lines.append(RULES)
     lines.append(DISCIPLINE)
     return "\n".join(lines)
@@ -146,9 +227,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", type=int, required=True)
     parser.add_argument("--root", default=".")
     parser.add_argument("--out")
+    parser.add_argument(
+        "--repair",
+        choices=("ci", "review"),
+        help="write a repair brief for an existing branch instead of a fresh one",
+    )
+    parser.add_argument(
+        "--findings", help="path to a saved review verdict, for a review repair"
+    )
     args = parser.parse_args(argv)
 
-    text = render(Path(args.root).resolve(), args.task)
+    text = render(
+        Path(args.root).resolve(),
+        args.task,
+        repair=args.repair,
+        findings=Path(args.findings) if args.findings else None,
+    )
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
     else:

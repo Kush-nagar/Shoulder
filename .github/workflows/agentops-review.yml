@@ -128,3 +128,68 @@ jobs:
           set -euo pipefail
           gh pr comment "$PR" --repo "$REPO" \
             --body '@codex review for correctness, privacy, row-level security, migration safety, and anything outside this task'
+
+  verdict:
+    # The merge gate. Required branch protection contexts must report on every
+    # pull request, including ones this system did not write and ones where the
+    # reviewer job was skipped -- a required check that never runs leaves the
+    # pull request pending forever. So this job always runs and always reports.
+    #
+    # It merges nothing itself. GitHub's own auto-merge does that once every
+    # required context is green, which is why no workflow here polls for it.
+    needs: [choose, review]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_REF: ${{ github.head_ref }}
+      REVIEW_RESULT: ${{ needs.review.result }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Skip branches this system did not write
+        id: scope
+        run: |
+          set -euo pipefail
+          case "$HEAD_REF" in
+            block-*|task-*) echo 'autonomous=true' >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo 'autonomous=false' >> "$GITHUB_OUTPUT"
+              echo 'Not an autonomous branch; review verdict does not apply.' \
+                >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.scope.outputs.autonomous == 'true'
+        with:
+          # The base revision again: this runs orchestrator code, and the pull
+          # request's copy of it is what is under review.
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        if: steps.scope.outputs.autonomous == 'true'
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Decide the verdict
+        if: steps.scope.outputs.autonomous == 'true'
+        run: |
+          set -uo pipefail
+          # A reviewer that failed to run is not an approval. Fail closed: the
+          # pull request waits rather than merging unreviewed.
+          if [ "$REVIEW_RESULT" != 'success' ]; then
+            echo "Independent review did not complete (result: $REVIEW_RESULT)." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          uv run --locked python -m services.agentops.cli review-verdict \
+            --repo "$REPO" --pull-request "$PR" > verdict.json
+          status=$?
+          cat verdict.json >> "$GITHUB_STEP_SUMMARY"
+          exit $status

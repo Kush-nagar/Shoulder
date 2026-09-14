@@ -1,0 +1,185 @@
+name: AgentOps PR
+
+# What happens to an autonomous pull request after its checks report.
+#
+# Merging is deliberately NOT here. GitHub's own auto-merge does that once the
+# required contexts pass, so nothing in this repository polls for green or
+# holds a runner open waiting for it. This workflow handles the other outcome:
+# a check that failed, which is ordinary engineering and belongs back with the
+# writer rather than with a human.
+#
+# It triggers on `workflow_run`, so it runs from the default branch with the
+# repository's own trusted code, never from the pull request's copy of it. That
+# matters: the branch under review is written by an autonomous agent, and this
+# job is credentialed.
+
+on:
+  workflow_run:
+    workflows: ['Quality', 'AgentOps Review']
+    types: [completed]
+
+concurrency:
+  # One reaction per branch. Quality and the review verdict often finish within
+  # seconds of each other, and two repair dispatches for one branch would put
+  # two writers on it.
+  group: agentops-pr-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  react:
+    # Only branches this system produced, and only a real failure. A cancelled
+    # or skipped run says nothing about the code.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      (startsWith(github.event.workflow_run.head_branch, 'block-') ||
+       startsWith(github.event.workflow_run.head_branch, 'task-'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # record the repair on the state ledger
+      actions: write # dispatch the repair worker
+      issues: write # activity feed and Control Center
+      pull-requests: read
+    env:
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+      FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Work out what failed and whether it is still worth repairing
+        id: triage
+        run: |
+          set -euo pipefail
+          # The branch encodes its task: block-04-t15-... or task-15-...
+          task="$(printf '%s' "$BRANCH" | sed -n 's/.*[-]t\?\([0-9][0-9]*\)-.*/\1/p')"
+          if [ -z "$task" ]; then
+            echo 'no task number in the branch name; nothing to repair'
+            echo 'repair=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "task=${task}" >> "$GITHUB_OUTPUT"
+
+          # A merged or closed pull request is not worth repairing, and neither
+          # is a branch whose task already landed.
+          stateof="$(gh pr view "$BRANCH" --repo "$REPO" --json state \
+            --jq '.state' 2>/dev/null || echo 'NONE')"
+          if [ "$stateof" != 'OPEN' ]; then
+            echo "the pull request for $BRANCH is $stateof; not repairing"
+            echo 'repair=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${AUTONOMY_ENABLED:-false}" != 'true' ]; then
+            echo 'AUTONOMY_ENABLED is not true; recording the failure only'
+            echo 'repair=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "$FAILED_WORKFLOW" in
+            'AgentOps Review') reason=review ;;
+            *) reason=ci ;;
+          esac
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          echo 'repair=true' >> "$GITHUB_OUTPUT"
+
+      - name: Take a repair cycle
+        id: repair
+        if: steps.triage.outputs.repair == 'true'
+        env:
+          TASK: ${{ steps.triage.outputs.task }}
+          REASON: ${{ steps.triage.outputs.reason }}
+        run: |
+          set -euo pipefail
+          # Bounded on purpose. When the ceiling for this kind of failure is
+          # spent the task is released as blocked rather than retried forever,
+          # and the Control Center says so.
+          uv run --locked python -m services.agentops.cli repair \
+            --task "$TASK" --reason "$REASON" > repair.json
+          cat repair.json >> "$GITHUB_STEP_SUMMARY"
+          echo "granted=$(jq -r '.repair // false' repair.json)" >> "$GITHUB_OUTPUT"
+          echo "lane=$(jq -r '.lane // empty' repair.json)" >> "$GITHUB_OUTPUT"
+          echo "model=$(jq -r '.model // empty' repair.json)" >> "$GITHUB_OUTPUT"
+          echo "effort=$(jq -r '.effort // empty' repair.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the repair on the ledger
+        if: steps.triage.outputs.repair == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+          uv run --locked python -m services.agentops.cli validate
+          git add ops/state STATUS.md
+          if git diff --cached --quiet; then
+            echo 'no ledger change'
+            exit 0
+          fi
+          git commit -m "Record a repair cycle for branch ${BRANCH}"
+          git pull --rebase --autostash origin main
+          uv run --locked python -m services.agentops.cli validate
+          git push origin HEAD:main
+
+      - name: Send the repair back to the writer
+        # The same lane that wrote the branch. A failing test or a review
+        # finding is a code problem, not a provider problem, so switching
+        # providers here would spend fallback capacity on an ordinary bug.
+        if: steps.repair.outputs.granted == 'true'
+        env:
+          TASK: ${{ steps.triage.outputs.task }}
+          REASON: ${{ steps.triage.outputs.reason }}
+          LANE: ${{ steps.repair.outputs.lane }}
+          MODEL: ${{ steps.repair.outputs.model }}
+          EFFORT: ${{ steps.repair.outputs.effort }}
+        run: |
+          set -euo pipefail
+          if [ "$LANE" != 'claude_subscription' ] && [ "$LANE" != 'openrouter' ]; then
+            # Codex Cloud is reached by mention, not by dispatch. Ask it on the
+            # pull request instead of starting a worker that cannot run it.
+            gh pr comment "$BRANCH" --repo "$REPO" --body \
+              "@codex the required checks are failing on this branch (${REASON}). Fix the cause without weakening any check, and push to this branch."
+            exit 0
+          fi
+          gh workflow run agentops-worker.yml \
+            --field task_id="$TASK" \
+            --field lane="$LANE" \
+            --field model="$MODEL" \
+            --field effort="$EFFORT" \
+            --field branch="$BRANCH" \
+            --field mode=repair \
+            --field repair_reason="$REASON"
+
+      - name: Report
+        if: always()
+        env:
+          # Through the environment, never through ${{ }} in a run: block.
+          # That substitution is textual, and a branch name is attacker-shaped
+          # input on a workflow that holds write permissions.
+          GRANTED: ${{ steps.repair.outputs.granted }}
+          ATTEMPTED: ${{ steps.triage.outputs.repair }}
+        run: |
+          set -uo pipefail
+          granted="${GRANTED:-false}"
+          kind=ci_fail
+          headline="Checks failed on ${BRANCH}"
+          if [ "$granted" = 'true' ]; then
+            headline="Repairing ${BRANCH} after ${FAILED_WORKFLOW} failed"
+          elif [ "${ATTEMPTED:-false}" = 'true' ]; then
+            kind=blocked
+            headline="Repair ceiling reached on ${BRANCH}"
+          fi
+          details="$(jq -nc --arg b "$BRANCH" --arg w "$FAILED_WORKFLOW" \
+            '{branch: $b, failed: $w}')"
+          uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
+            --details "$details" --repo "$REPO" || echo 'activity feed unavailable'
+          uv run --locked python -m services.agentops.cli control-center \
+            --repo "$REPO" || echo 'control center unavailable'

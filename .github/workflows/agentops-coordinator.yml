@@ -219,3 +219,13 @@ jobs:
           uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
             --details "$details" --repo "$REPO" \
             || echo 'activity feed unavailable'
+
+      - name: Refresh the Control Center
+        # One page that answers "what is it doing" without reading the feed to
+        # the bottom. Rewritten in place, so watching costs one page load.
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          uv run --locked python -m services.agentops.cli control-center \
+            --repo "$REPO" || echo 'control center unavailable'

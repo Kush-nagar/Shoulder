@@ -35,6 +35,10 @@ class TestWorkflowsExist(unittest.TestCase):
                 "agentops-watchdog.yml",
                 "agentops-review.yml",
                 "agentops-verify.yml",
+                # Reacts to a failing check on an autonomous pull request.
+                # Merging is not here on purpose: GitHub's auto-merge does that
+                # once the required contexts pass, so nothing polls for green.
+                "agentops-pr.yml",
             },
         )
 
@@ -370,13 +374,29 @@ class TestWorkerBrief(unittest.TestCase):
 class TestDryRunEvidence(unittest.TestCase):
     """48. The dry run against the real backlog is the readiness proof."""
 
-    def test_dry_run_selects_task_14_with_a_complete_plan(self) -> None:
+    def test_dry_run_selects_the_next_real_task_with_a_complete_plan(self) -> None:
+        """Asserted as an invariant rather than against a task number.
+
+        This used to pin Task 14, so finishing Task 14 failed the readiness
+        proof -- the check had to be edited at every task boundary, which makes
+        it a chore rather than a guard. What actually matters is that the plan
+        is complete and internally consistent with the backlog it came from.
+        """
         result = coordinator.dry_run(REPO_ROOT)
-        self.assertEqual(result["task_id"], 14)
-        self.assertEqual(result["block"], "block-04")
-        self.assertEqual(result["prerequisites"], [7, 13])
-        self.assertEqual(result["branch"], "block-04-t14-manual-clip-marking")
-        self.assertIn("Playwright", result["verification"])
+        ctx = coordinator.load_context(REPO_ROOT)
+        task_id = result["task_id"]
+        self.assertIsNotNone(task_id, result.get("blocked"))
+
+        task = ctx.backlog.tasks[task_id]
+        block = ctx.backlog.block_for_task(task_id)
+        self.assertNotIn(task_id, state.completed_tasks(ctx.progress))
+        self.assertEqual(result["block"], block.slug if block else None)
+        self.assertEqual(result["prerequisites"], list(task.prerequisites))
+        self.assertEqual(result["branch"], coordinator.branch_name(task, block))
+        self.assertTrue(result["verification"])
+        self.assertIsNone(result["blocked_reason"])
+        self.assertIsNotNone(result["writer"])
+        self.assertIsNotNone(result["reviewer"])
 
     def test_dry_run_is_serialisable_for_a_workflow_summary(self) -> None:
         json.dumps(coordinator.dry_run(REPO_ROOT), default=str)
@@ -439,7 +459,11 @@ class TestReviewWorkflow(unittest.TestCase):
         self.assertNotIn("secrets.", choose)
 
     def test_the_credentialed_job_checks_out_only_the_trusted_base(self) -> None:
-        review = self.text.split("  review:", 1)[1]
+        # Bounded at the next job. This asserts what the *credentialed* job
+        # does, and reading to end of file would fold the uncredentialed
+        # verdict job into it -- which does legitimately read the head ref,
+        # holds no secret, and is covered separately.
+        review = self.text.split("  review:", 1)[1].split("\n  verdict:", 1)[0]
         checkout = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
         self.assertEqual(review.count("actions/checkout@"), 1)
         self.assertEqual(review.count(checkout), 1)

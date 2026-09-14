@@ -239,6 +239,64 @@ def checkpoint(
     return lease
 
 
+class RepairBudgetExhausted(Exception):
+    """This task has used its repair cycles for that kind of failure."""
+
+
+REPAIR_COUNTERS = {"ci": "ci_repair_cycles", "review": "review_repair_cycles"}
+
+
+def begin_repair(
+    tasks: dict[str, Any], policy: dict[str, Any], task_id: int, *, reason: str
+) -> dict[str, Any]:
+    """Hand a task back to a writer to fix a failing check or a review finding.
+
+    Deliberately not a fresh `acquire`. A repair is the same attempt continuing
+    on the same branch, so counting it as a new implementation attempt would
+    burn the task's attempt budget on ordinary engineering failures and block
+    work that was one lint fix from done. The two repair ceilings are separate
+    from that budget and from each other, so a branch that keeps failing CI
+    cannot also exhaust its review allowance.
+
+    Clearing the attached run matters: the lease belongs to whichever run is
+    doing the work, and the worker refuses to start against a lease held by a
+    different run. Leaving the finished run attached would refuse every repair.
+    """
+    if reason not in REPAIR_COUNTERS:
+        raise ValueError(f"{reason} is not a repairable failure kind")
+    lease = tasks.get("leases", {}).get(str(task_id))
+    if lease is None:
+        raise LeaseConflict(f"no lease for task {task_id}")
+    if lease.get("state") in TERMINAL_STATES:
+        raise LeaseConflict(
+            f"task {task_id} lease is {lease.get('state')}; nothing to repair"
+        )
+
+    counter = REPAIR_COUNTERS[reason]
+    ceiling = int(policy["escalation"][f"max_{counter}"])
+    used = int(lease.get(counter, 0))
+    if used >= ceiling:
+        raise RepairBudgetExhausted(
+            f"task {task_id} has used {used} of {ceiling} {reason} repair cycles"
+        )
+
+    lease[counter] = used + 1
+    # A repair is a fresh worker job, so it gets a fresh window. Leaving the
+    # original expiry in place would let the watchdog reclaim the branch part
+    # way through the fix.
+    started = datetime.now(UTC)
+    lease["expires_at"] = (
+        started + timedelta(seconds=int(policy["lease"]["duration_seconds"]))
+    ).isoformat(timespec="seconds")
+    lease["state"] = "repairing"
+    lease["repair_reason"] = reason
+    lease["heartbeat_at"] = now()
+    lease.pop("worker_run_id", None)
+    lease.pop("worker_run_attempt", None)
+    repaired: dict[str, Any] = lease
+    return repaired
+
+
 def release(tasks: dict[str, Any], task_id: int, state: str) -> dict[str, Any] | None:
     lease = tasks.get("leases", {}).get(str(task_id))
     if lease is None:

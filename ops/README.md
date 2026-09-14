@@ -61,15 +61,77 @@ model.
 
 ## Lanes
 
-| Lane | Harness | Billing | May write frontend |
-|---|---|---|---|
-| `claude_subscription` | Claude Code action | Claude subscription | no |
-| `codex_api` | Codex action | OpenAI API | **yes, only this one** |
-| `openrouter` | Claude Code action via OpenRouter | OpenRouter credits | no |
+| Lane | Harness | Billing | Priority | May write frontend |
+|---|---|---|---|---|
+| `claude_subscription` | Claude Code action | Claude subscription | 1 | yes |
+| `codex_cloud` | `@codex` mention | ChatGPT subscription | 2 | yes |
+| `openrouter` | Claude Code action via OpenRouter | OpenRouter credits | 3 | **no** |
+| `codex_api` | Codex action | OpenAI API | 4 (disabled) | yes |
 
-Frontend implementation is written by the OpenAI lane or it does not happen. If
-that lane is unavailable, frontend tasks report `BLOCKED_PROVIDER` rather than
-falling back to a forbidden writer.
+Claude is the primary writer for both halves of a task. That changed on
+2026-09-14: frontend work used to be Codex-only, which meant every canonical
+task containing UI stalled the autonomous loop waiting for a second provider.
+Claude now writes the interface a task requires, bounded to *functional*
+completeness — real data flow, states, keyboard operation, labels and roles,
+phone width, and the task's named tests. Visual polish is a separate later
+pass and the brief says so explicitly.
+
+The OpenRouter restriction is unchanged: that lane never writes frontend. If
+both permitted lanes are down, frontend tasks report `BLOCKED_PROVIDER` rather
+than falling back to a forbidden writer.
+
+## How the loop closes
+
+Each stage hands to the next through GitHub, not through a conversation, so any
+stage can be resumed by a fresh run that reads only repository state.
+
+```
+merge to main ─▶ coordinator ─▶ worker ─▶ pull request
+                     ▲                        │
+                     │                        ▼
+                 reconcile ◀── merge ◀── Quality + review verdict
+                                              │ (failed)
+                                              ▼
+                                        agentops-pr ─▶ repair worker
+```
+
+**Nothing in this repository merges a pull request.** GitHub's own auto-merge
+does, once every required branch-protection context passes. The worker enables
+it when it opens the pull request; the watchdog re-arms it on any open
+autonomous pull request that has none, which is the recovery path for a worker
+that died between opening the pull request and arming the merge. No workflow
+polls for green and no runner is held open waiting for a check that outlasts
+it.
+
+The required contexts are:
+
+| Context | Workflow | What it proves |
+|---|---|---|
+| `quality` | `ci.yml` | format, lint, types, tests, contracts, build, browser smoke |
+| `verdict` | `agentops-review.yml` | independent review left nothing unresolved |
+
+`verdict` is counted, not judged: unresolved, non-outdated review threads plus
+any changes-requested review. It fails closed — a review state that cannot be
+read blocks the merge rather than passing it. It also reports on every pull
+request including a human's, because a required context that never runs leaves
+one pending forever.
+
+`agentops-pr.yml` reacts to a failing required check on an autonomous branch by
+taking a repair cycle and dispatching the **same** writer again with a repair
+brief. A failing test is a code problem, not a provider problem, so a repair
+never spends fallback capacity and never spends an implementation attempt. The
+two ceilings — `max_ci_repair_cycles` and `max_review_repair_cycles` — are
+independent, and when one is spent the task is released as blocked instead of
+retried forever.
+
+## Watching it
+
+`cli control-center` rewrites the body of one issue, **Shoulder AgentOps
+Control Center**, on every meaningful transition: autonomy status, current task
+and stage, provider and model, checks, last durable checkpoint, repair counts,
+next eligible tasks, blocked tasks, and the real gates. The activity feed issue
+stays a feed — event comments — because a page that answers "what is happening
+now" and a log that answers "what happened at 03:14" are different things.
 
 ## Secrets
 

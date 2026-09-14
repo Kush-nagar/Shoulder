@@ -23,11 +23,13 @@ from typing import Any
 from . import (
     catalog,
     classify,
+    control_center,
     coordinator,
     leases,
     notify,
     qualify,
     reconcile,
+    review,
     routing,
     state,
     watchdog,
@@ -824,6 +826,71 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     return _emit(payload)
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Hand a failing task back to its writer, within the repair ceilings.
+
+    A failing check or a review finding is ordinary engineering, not a provider
+    problem, so this deliberately does not change lane: it reuses the writer
+    already recorded on the lease. Exit 1 means the ceiling is spent and the
+    task is genuinely stuck, which is a thing to surface rather than retry.
+    """
+    root = _root(args)
+    ctx = coordinator.load_context(root)
+    try:
+        lease = leases.begin_repair(
+            ctx.tasks, ctx.policy, args.task, reason=args.reason
+        )
+    except leases.RepairBudgetExhausted as spent:
+        leases.release(ctx.tasks, args.task, "blocked")
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+        return _emit(
+            {
+                "repair": False,
+                "reason": f"BLOCKED_AUTOMATION: {spent}",
+                "task": args.task,
+            }
+        )
+    except (leases.LeaseConflict, ValueError) as problem:
+        return _emit({"repair": False, "reason": str(problem), "task": args.task})
+
+    state.write_json(ctx.paths.tasks, ctx.tasks)
+    assignment = lease.get("assignment") or {}
+    return _emit(
+        {
+            "repair": True,
+            "task": args.task,
+            "reason": args.reason,
+            "branch": lease.get("branch"),
+            "lane": assignment.get("lane"),
+            "model": assignment.get("harness_model"),
+            "effort": assignment.get("effort"),
+            "pull_request": lease.get("pull_request"),
+            "ci_repair_cycles": lease.get("ci_repair_cycles", 0),
+            "review_repair_cycles": lease.get("review_repair_cycles", 0),
+        }
+    )
+
+
+def cmd_review_verdict(args: argparse.Namespace) -> int:
+    """Whether a pull request is clear to merge on review grounds.
+
+    Exit 1 is the merge gate. It is a required status check rather than a step
+    that merges by itself, so GitHub's own auto-merge does the merging and this
+    system never needs to poll for green.
+    """
+    result = review.verdict(args.repo, args.pull_request)
+    _emit(result)
+    return 0 if result.get("verdict") == "pass" else 1
+
+
+def cmd_control_center(args: argparse.Namespace) -> int:
+    root = _root(args)
+    if args.render_only:
+        print(control_center.render(root, repo=args.repo))
+        return 0
+    return _emit(control_center.publish(root, repo=args.repo))
+
+
 def cmd_notify(args: argparse.Namespace) -> int:
     root = _root(args)
     policy = state.load_policy(state.Paths(root))
@@ -965,6 +1032,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="apply this charge at most once, so a retry cannot double count",
     )
     spend.set_defaults(func=cmd_spend)
+
+    repair = sub.add_parser(
+        "repair", help="hand a failing task back to its writer, within the ceilings"
+    )
+    repair.add_argument("--task", type=int, required=True)
+    repair.add_argument("--reason", required=True, choices=("ci", "review"))
+    repair.set_defaults(func=cmd_repair)
+
+    verdict = sub.add_parser(
+        "review-verdict",
+        help="decide a pull request's review verdict; exit 1 blocks the merge",
+    )
+    verdict.add_argument("--repo", required=True)
+    verdict.add_argument("--pull-request", dest="pull_request", type=int, required=True)
+    verdict.set_defaults(func=cmd_review_verdict)
+
+    centre = sub.add_parser(
+        "control-center", help="rewrite the Control Center issue body"
+    )
+    centre.add_argument("--repo")
+    centre.add_argument(
+        "--render-only",
+        dest="render_only",
+        action="store_true",
+        help="print the page instead of publishing it",
+    )
+    centre.set_defaults(func=cmd_control_center)
 
     feed = sub.add_parser("notify", help="post one milestone to the activity feed")
     feed.add_argument("kind")

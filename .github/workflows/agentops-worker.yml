@@ -39,6 +39,18 @@ on:
       branch:
         required: true
         type: string
+      mode:
+        description: 'implement a task, or repair the branch already open for it'
+        required: false
+        default: implement
+        type: choice
+        options: [implement, repair]
+      repair_reason:
+        description: 'what failed, when mode is repair'
+        required: false
+        default: ci
+        type: choice
+        options: [ci, review]
 
 concurrency:
   # One writer per branch. This is the last line of defence behind the lease.
@@ -95,6 +107,9 @@ jobs:
       MODEL: ${{ inputs.model }}
       EFFORT: ${{ inputs.effort }}
       BRANCH: ${{ inputs.branch }}
+      MODE: ${{ inputs.mode }}
+      REPAIR_REASON: ${{ inputs.repair_reason }}
+      REPO: ${{ github.repository }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -230,10 +245,32 @@ jobs:
           uv sync --locked
 
       - name: Build the task brief
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          uv run --locked python -m services.agentops.brief \
-            --task "$TASK_ID" --out brief.md
+          if [ "${MODE:-implement}" = 'repair' ]; then
+            # A repair brief names what failed instead of restating the task,
+            # so the writer fixes the branch rather than reimplementing it.
+            # Review findings come from the same deterministic verdict the
+            # merge gate uses, not from a model re-reading the thread.
+            findings=()
+            if [ "${REPAIR_REASON:-ci}" = 'review' ]; then
+              pr="$(gh pr view "$BRANCH" --repo "$REPO" --json number \
+                --jq '.number' 2>/dev/null || true)"
+              if [ -n "$pr" ]; then
+                uv run --locked python -m services.agentops.cli review-verdict \
+                  --repo "$REPO" --pull-request "$pr" > findings.json || true
+                findings=(--findings findings.json)
+              fi
+            fi
+            uv run --locked python -m services.agentops.brief \
+              --task "$TASK_ID" --repair "${REPAIR_REASON:-ci}" \
+              "${findings[@]}" --out brief.md
+          else
+            uv run --locked python -m services.agentops.brief \
+              --task "$TASK_ID" --out brief.md
+          fi
 
       # --- Claude lane: the Claude subscription pays for this one -----------
       - name: Implement with Claude
@@ -356,7 +393,7 @@ jobs:
           GATE: ${{ steps.gate.outcome }}
         run: |
           set -euo pipefail
-          rm -f brief.md
+          rm -f brief.md findings.json
           # A harness may commit its own work, so an uncommitted-changes check
           # alone would report "no change" for a run that did plenty. Look at
           # both the working tree and what the branch has gained over main.
@@ -384,6 +421,17 @@ jobs:
             --title "Task $TASK_ID: autonomous implementation" \
             --body "$body" \
             || echo 'a pull request already exists for this branch'
+
+          # Hand merging to GitHub rather than polling for green. Auto-merge
+          # fires only once every required branch-protection context passes --
+          # Quality and the independent review verdict -- so this cannot merge
+          # failing or unreviewed work, and no runner has to stay alive waiting
+          # for checks that take longer than this job does.
+          #
+          # rm -f brief.md above keeps the brief out of the branch; findings.json
+          # is a repair artefact and must not land either.
+          gh pr merge "$BRANCH" --auto --squash --delete-branch \
+            || echo 'auto-merge could not be enabled; the pull request waits for review'
 
       - name: Carry spend and the pull request back to the ledger
         # Both were written on the task branch. A retry starts from a fresh
@@ -459,3 +507,18 @@ jobs:
             "Task $TASK_ID worker finished" \
             --details "$details" \
             --repo "$GITHUB_REPOSITORY" || echo 'activity feed unavailable'
+
+      - name: Refresh the Control Center
+        # Reads the ledger this run just pushed, so it runs last and from the
+        # default branch rather than from whatever the harness left on the
+        # task branch.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout "origin/$DEFAULT_BRANCH" -- ops/state STATUS.md || true
+          uv run --locked python -m services.agentops.cli control-center \
+            --repo "$REPO" || echo 'control center unavailable'

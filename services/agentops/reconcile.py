@@ -64,6 +64,45 @@ def pull_request_merged(
     return bool(found)
 
 
+def merged_branches(*, repo: str | None = None, base: str = "main") -> set[str]:
+    """Head branches of every pull request already merged into `base`.
+
+    Reconciliation used to read leases only. A task whose lease was swept,
+    released, or never written -- a worker that pushed and died before the
+    ledger write, a branch a human merged, a Codex Cloud hand-off whose lease
+    expired -- then merged with nothing left to reconcile against, so it was
+    never marked complete and the coordinator handed the finished task to
+    another writer. Branch names are derived from the canonical backlog, so
+    the merged branch itself is sufficient evidence without any lease.
+
+    An empty set means "could not answer", which is the same as "nothing
+    merged" here: both leave completion unchanged rather than inventing it.
+    """
+    command = [
+        "gh",
+        "pr",
+        "list",
+        "--base",
+        base,
+        "--state",
+        "merged",
+        "--json",
+        "headRefName",
+        "--limit",
+        "100",
+    ]
+    if repo:
+        command += ["--repo", repo]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return set()
+    try:
+        found = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return set()
+    return {str(pr["headRefName"]) for pr in found if pr.get("headRefName")}
+
+
 def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool:
     """Whether every commit on `branch` is already contained in `base`."""
     for ref in (f"origin/{branch}", branch):
@@ -144,6 +183,65 @@ def update_status_file(root: Path, progress: dict[str, Any], next_task: str) -> 
     return True
 
 
+def _record_completion(
+    ctx: coordinator.Context, task_id: int, branch: str, how: str
+) -> None:
+    """Mark one task complete and close its block if that finished it."""
+    done = state.completed_tasks(ctx.progress)
+    if task_id not in done:
+        done.add(task_id)
+        ctx.progress["completed_tasks"] = sorted(done)
+        ctx.progress.setdefault("evidence", {})[str(task_id)] = (
+            f"merged branch {branch} ({how})"
+        )
+        ctx.progress["updated_at"] = state.now()
+
+    block = ctx.backlog.block_for_task(task_id)
+    if block and set(block.tasks) <= set(state.completed_tasks(ctx.progress)):
+        blocks = {int(b) for b in ctx.progress.get("completed_blocks", [])}
+        blocks.add(block.id)
+        ctx.progress["completed_blocks"] = sorted(blocks)
+
+
+def _reconcile_unleased(
+    ctx: coordinator.Context, root: Path, *, repo: str | None = None
+) -> list[dict[str, Any]]:
+    """Complete merged tasks that no live lease points at.
+
+    The lease loop above cannot see these, and without them the coordinator
+    re-dispatches work that already landed on main.
+    """
+    outstanding = [
+        task_id
+        for task_id in ctx.backlog.task_ids()
+        if task_id not in state.completed_tasks(ctx.progress)
+    ]
+    if not outstanding:
+        return []
+
+    remote = merged_branches(repo=repo, base="main")
+    found: list[dict[str, Any]] = []
+    for task_id in outstanding:
+        task = ctx.backlog.tasks[task_id]
+        branch = coordinator.branch_name(task, ctx.backlog.block_for_task(task_id))
+        if branch in remote:
+            how = "pull request for the canonical task branch was merged into main"
+        elif branch_is_merged(root, branch):
+            how = "canonical task branch is an ancestor of main"
+        else:
+            continue
+        # A lease may still exist in a non-terminal state -- an expired one the
+        # loop above skipped, or one released as blocked before the work in
+        # fact landed. Close it, or the task stays held against its own
+        # completion.
+        lease = ctx.tasks.get("leases", {}).get(str(task_id))
+        if lease is not None and lease.get("state") != "merged":
+            leases.release(ctx.tasks, task_id, "merged")
+        _record_completion(ctx, task_id, branch, how)
+        found.append({"task_id": task_id, "branch": branch, "how": how})
+    return found
+
+
 def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     """Mark merged tasks complete, release their leases, and record it."""
     ctx = coordinator.load_context(root)
@@ -167,24 +265,10 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
             continue
 
         leases.release(ctx.tasks, task_id, "merged")
-
-        done = state.completed_tasks(ctx.progress)
-        if task_id not in done:
-            done.add(task_id)
-            ctx.progress["completed_tasks"] = sorted(done)
-            ctx.progress.setdefault("evidence", {})[str(task_id)] = (
-                f"merged branch {branch} ({how})"
-            )
-            ctx.progress["updated_at"] = state.now()
-
-        # A block is complete when every task in it is.
-        block = ctx.backlog.block_for_task(task_id)
-        if block and set(block.tasks) <= set(state.completed_tasks(ctx.progress)):
-            blocks = {int(b) for b in ctx.progress.get("completed_blocks", [])}
-            blocks.add(block.id)
-            ctx.progress["completed_blocks"] = sorted(blocks)
-
+        _record_completion(ctx, task_id, str(branch), how)
         completed.append({"task_id": task_id, "branch": branch, "how": how})
+
+    completed += _reconcile_unleased(ctx, root, repo=repo)
 
     status_updated = False
     if completed:

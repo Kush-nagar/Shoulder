@@ -66,6 +66,42 @@ jobs:
           uv run --locked python -m services.agentops.cli validate
           git push origin HEAD:main
 
+      - name: Re-arm auto-merge on open autonomous pull requests
+        # Recovery for a worker that pushed and opened its pull request but
+        # died before enabling auto-merge. Without this the branch is finished,
+        # green, and waits forever for a human -- the loop stops on a success.
+        # Enabling it merges nothing by itself: the required contexts still
+        # have to pass.
+        if: vars.AUTONOMY_ENABLED == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          gh pr list --repo "$REPO" --state open --base main \
+            --json number,headRefName,autoMergeRequest \
+            --jq '.[] | select(.autoMergeRequest == null)
+                  | select(.headRefName | test("^(block|task)-"))
+                  | .number' \
+          | while read -r pr; do
+              [ -n "$pr" ] || continue
+              echo "re-arming auto-merge on #${pr}"
+              gh pr merge "$pr" --repo "$REPO" --auto --squash --delete-branch \
+                || echo "could not enable auto-merge on #${pr}"
+            done
+
+      - name: Refresh the Control Center
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          uv run --locked python -m services.agentops.cli control-center \
+            --repo "$REPO" || echo 'control center unavailable'
+
       - name: Restart a lost continuation
         # Only when autonomy is on, nothing is in flight, and the coordinator
         # has not run recently. This repairs a dropped event; it is not the

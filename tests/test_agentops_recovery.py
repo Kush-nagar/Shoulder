@@ -653,9 +653,15 @@ class TestEndToEndFailover(unittest.TestCase):
         assert built.writer is not None, built.blocked_reason
         self.assertEqual(built.writer.lane, "openrouter")
 
-    def test_frontend_work_waits_when_codex_cools(self) -> None:
-        """It must not fall through to a writer the policy forbids."""
+    def test_frontend_work_waits_when_every_permitted_lane_cools(self) -> None:
+        """It must not fall through to a writer the policy forbids.
+
+        Both lanes allowed to write UI are cooled here. Since the 2026-09-14
+        owner decision that is Claude as well as Codex Cloud; the OpenRouter
+        lane is still forbidden, and that is what must not be promoted.
+        """
         self.cool("codex_cloud")
+        self.cool("claude_subscription")
         built = self.plan_for(18)
         self.assertIsNone(built.writer)
         self.assertIn("BLOCKED_PROVIDER", built.blocked_reason or "")
@@ -675,6 +681,8 @@ class TestEndToEndFailover(unittest.TestCase):
         )
         state.write_json(paths.providers, providers)
 
+        # Claude is cooled so the recovered lane is the one under test.
+        self.cool("claude_subscription")
         built = self.plan_for(18)
         assert built.writer is not None, built.blocked_reason
         self.assertEqual(built.writer.lane, "codex_cloud")
@@ -800,18 +808,22 @@ class TestSixthReviewFindings(unittest.TestCase):
             shutil.copytree(source / relative, root / relative)
 
         ctx = coordinator.load_context(root)
+        # Whatever is genuinely next, rather than a pinned number: pinning one
+        # meant finishing that task failed this check.
+        pending = coordinator.next_eligible(ctx)
+        assert pending is not None
         leases.acquire(
             ctx.tasks,
             ctx.policy,
-            task_id=14,
+            task_id=pending.task.id,
             owner="run-1",
-            branch="block-04-t14",
+            branch=coordinator.branch_name(pending.task, pending.block),
             assignment={"lane": "codex_cloud"},
         )
         state.write_json(ctx.paths.tasks, ctx.tasks)
 
         fresh = coordinator.load_context(root)
-        task = fresh.backlog.tasks[14]
+        task = fresh.backlog.tasks[pending.task.id]
         self.assertTrue(
             coordinator.evaluate(fresh, task, ignore_own_lease=True).eligible
         )
