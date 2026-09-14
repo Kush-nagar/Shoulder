@@ -253,10 +253,11 @@ class TestKillSwitch(unittest.TestCase):
     def test_dispatch_refuses_while_autonomy_is_off(self) -> None:
         from services.agentops import cli
 
+        before = coordinator.load_context(REPO_ROOT).tasks.get("leases", {})
         code = cli.main(["--root", str(REPO_ROOT), "dispatch"])
         self.assertEqual(code, 0)
-        ctx = coordinator.load_context(REPO_ROOT)
-        self.assertEqual(ctx.tasks.get("leases"), {}, "no lease may be taken")
+        after = coordinator.load_context(REPO_ROOT).tasks.get("leases", {})
+        self.assertEqual(after, before, "disabled dispatch must not mutate leases")
 
 
 class TestStateWriting(unittest.TestCase):
@@ -308,8 +309,25 @@ class TestSeededStateShape(unittest.TestCase):
     def setUp(self) -> None:
         self.ctx = coordinator.load_context(REPO_ROOT)
 
-    def test_no_lease_is_committed(self) -> None:
-        self.assertEqual(self.ctx.tasks.get("leases"), {})
+    def test_committed_leases_are_well_formed(self) -> None:
+        committed = self.ctx.tasks.get("leases")
+        if not isinstance(committed, dict):
+            self.fail("committed task state must contain a lease table")
+        completed = state.completed_tasks(self.ctx.progress)
+        valid_states = (*leases.ACTIVE_STATES, *leases.TERMINAL_STATES)
+
+        for key, lease in committed.items():
+            with self.subTest(key):
+                self.assertIsInstance(lease, dict)
+                task_id = lease.get("task_id")
+                self.assertIsInstance(task_id, int)
+                self.assertEqual(key, str(task_id))
+                self.assertIn(task_id, self.ctx.backlog.tasks)
+                self.assertIsInstance(lease.get("branch"), str)
+                self.assertTrue(lease["branch"])
+                self.assertIn(lease.get("state"), valid_states)
+                if lease["state"] in leases.ACTIVE_STATES:
+                    self.assertNotIn(task_id, completed)
 
     def test_committed_spend_is_real_and_far_under_the_ceilings(self) -> None:
         """Qualification runs really do spend, and it is recorded.

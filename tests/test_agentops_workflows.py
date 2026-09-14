@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import unittest
@@ -335,6 +336,7 @@ class TestWorkerBrief(unittest.TestCase):
 
     def test_brief_includes_a_checkpoint_when_one_exists(self) -> None:
         ctx = coordinator.load_context(REPO_ROOT)
+        original = copy.deepcopy(ctx.tasks)
         ctx.tasks.setdefault("leases", {})["14"] = {
             "task_id": 14,
             "state": "implementing",
@@ -353,14 +355,7 @@ class TestWorkerBrief(unittest.TestCase):
             self.assertIn("deadbee", text)
             self.assertIn("write the keyboard handler", text)
         finally:
-            state.write_json(
-                ctx.paths.tasks,
-                {
-                    "$comment": "Active task leases. One writer per task, per branch, "
-                    "per checkout.",
-                    "leases": {},
-                },
-            )
+            state.write_json(ctx.paths.tasks, original)
 
     def test_unknown_task_is_refused(self) -> None:
         with self.assertRaises(SystemExit):
