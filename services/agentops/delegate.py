@@ -29,7 +29,13 @@ MENTION = "@codex"
 
 def _run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        args, cwd=str(cwd) if cwd else None, capture_output=True, text=True, check=False
+        args,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
     )
 
 

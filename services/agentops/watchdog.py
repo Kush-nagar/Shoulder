@@ -122,7 +122,14 @@ def _run_finished(run_id: str, *, repo: str | None = None) -> bool | None:
     command = ["gh", "run", "view", run_id, "--json", "status"]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return None
     try:
@@ -137,7 +144,14 @@ def _pull_request_finished(number: int, *, repo: str | None = None) -> bool | No
     command = ["gh", "pr", "view", str(number), "--json", "state"]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return None
     try:

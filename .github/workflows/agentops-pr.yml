@@ -2,11 +2,11 @@ name: AgentOps PR
 
 # What happens to an autonomous pull request after its checks report.
 #
-# Merging is deliberately NOT here. GitHub's own auto-merge does that once the
-# required contexts pass, so nothing in this repository polls for green or
-# holds a runner open waiting for it. This workflow handles the other outcome:
-# a check that failed, which is ordinary engineering and belongs back with the
-# writer rather than with a human.
+# Merging is deliberately NOT here. A pull request merges once every required
+# context is green, so nothing in this repository polls for green or holds a
+# runner open waiting for it. This workflow handles the other outcome: a check
+# that failed, which is ordinary engineering and belongs back with the writer
+# rather than with a human.
 #
 # It triggers on `workflow_run`, so it runs from the default branch with the
 # repository's own trusted code, never from the pull request's copy of it. That
@@ -29,23 +29,32 @@ permissions: {}
 
 jobs:
   react:
-    # Only branches this system produced, and only a real failure. A cancelled
-    # or skipped run says nothing about the code.
+    # Only a real failure, on a branch this system produced, IN THIS REPOSITORY.
+    #
+    # The head-repository check is not redundant with the branch-name check. On
+    # a public repository anyone may open a fork pull request whose branch is
+    # named after the active canonical task, fail Quality on purpose, and reach
+    # this credentialed workflow through `workflow_run`. Repair lookup is by
+    # task number, so without this such a run would spend the real task's
+    # repair budget and dispatch a credentialed worker at the real branch.
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       (startsWith(github.event.workflow_run.head_branch, 'block-') ||
        startsWith(github.event.workflow_run.head_branch, 'task-'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write # record the repair on the state ledger
-      actions: write # dispatch the repair worker
+      actions: write # dispatch the repair worker, or rerun the reviewer
       issues: write # activity feed and Control Center
       pull-requests: read
     env:
       AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
       BRANCH: ${{ github.event.workflow_run.head_branch }}
       FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
+      FAILED_RUN_ID: ${{ github.event.workflow_run.id }}
       REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -65,69 +74,125 @@ jobs:
           task="$(printf '%s' "$BRANCH" | sed -n 's/.*[-]t\?\([0-9][0-9]*\)-.*/\1/p')"
           if [ -z "$task" ]; then
             echo 'no task number in the branch name; nothing to repair'
-            echo 'repair=false' >> "$GITHUB_OUTPUT"
+            echo 'action=none' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "task=${task}" >> "$GITHUB_OUTPUT"
 
-          # A merged or closed pull request is not worth repairing, and neither
-          # is a branch whose task already landed.
-          stateof="$(gh pr view "$BRANCH" --repo "$REPO" --json state \
-            --jq '.state' 2>/dev/null || echo 'NONE')"
-          if [ "$stateof" != 'OPEN' ]; then
-            echo "the pull request for $BRANCH is $stateof; not repairing"
-            echo 'repair=false' >> "$GITHUB_OUTPUT"
+          # A merged or closed pull request is not worth repairing, and the
+          # branch must be the one the lease actually names -- the task number
+          # alone is not proof of which branch this is.
+          pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$pr" ]; then
+            echo "no open pull request for $BRANCH; not repairing"
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+
+          leased="$(jq -r --arg t "$task" '.leases[$t].branch // empty' \
+            ops/state/tasks.json)"
+          if [ -n "$leased" ] && [ "$leased" != "$BRANCH" ]; then
+            echo "task $task is leased on $leased, not $BRANCH; not repairing"
+            echo 'action=none' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ "${AUTONOMY_ENABLED:-false}" != 'true' ]; then
             echo 'AUTONOMY_ENABLED is not true; recording the failure only'
-            echo 'repair=false' >> "$GITHUB_OUTPUT"
+            echo 'action=none' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          case "$FAILED_WORKFLOW" in
-            'AgentOps Review') reason=review ;;
-            *) reason=ci ;;
-          esac
-          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
-          echo 'repair=true' >> "$GITHUB_OUTPUT"
+          if [ "$FAILED_WORKFLOW" != 'AgentOps Review' ]; then
+            echo 'reason=ci' >> "$GITHUB_OUTPUT"
+            echo 'action=repair' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      - name: Take a repair cycle
+          # Review failing is two different events wearing one face. Either the
+          # reviewer found something -- a code problem, repair it -- or the
+          # reviewer itself failed to run, in which case there is nothing for a
+          # writer to fix. Sending the second case to the writer spends a
+          # review cycle, produces no commit, and therefore emits no
+          # `synchronize` to rerun the review: the pull request sticks forever.
+          uv run --locked python -m services.agentops.cli review-verdict \
+            --repo "$REPO" --pull-request "$pr" > verdict.json || true
+          blocking="$(jq -r '.blocking // 0' verdict.json)"
+          readable="$(jq -r '.ok // false' verdict.json)"
+          if [ "$readable" = 'true' ] && [ "$blocking" -gt 0 ]; then
+            echo 'reason=review' >> "$GITHUB_OUTPUT"
+            echo 'action=repair' >> "$GITHUB_OUTPUT"
+          else
+            echo 'the reviewer left no finding; treating this as reviewer failure'
+            echo 'action=rerun-review' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the reviewer again
+        # Infrastructure, not code: a timeout, a lost credential, a provider
+        # blip. Rerunning the failed jobs re-reports the same check on the same
+        # commit, which is what an unchanged branch needs. No repair cycle is
+        # spent, because nothing was wrong with the branch.
+        if: steps.triage.outputs.action == 'rerun-review'
+        run: |
+          set -uo pipefail
+          gh run rerun "$FAILED_RUN_ID" --repo "$REPO" --failed \
+            || echo 'could not rerun the reviewer; the watchdog will retry'
+
+      - name: Take a repair cycle and record it
         id: repair
-        if: steps.triage.outputs.repair == 'true'
+        if: steps.triage.outputs.action == 'repair'
         env:
           TASK: ${{ steps.triage.outputs.task }}
           REASON: ${{ steps.triage.outputs.reason }}
         run: |
           set -euo pipefail
-          # Bounded on purpose. When the ceiling for this kind of failure is
-          # spent the task is released as blocked rather than retried forever,
-          # and the Control Center says so.
-          uv run --locked python -m services.agentops.cli repair \
-            --task "$TASK" --reason "$REASON" > repair.json
+          git config user.name 'shoulder-agentops[bot]'
+          git config user.email 'shoulder-agentops@users.noreply.github.com'
+
+          # The coordinator and watchdog push these same files, so this uses
+          # the repository's retry-and-reapply pattern rather than rebasing a
+          # commit built from state one of them has since replaced. Taking the
+          # shared `agentops-state` lock instead would block this reaction
+          # behind a ninety-minute coordinator run, and the failing check emits
+          # no second event to retry with.
+          #
+          # Re-applying is safe because the repair carries the triggering run as
+          # a once-key: a retry cannot spend two cycles for one failure.
+          granted=false
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$DEFAULT_BRANCH"
+            git checkout -B agentops-repair "origin/$DEFAULT_BRANCH"
+            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            # What came off the branch, before anything is built on top of it.
+            # A ledger already carrying conflict markers would otherwise be
+            # re-committed here with a repair added to it.
+            uv run --locked python -m services.agentops.cli validate
+
+            uv run --locked python -m services.agentops.cli repair \
+              --task "$TASK" --reason "$REASON" \
+              --once-key "run-${FAILED_RUN_ID}" > repair.json
+            granted="$(jq -r '.repair // false' repair.json)"
+            uv run --locked python -m services.agentops.cli validate
+
+            git add ops/state STATUS.md
+            if git diff --cached --quiet; then
+              echo 'the repair is already recorded'
+              break
+            fi
+            git commit -m "Record a repair cycle for branch ${BRANCH}"
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
           cat repair.json >> "$GITHUB_STEP_SUMMARY"
-          echo "granted=$(jq -r '.repair // false' repair.json)" >> "$GITHUB_OUTPUT"
+          echo "granted=${granted}" >> "$GITHUB_OUTPUT"
           echo "lane=$(jq -r '.lane // empty' repair.json)" >> "$GITHUB_OUTPUT"
           echo "model=$(jq -r '.model // empty' repair.json)" >> "$GITHUB_OUTPUT"
           echo "effort=$(jq -r '.effort // empty' repair.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Commit the repair on the ledger
-        if: steps.triage.outputs.repair == 'true'
-        run: |
-          set -euo pipefail
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-          uv run --locked python -m services.agentops.cli validate
-          git add ops/state STATUS.md
-          if git diff --cached --quiet; then
-            echo 'no ledger change'
-            exit 0
-          fi
-          git commit -m "Record a repair cycle for branch ${BRANCH}"
-          git pull --rebase --autostash origin main
-          uv run --locked python -m services.agentops.cli validate
-          git push origin HEAD:main
 
       - name: Send the repair back to the writer
         # The same lane that wrote the branch. A failing test or a review
@@ -165,20 +230,21 @@ jobs:
           # That substitution is textual, and a branch name is attacker-shaped
           # input on a workflow that holds write permissions.
           GRANTED: ${{ steps.repair.outputs.granted }}
-          ATTEMPTED: ${{ steps.triage.outputs.repair }}
+          ACTION: ${{ steps.triage.outputs.action }}
         run: |
           set -uo pipefail
-          granted="${GRANTED:-false}"
           kind=ci_fail
           headline="Checks failed on ${BRANCH}"
-          if [ "$granted" = 'true' ]; then
+          if [ "${GRANTED:-false}" = 'true' ]; then
             headline="Repairing ${BRANCH} after ${FAILED_WORKFLOW} failed"
-          elif [ "${ATTEMPTED:-false}" = 'true' ]; then
+          elif [ "${ACTION:-none}" = 'rerun-review' ]; then
+            headline="Rerunning the reviewer on ${BRANCH}; it left no finding"
+          elif [ "${ACTION:-none}" = 'repair' ]; then
             kind=blocked
             headline="Repair ceiling reached on ${BRANCH}"
           fi
           details="$(jq -nc --arg b "$BRANCH" --arg w "$FAILED_WORKFLOW" \
-            '{branch: $b, failed: $w}')"
+            --arg a "${ACTION:-none}" '{branch: $b, failed: $w, action: $a}')"
           uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
             --details "$details" --repo "$REPO" || echo 'activity feed unavailable'
           uv run --locked python -m services.agentops.cli control-center \

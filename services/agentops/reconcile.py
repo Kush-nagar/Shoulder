@@ -54,7 +54,14 @@ def pull_request_merged(
     ]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return None
     try:
@@ -93,7 +100,14 @@ def merged_branches(*, repo: str | None = None, base: str = "main") -> set[str]:
     ]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return set()
     try:
@@ -111,6 +125,8 @@ def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
+            errors="replace",
         )
         if exists.returncode != 0:
             continue
@@ -119,6 +135,8 @@ def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
+            errors="replace",
         )
         if merged.returncode == 0:
             return True

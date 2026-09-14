@@ -247,7 +247,12 @@ REPAIR_COUNTERS = {"ci": "ci_repair_cycles", "review": "review_repair_cycles"}
 
 
 def begin_repair(
-    tasks: dict[str, Any], policy: dict[str, Any], task_id: int, *, reason: str
+    tasks: dict[str, Any],
+    policy: dict[str, Any],
+    task_id: int,
+    *,
+    reason: str,
+    once_key: str | None = None,
 ) -> dict[str, Any]:
     """Hand a task back to a writer to fix a failing check or a review finding.
 
@@ -261,12 +266,21 @@ def begin_repair(
     Clearing the attached run matters: the lease belongs to whichever run is
     doing the work, and the worker refuses to start against a lease held by a
     different run. Leaving the finished run attached would refuse every repair.
+
+    Incrementing a counter is not idempotent, and the caller writes this to a
+    branch other writers push to, so a losing race makes it re-read and
+    re-apply. `once_key` -- the triggering run -- makes the second application
+    a no-op, exactly as `record_spend` does for the same reason. Without it a
+    contended push would spend two repair cycles for one failure.
     """
     if reason not in REPAIR_COUNTERS:
         raise ValueError(f"{reason} is not a repairable failure kind")
     lease = tasks.get("leases", {}).get(str(task_id))
     if lease is None:
         raise LeaseConflict(f"no lease for task {task_id}")
+    if once_key is not None and once_key in (lease.get("repairs_applied") or {}):
+        already: dict[str, Any] = lease
+        return already
     if lease.get("state") in TERMINAL_STATES:
         raise LeaseConflict(
             f"task {task_id} lease is {lease.get('state')}; nothing to repair"
@@ -291,6 +305,11 @@ def begin_repair(
     lease["state"] = "repairing"
     lease["repair_reason"] = reason
     lease["heartbeat_at"] = now()
+    if once_key is not None:
+        lease.setdefault("repairs_applied", {})[once_key] = {
+            "reason": reason,
+            "at": now(),
+        }
     lease.pop("worker_run_id", None)
     lease.pop("worker_run_attempt", None)
     repaired: dict[str, Any] = lease

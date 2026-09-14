@@ -838,7 +838,11 @@ def cmd_repair(args: argparse.Namespace) -> int:
     ctx = coordinator.load_context(root)
     try:
         lease = leases.begin_repair(
-            ctx.tasks, ctx.policy, args.task, reason=args.reason
+            ctx.tasks,
+            ctx.policy,
+            args.task,
+            reason=args.reason,
+            once_key=args.once_key,
         )
     except leases.RepairBudgetExhausted as spent:
         leases.release(ctx.tasks, args.task, "blocked")
@@ -878,7 +882,11 @@ def cmd_review_verdict(args: argparse.Namespace) -> int:
     that merges by itself, so GitHub's own auto-merge does the merging and this
     system never needs to poll for green.
     """
-    result = review.verdict(args.repo, args.pull_request)
+    result = review.verdict(
+        args.repo,
+        args.pull_request,
+        require_submitted_review=args.require_submitted_review,
+    )
     _emit(result)
     return 0 if result.get("verdict") == "pass" else 1
 
@@ -1038,6 +1046,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     repair.add_argument("--task", type=int, required=True)
     repair.add_argument("--reason", required=True, choices=("ci", "review"))
+    repair.add_argument(
+        "--once-key",
+        dest="once_key",
+        help="apply this repair at most once, so a retried state write "
+        "cannot spend two cycles for one failure",
+    )
     repair.set_defaults(func=cmd_repair)
 
     verdict = sub.add_parser(
@@ -1046,6 +1060,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verdict.add_argument("--repo", required=True)
     verdict.add_argument("--pull-request", dest="pull_request", type=int, required=True)
+    verdict.add_argument(
+        "--require-submitted-review",
+        dest="require_submitted_review",
+        action="store_true",
+        help="the reviewer answers asynchronously; wait for a review of this head",
+    )
     verdict.set_defaults(func=cmd_review_verdict)
 
     centre = sub.add_parser(

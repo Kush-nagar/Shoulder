@@ -193,19 +193,54 @@ class TestRepairBudget(unittest.TestCase):
             leases.begin_repair(tasks, policy(), 15, reason="vibes")
 
 
-def graphql(threads: list[dict[str, Any]], reviews: list[str]) -> str:
+HEAD = "deadbeef"
+
+
+def graphql(
+    threads: list[dict[str, Any]],
+    reviews: list[dict[str, Any]] | list[str],
+    *,
+    head: str = HEAD,
+) -> str:
+    nodes = [
+        {
+            "state": r,
+            "submittedAt": "2026-09-14T00:00:00Z",
+            "author": {"login": "reviewer"},
+            "commit": {"oid": head},
+        }
+        if isinstance(r, str)
+        else r
+        for r in reviews
+    ]
     return json.dumps(
         {
             "data": {
                 "repository": {
                     "pullRequest": {
+                        "headRefOid": head,
                         "reviewThreads": {"nodes": threads},
-                        "reviews": {"nodes": [{"state": s} for s in reviews]},
+                        "reviews": {"nodes": nodes},
                     }
                 }
             }
         }
     )
+
+
+def a_review(
+    state: str,
+    *,
+    author: str = "reviewer",
+    at: str = "2026-09-14T00:00:00Z",
+    commit: str = HEAD,
+) -> dict[str, Any]:
+    return {
+        "state": state,
+        "submittedAt": at,
+        "author": {"login": author},
+        "commit": {"oid": commit},
+    }
 
 
 def thread(*, resolved: bool = False, outdated: bool = False) -> dict[str, Any]:
@@ -217,7 +252,6 @@ def thread(*, resolved: bool = False, outdated: bool = False) -> dict[str, Any]:
                 {
                     "path": "services/api/app.py",
                     "line": 10,
-                    "originalCommit": {"oid": "abc"},
                     "body": "This leaks another player's judgment.",
                 }
             ]
@@ -228,10 +262,12 @@ def thread(*, resolved: bool = False, outdated: bool = False) -> dict[str, Any]:
 class TestReviewVerdict(unittest.TestCase):
     """The merge gate. It decides, deterministically, without a model."""
 
-    def verdict_for(self, stdout: str, code: int = 0) -> dict[str, Any]:
+    def verdict_for(
+        self, stdout: str, code: int = 0, *, wait: bool = False
+    ) -> dict[str, Any]:
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=code, stdout=stdout)
-            return review.verdict("o/r", 42)
+            return review.verdict("o/r", 42, require_submitted_review=wait)
 
     def test_a_clean_review_passes(self) -> None:
         result = self.verdict_for(graphql([], ["APPROVED"]))
@@ -314,7 +350,7 @@ class TestMergeIsNativeAndGated(unittest.TestCase):
     def test_an_incomplete_review_is_not_an_approval(self) -> None:
         text = read("agentops-review.yml")
         self.assertIn("REVIEW_RESULT: ${{ needs.review.result }}", text)
-        self.assertIn("if [ \"$REVIEW_RESULT\" != 'success' ]", text)
+        self.assertIn("\"$REVIEW_RESULT\" != 'success'", text)
 
 
 class TestRepairWorkflow(unittest.TestCase):
@@ -348,7 +384,8 @@ class TestRepairWorkflow(unittest.TestCase):
 
     def test_it_does_not_repair_a_closed_pull_request(self) -> None:
         text = read("agentops-pr.yml")
-        self.assertIn("!= 'OPEN'", text)
+        self.assertIn("--state open", text)
+        self.assertIn("no open pull request for $BRANCH", text)
 
     def test_it_respects_the_kill_switch(self) -> None:
         text = read("agentops-pr.yml")
@@ -480,6 +517,198 @@ class TestNoSecretReachesAnUntrustedContext(unittest.TestCase):
         verdict = text.split("  verdict:", 1)[1]
         self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", verdict)
         self.assertNotIn("OPENROUTER_API_KEY", verdict)
+
+
+class TestIndependentReviewFindings(unittest.TestCase):
+    """The five findings independent review left on this change itself.
+
+    Each was a way the loop stopped, spent a budget on nothing, or merged
+    something unreviewed, so each keeps a test rather than a line in a commit
+    message.
+    """
+
+    def verdict_for(self, stdout: str, *, wait: bool = False) -> dict[str, Any]:
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout=stdout)
+            return review.verdict("o/r", 42, require_submitted_review=wait)
+
+    # 1. A reviewer reached by mention answers asynchronously.
+
+    def test_a_mention_reviewer_does_not_pass_before_it_answers(self) -> None:
+        """The job that posts `@codex review` succeeds immediately.
+
+        Reading the review state right then finds nothing, which is
+        indistinguishable from a clean review -- and would merge a pull request
+        nobody had looked at yet.
+        """
+        result = self.verdict_for(graphql([], []), wait=True)
+        self.assertEqual(result["verdict"], "pending")
+        self.assertGreaterEqual(result["blocking"], 1)
+
+    def test_it_passes_once_that_review_lands_on_this_head(self) -> None:
+        result = self.verdict_for(graphql([], [a_review("COMMENTED")]), wait=True)
+        self.assertEqual(result["verdict"], "pass")
+
+    def test_a_review_of_an_older_commit_does_not_count(self) -> None:
+        """A repair moves the branch on; the old review judged other code."""
+        stale = a_review("COMMENTED", commit="0ldc0de")
+        self.assertEqual(
+            self.verdict_for(graphql([], [stale]), wait=True)["verdict"], "pending"
+        )
+
+    def test_an_action_reviewer_passes_without_a_submitted_review(self) -> None:
+        """It posts inline comments synchronously, so silence really is clean."""
+        self.assertEqual(self.verdict_for(graphql([], []))["verdict"], "pass")
+
+    def test_the_workflow_waits_only_for_the_mention_mechanism(self) -> None:
+        text = read("agentops-review.yml")
+        self.assertIn("github-mention", text)
+        self.assertIn("--require-submitted-review", text)
+
+    def test_an_arriving_review_recomputes_the_verdict(self) -> None:
+        """Otherwise a pending verdict never becomes a pass and nothing merges."""
+        text = read("agentops-review.yml")
+        self.assertIn("pull_request_review:", text)
+        self.assertIn("types: [submitted, dismissed]", text)
+
+    def test_an_arriving_review_does_not_ask_for_another_one(self) -> None:
+        text = read("agentops-review.yml")
+        self.assertIn("github.event_name == 'pull_request' &&", text)
+
+    # 2. Only each reviewer's latest review counts.
+
+    def test_an_approval_supersedes_that_reviewers_earlier_objection(self) -> None:
+        """Summing history keeps a repaired branch red forever, which spends
+        the repair ceiling achieving nothing and blocks the task for good."""
+        reviews = [
+            a_review("CHANGES_REQUESTED", at="2026-09-14T00:00:00Z"),
+            a_review("APPROVED", at="2026-09-14T01:00:00Z"),
+        ]
+        result = self.verdict_for(graphql([], reviews))
+        self.assertEqual(result["changes_requested_reviews"], 0)
+        self.assertEqual(result["verdict"], "pass")
+
+    def test_another_reviewers_objection_still_counts(self) -> None:
+        reviews = [
+            a_review("APPROVED", author="one"),
+            a_review("CHANGES_REQUESTED", author="two"),
+        ]
+        self.assertEqual(
+            self.verdict_for(graphql([], reviews))["changes_requested_reviews"], 1
+        )
+
+    def test_a_comment_is_not_a_verdict(self) -> None:
+        """GitHub records COMMENTED for every inline batch. Letting it override
+        a standing objection would turn a rejection into an approval."""
+        reviews = [
+            a_review("CHANGES_REQUESTED", at="2026-09-14T00:00:00Z"),
+            a_review("COMMENTED", at="2026-09-14T02:00:00Z"),
+        ]
+        self.assertEqual(
+            self.verdict_for(graphql([], reviews))["changes_requested_reviews"], 1
+        )
+
+    def test_latest_state_ignores_advisory_records(self) -> None:
+        states = review.latest_review_states(
+            [a_review(s) for s in ("COMMENTED", "PENDING", "DISMISSED")]
+        )
+        self.assertEqual(states, {})
+
+    # 3. A fork must not reach this credentialed workflow.
+
+    def test_repair_requires_the_failure_to_come_from_this_repository(self) -> None:
+        """A fork may name its branch after the live task and fail Quality on
+        purpose. Repair lookup is by task number, so without this check that
+        run spends the real task's budget and dispatches a credentialed worker
+        at the real branch."""
+        text = read("agentops-pr.yml")
+        self.assertIn(
+            "github.event.workflow_run.head_repository.full_name == github.repository",
+            text,
+        )
+
+    def test_repair_also_checks_the_branch_against_the_lease(self) -> None:
+        """The task number alone does not prove which branch this is."""
+        text = read("agentops-pr.yml")
+        self.assertIn(".leases[$t].branch", text)
+
+    # 4. A reviewer that could not run is not a code problem.
+
+    def test_a_reviewer_failure_reruns_the_reviewer(self) -> None:
+        """Sending it to the writer spends a review cycle, produces no commit,
+        emits no `synchronize`, and leaves the pull request stuck forever."""
+        text = read("agentops-pr.yml")
+        self.assertIn("action=rerun-review", text)
+        self.assertIn("gh run rerun", text)
+
+    def test_only_a_real_finding_spends_a_review_cycle(self) -> None:
+        text = read("agentops-pr.yml")
+        self.assertIn('"$blocking" -gt 0', text)
+        self.assertIn('"$readable" = ', text)
+
+    # 5. The repair ledger write races the other state writers.
+
+    def test_the_repair_write_retries_and_reapplies(self) -> None:
+        text = read("agentops-pr.yml")
+        self.assertIn("for attempt in 1 2 3 4 5", text)
+        self.assertIn('git push origin "HEAD:$DEFAULT_BRANCH"', text)
+
+    def test_a_reapplied_repair_does_not_spend_a_second_cycle(self) -> None:
+        """Incrementing is not idempotent, so a contended push would otherwise
+        charge two cycles for one failure."""
+        tasks = {"leases": {"15": a_lease()}}
+        settings = policy()
+        first = leases.begin_repair(tasks, settings, 15, reason="ci", once_key="run-7")
+        again = leases.begin_repair(tasks, settings, 15, reason="ci", once_key="run-7")
+        self.assertEqual(first["ci_repair_cycles"], 1)
+        self.assertEqual(again["ci_repair_cycles"], 1)
+
+    def test_a_different_failure_still_spends_one(self) -> None:
+        tasks = {"leases": {"15": a_lease()}}
+        settings = policy()
+        leases.begin_repair(tasks, settings, 15, reason="ci", once_key="run-7")
+        second = leases.begin_repair(tasks, settings, 15, reason="ci", once_key="run-8")
+        self.assertEqual(second["ci_repair_cycles"], 2)
+
+    def test_the_workflow_passes_the_triggering_run_as_the_key(self) -> None:
+        text = read("agentops-pr.yml")
+        self.assertIn("--once-key", text)
+        self.assertIn("FAILED_RUN_ID", text)
+
+
+class TestShellOutputIsDecodedExplicitly(unittest.TestCase):
+    """`text=True` decodes with the locale codec.
+
+    On a Windows checkout that is cp1252, and the first non-ASCII character in
+    a review body, an issue title, or a branch name raises instead of
+    returning. The verdict fails closed, so the effect is a merge gate that can
+    never pass. Found by running the verdict against its own pull request.
+    """
+
+    def test_every_gh_and_git_call_forces_utf8(self) -> None:
+        import ast
+
+        from services.agentops import delegate, notify, watchdog
+
+        modules = (review, control_center, notify, reconcile, watchdog, delegate)
+        checked = 0
+        for module in modules:
+            assert module.__file__ is not None
+            source = Path(module.__file__).read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                target = ast.unparse(node.func)
+                if target not in ("subprocess.run", "run"):
+                    continue
+                keywords = {kw.arg for kw in node.keywords}
+                with self.subTest(f"{module.__name__}:{node.lineno}"):
+                    self.assertIn("encoding", keywords)
+                    self.assertIn("errors", keywords)
+                checked += 1
+        # A pass because nothing matched would be worthless.
+        self.assertGreaterEqual(checked, 8)
 
 
 if __name__ == "__main__":

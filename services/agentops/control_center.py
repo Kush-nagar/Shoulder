@@ -47,7 +47,14 @@ def _gh(args: list[str], *, repo: str | None = None) -> str | None:
     command = ["gh", *args]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     return result.stdout if result.returncode == 0 else None
 
 
@@ -273,7 +280,13 @@ def publish(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     command = ["issue", "edit", str(number), "--body-file", "-"]
     full = ["gh", *command] + (["--repo", repo] if repo else [])
     result = subprocess.run(
-        full, input=body, capture_output=True, text=True, check=False
+        full,
+        input=body,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
     )
     return {
         "ok": result.returncode == 0,

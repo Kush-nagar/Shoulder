@@ -74,7 +74,14 @@ def _gh(
     command = ["gh", *args]
     if repo:
         command += ["--repo", repo]
-    return subprocess.run(command, capture_output=True, text=True, check=False)
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def find_issue(title: str, *, repo: str | None = None) -> int | None:

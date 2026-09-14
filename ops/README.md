@@ -111,10 +111,23 @@ The required contexts are:
 | `verdict` | `agentops-review.yml` | independent review left nothing unresolved |
 
 `verdict` is counted, not judged: unresolved, non-outdated review threads plus
-any changes-requested review. It fails closed — a review state that cannot be
-read blocks the merge rather than passing it. It also reports on every pull
-request including a human's, because a required context that never runs leaves
-one pending forever.
+each reviewer's **latest** review state. It fails closed — a review state that
+cannot be read blocks the merge rather than passing it. It reports on every
+pull request including a human's, because a required context that never runs
+leaves one pending forever.
+
+Three things it deliberately does not do:
+
+- **Count review history.** A reviewer that requested changes and then approved
+  the repaired branch would otherwise stay blocking forever, so the branch
+  could never go green and the repair ceiling would be spent on nothing.
+- **Count outdated threads.** A pushed repair makes every earlier thread
+  outdated; counting them would keep the branch red whatever the repair fixed.
+- **Trust a mention-based reviewer's job result.** Codex Cloud answers minutes
+  after the job that asked it finishes, so "not looked at yet" and "reviewed
+  and clean" are the same picture. For a `github-mention` reviewer the verdict
+  stays `pending` until a review is submitted against the current head commit,
+  and `pull_request_review` re-derives it when that review lands.
 
 `agentops-pr.yml` reacts to a failing required check on an autonomous branch by
 taking a repair cycle and dispatching the **same** writer again with a repair
@@ -123,6 +136,18 @@ never spends fallback capacity and never spends an implementation attempt. The
 two ceilings — `max_ci_repair_cycles` and `max_review_repair_cycles` — are
 independent, and when one is spent the task is released as blocked instead of
 retried forever.
+
+It separates a reviewer that *found* something from a reviewer that *could not
+run*. Only the first is a repair; the second reruns the reviewer and spends no
+cycle, because a writer handed no finding pushes no commit, which emits no
+`synchronize`, which leaves the pull request stuck on the original failed check
+forever.
+
+It also requires the failing run's head repository to be this repository. On a
+public repository anyone may open a fork pull request named after the live
+canonical branch and fail a check deliberately; repair lookup is by task
+number, so without that check such a run would spend the real task's repair
+budget and point a credentialed worker at the real branch.
 
 ## Watching it
 
