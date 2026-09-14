@@ -15,10 +15,10 @@ against Git and GitHub before editing anything.
 | Current worker / branch | AgentOps cloud supervisor upgrade / `agentops-cloud-supervisor` |
 | Open PRs | autonomy infrastructure (this branch) |
 | Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-14 on `agentops-cloud-supervisor`: `scripts/check.ps1` passed end to end - 721 Python tests (288 skipped, all Docker or remote dependent), 367 of them AgentOps; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean |
+| Last full verification | 2026-09-14 on `agentops-cloud-supervisor` at `7ca44c8`: `scripts/check.ps1` passed end to end - 764 Python tests (288 skipped, all Docker or remote dependent), 410 of them AgentOps; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. PR #24 `quality` and `verdict` green; two independent review rounds, 19 findings, all answered and resolved. |
 | Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Merge the autonomy infrastructure pull request, enable branch protection on `quality` and `verdict`, then set `AUTONOMY_ENABLED=true`. The coordinator then selects Task 15 by itself; do not dispatch it by hand. |
+| Next action | Owner action required first: add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 and the loop cannot run. Then merge PR #24 and set `AUTONOMY_ENABLED=true`. The coordinator selects Task 15 by itself; do not dispatch it by hand. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
