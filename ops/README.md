@@ -137,6 +137,26 @@ two ceilings — `max_ci_repair_cycles` and `max_review_repair_cycles` — are
 independent, and when one is spent the task is released as blocked instead of
 retried forever.
 
+### The liveness cost of failing closed
+
+An unresolved review thread blocks the merge, and the gate cannot tell "already
+fixed" from "ignored". Changing the lines a finding points at marks its thread
+outdated and it stops counting, which covers most repairs — this pull request
+went from fourteen blocking threads to six that way. A fix made *elsewhere*
+leaves its thread standing, and the branch then stays blocked for every
+remaining repair cycle until the task is released as blocked.
+
+That is deliberate. The alternative — dropping findings from older commits —
+merges on the assumption that a silent reviewer means a fixed problem, and gets
+it wrong in the direction that ships the defect. Blocking is wrong in the
+direction that stops and asks, which is the trade this system is supposed to
+make.
+
+The repair brief therefore tells the writer to reply to and resolve each thread
+it answers, and gives it the exact `gh api graphql` calls. If that does not
+happen, the task blocks visibly on the Control Center rather than merging
+something unreviewed.
+
 It separates a reviewer that *found* something from a reviewer that *could not
 run*. Only the first is a repair; the second reruns the reviewer and spends no
 cycle, because a writer handed no finding pushes no commit, which emits no

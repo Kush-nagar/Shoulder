@@ -89,6 +89,34 @@ else.
 """
 
 
+RESOLVING = """The full thread for each is on the pull request.
+
+**Answer every thread before you finish.** The merge gate counts unresolved
+threads, and it cannot tell "already fixed" from "ignored". Changing the lines
+a finding points at marks its thread outdated automatically and it stops
+counting -- but a fix made anywhere else leaves the thread standing, and the
+branch then stays blocked through every remaining repair cycle until the task
+is given up on. That is the most likely way this task fails from here.
+
+So: reply saying where you fixed it, or why you are declining it, and then
+resolve it. List the open threads and resolve one with:
+
+```
+gh api graphql -F o=OWNER -F n=REPO -F p=NUMBER -f query='
+  query($o:String!,$n:String!,$p:Int!){ repository(owner:$o,name:$n){
+    pullRequest(number:$p){ reviewThreads(first:100){ nodes{
+      id isResolved isOutdated
+      comments(first:1){ nodes{ path line body } } } } } } }'
+
+gh api graphql -F t=THREAD_ID -f query='
+  mutation($t:ID!){ resolveReviewThread(input:{threadId:$t}){
+    thread{ isResolved } } }'
+```
+
+Resolve only what you actually answered. Resolving a finding you did not
+address hides a real defect from the one gate that would have caught it."""
+
+
 def _repair_section(reason: str, findings_path: Path | None) -> str:
     """What failed, in the smallest form a repairer can act on."""
     lines = ["## What failed"]
@@ -115,10 +143,11 @@ def _repair_section(reason: str, findings_path: Path | None) -> str:
                 line_no = item.get("line")
                 at = f"{where}:{line_no}" if line_no else where
                 lines.append(f"- `{at}` -- {item.get('summary', '').strip()}")
-            lines.append(
-                "The full thread for each is on the pull request. Resolve "
-                "each thread you act on, and reply to each one you decline."
-            )
+    if reason == "review":
+        # Unconditional, not only when the findings file parsed. A review
+        # repair means threads exist by definition; if fetching them failed,
+        # the writer needs this more, not less.
+        lines.append(RESOLVING)
     lines.append("")
     return "\n\n".join(lines)
 

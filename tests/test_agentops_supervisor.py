@@ -868,6 +868,42 @@ class TestSecondRoundReviewFindings(unittest.TestCase):
         work = text.split("  work:", 1)[1].split("\n  report:", 1)[0]
         self.assertNotIn("cli control-center", work)
 
+    # Answering a thread is what unblocks the branch.
+
+    def test_a_review_repair_is_told_how_to_resolve_a_thread(self) -> None:
+        """The gate counts unresolved threads and cannot tell "already fixed"
+        from "ignored". A fix made away from the flagged line leaves its thread
+        standing, and the branch then stays blocked through every remaining
+        repair cycle -- the most likely way a task fails from there."""
+        from services.agentops import brief
+
+        text = brief.render(REPO_ROOT, 15, repair="review")
+        self.assertIn("resolveReviewThread", text)
+        self.assertIn("reviewThreads", text)
+
+    def test_the_guidance_survives_a_failed_findings_fetch(self) -> None:
+        """A review repair means threads exist by definition; if reading them
+        failed, the writer needs this more, not less."""
+        from services.agentops import brief
+
+        missing = REPO_ROOT / "does-not-exist.json"
+        text = brief.render(REPO_ROOT, 15, repair="review", findings=missing)
+        self.assertIn("resolveReviewThread", text)
+
+    def test_it_warns_against_resolving_what_was_not_addressed(self) -> None:
+        """That hides a real defect from the one gate that would catch it."""
+        from services.agentops import brief
+
+        text = brief.render(REPO_ROOT, 15, repair="review")
+        self.assertIn("Resolve only what you actually answered", text)
+
+    def test_a_ci_repair_is_not_told_about_threads(self) -> None:
+        from services.agentops import brief
+
+        self.assertNotIn(
+            "resolveReviewThread", brief.render(REPO_ROOT, 15, repair="ci")
+        )
+
 
 class TestShellOutputIsDecodedExplicitly(unittest.TestCase):
     """`text=True` decodes with the locale codec.
