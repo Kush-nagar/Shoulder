@@ -7,10 +7,10 @@ name: AgentOps Review
 #
 # The work is split across two jobs on purpose. Choosing the reviewer runs
 # orchestrator code, so it runs from the base revision with no secrets at all.
-# Only the second job holds credentials, and it runs nothing from the branch
-# except the vendored review action itself. Without that split a branch could
-# edit services/agentops and read the provider secrets out of the runner --
-# and an autonomous writer's branch is exactly that kind of branch.
+# Only the second job holds credentials, and its workspace contains only the
+# trusted base revision. Without that split a branch could edit services/agentops
+# and read the provider secrets out of the runner -- and an autonomous writer's
+# branch is exactly that kind of branch.
 #
 # This triggers on `pull_request`, never on the target-context variant, so a
 # fork's code is never handed these credentials.
@@ -79,9 +79,13 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      # No checkout of the branch before a review step runs. Each action
-      # fetches what it needs itself, so no step here executes branch code with
-      # these credentials in scope.
+      - name: Checkout trusted base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Review with Claude
         if: needs.choose.outputs.lane == 'claude_subscription'
         uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1

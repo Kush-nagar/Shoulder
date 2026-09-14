@@ -438,10 +438,19 @@ class TestReviewWorkflow(unittest.TestCase):
         choose = self.text.split("  choose:", 1)[1].split("  review:", 1)[0]
         self.assertNotIn("secrets.", choose)
 
-    def test_the_credentialed_job_checks_out_no_branch_code(self) -> None:
+    def test_the_credentialed_job_checks_out_only_the_trusted_base(self) -> None:
         review = self.text.split("  review:", 1)[1]
-        self.assertIn("secrets.", review)
-        self.assertNotIn("actions/checkout", review)
+        checkout = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+        self.assertEqual(review.count("actions/checkout@"), 1)
+        self.assertEqual(review.count(checkout), 1)
+        checkout_step = review.split("- name: Review with Claude", 1)[0]
+        self.assertIn(checkout, checkout_step)
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", checkout_step)
+        self.assertIn("fetch-depth: 1", checkout_step)
+        self.assertIn("persist-credentials: false", checkout_step)
+        self.assertLess(review.index(checkout), review.index("secrets."))
+        self.assertNotIn("github.event.pull_request.head", review)
+        self.assertNotIn("github.head_ref", review)
 
     def test_review_only_touches_branches_this_system_made(self) -> None:
         self.assertIn("startsWith(github.head_ref, 'block-')", self.text)
