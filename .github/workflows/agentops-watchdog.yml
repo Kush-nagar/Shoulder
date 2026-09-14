@@ -11,9 +11,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Shared with the coordinator: both push ops/state to main, and interleaving
-  # them loses a lease recovery or fails the push. Not cancel-in-progress, for
-  # the same reason -- a half-finished recovery is worse than a delayed one.
+  # Shared with the coordinator: both rewrite several runtime state files per
+  # run, and this keeps them from racing each other. Not cancel-in-progress,
+  # for the same reason -- a half-finished recovery is worse than a delayed
+  # one.
   group: agentops-state
   cancel-in-progress: false
 
@@ -34,6 +35,9 @@ jobs:
           version: '0.12.10'
           python-version: '3.11.16'
 
+      - name: Read the runtime ledger
+        run: uv run --locked python -m services.agentops.cli state-pull
+
       - name: Sweep stale leases and recover providers
         id: sweep
         env:
@@ -48,23 +52,14 @@ jobs:
           echo "recovered=$(jq -r '.recovered | length' sweep.json)" >> "$GITHUB_OUTPUT"
           echo "idle=$(jq -r '.idle' sweep.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Commit any recovery
+      - name: Write any recovery to the runtime ledger
         run: |
           set -euo pipefail
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-          # A rebase between two state writers can leave conflict markers in a
-          # generated file nobody reads by hand. Never commit one.
+          # A conflict-marked ledger is invisible until something fails to load
+          # it. Never write one.
           uv run --locked python -m services.agentops.cli validate
-          git add ops/state STATUS.md
-          if git diff --cached --quiet; then
-            echo 'nothing to recover'
-            exit 0
-          fi
-          git commit -m 'Recover stale agentops state'
-          git pull --rebase --autostash origin main
-          uv run --locked python -m services.agentops.cli validate
-          git push origin HEAD:main
+          uv run --locked python -m services.agentops.cli state-push \
+            --message 'Recover stale agentops state'
 
       - name: Refresh the Control Center
         if: always()
@@ -108,7 +103,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
-          persist-credentials: false
+          # Credentials are kept here, unlike the review jobs: this is a private
+          # repository and reading the state branch is a fetch. The job's own
+          # permissions are what bound it -- contents: read, so the credential
+          # it keeps cannot write anything at all.
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Read the runtime ledger
+        # It decides which open pull requests this system actually owns, and
+        # the copy on the default branch is only a seed.
+        run: uv run --locked python -m services.agentops.cli state-pull
 
       - name: Re-arm auto-merge on stranded autonomous pull requests
         continue-on-error: true

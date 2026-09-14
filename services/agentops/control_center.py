@@ -116,7 +116,7 @@ def _autonomy_status(
 def _gates(ctx: coordinator.Context) -> list[str]:
     """Real gates standing between the system and the rest of the backlog."""
     out = []
-    if not state.gate_passed(ctx.progress):
+    if not state.gate_passed(ctx.policy, ctx.progress):
         out.append(
             "**real_use_gate** — Task 23 onward needs real coach and player use of "
             "the manual product plus the human judgments that come out of it. No "

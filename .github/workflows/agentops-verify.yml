@@ -100,6 +100,9 @@ jobs:
           version: '0.12.10'
           python-version: '3.11.16'
 
+      - name: Read the runtime ledger
+        run: uv run --locked python -m services.agentops.cli state-pull
+
       - name: Discover the live model catalogue
         id: discover
         run: |
@@ -220,64 +223,48 @@ jobs:
           # Autonomy must still be off after every one of these steps.
           test "$(jq -r '.autonomy_enabled' plan.json)" = 'false'
 
-      - name: Commit the qualification verdicts
+      - name: Preserve this run's verdicts
+        # Somewhere a checkout cannot overwrite. The next step replaces the
+        # worktree, and these were paid for.
+        if: github.event_name == 'workflow_dispatch'
+        run: cp ops/state/models.json "$RUNNER_TEMP/verdicts.json"
+
+      - name: Restore the checkout credential
+        # An earlier action in this job -- the Claude smoke test -- replaces
+        # the credential the first checkout left behind, and the next `git
+        # fetch` then fails with "Password authentication is not supported".
+        # A run that had already paid for its verdicts lost them that way.
+        # Checking out again restores it, which is cheaper and far less
+        # delicate than carrying an encoded token through the shell by hand.
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Record the qualification verdicts
         # A push-triggered run proves the control plane still loads and plans.
-        # It records nothing, so it cannot race the coordinator's own commit.
+        # It records nothing, so it cannot race another writer.
         if: github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-
-          # Keep this run's verdicts somewhere the branch switch cannot touch.
-          cp ops/state/models.json "$RUNNER_TEMP/verdicts.json"
-
-          # Authenticate this step's own remote work with the job token rather
-          # than relying on whatever credential the checkout left behind: a
-          # later action in this job can replace it, and a run that had already
-          # paid for its verdicts then failed on the first fetch with
-          # "Password authentication is not supported". The header is passed per
-          # command, so the token is never written into the remote URL or the
-          # repository config.
-          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          # The runner masks the token itself, but not this encoding of it, so
-          # say so explicitly before it can reach a log line.
-          echo "::add-mask::$auth"
-          git_auth() {
-            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" "$@"
-          }
-
           # Read-modify-write, not rebase. This run refreshed the whole
           # catalogue before qualifying anything, so its models.json differs
           # from the branch's in every last_seen timestamp; rebasing that
           # against another writer's commit conflicts on a generated file, and
           # that is how two runs lost verdicts they had already paid for.
           for attempt in 1 2 3 4 5; do
-            git_auth fetch origin "$DEFAULT_BRANCH"
-            git checkout -B agentops-verdicts "origin/$DEFAULT_BRANCH"
-            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
-            # Belt and braces: never push from anywhere but the branch just made.
-            if [ "$(git rev-parse --abbrev-ref HEAD)" != 'agentops-verdicts' ]; then
-              echo 'not on the expected state branch; refusing to push' >&2
-              exit 1
-            fi
-
-            # What main is carrying, before this run builds on it. If another
-            # writer ever lands a corrupt ledger, stop rather than extend it.
+            uv run --locked python -m services.agentops.cli state-pull
+            # What the branch is carrying, before this run builds on it. If
+            # another writer ever lands a corrupt ledger, stop rather than
+            # extend it.
             uv run --locked python -m services.agentops.cli validate
 
             uv run --locked python -m services.agentops.cli merge-verdicts \
               --from "$RUNNER_TEMP/verdicts.json"
-            # A conflict marker in a generated file nobody reads by hand would
-            # be committed silently. Never commit one.
             uv run --locked python -m services.agentops.cli validate
-            git add ops/state
-            if git diff --cached --quiet; then
-              echo 'verdicts already recorded'
-              exit 0
-            fi
-            git commit -m 'Record provider qualification from a cloud verify run'
-            if git_auth push origin "HEAD:$DEFAULT_BRANCH"; then
+
+            if uv run --locked python -m services.agentops.cli state-push \
+                 --message 'Record provider qualification from a cloud verify run'; then
               exit 0
             fi
             echo "another writer landed first; re-reading and re-applying (attempt $attempt)" >&2

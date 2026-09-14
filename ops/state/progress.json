@@ -38,7 +38,7 @@
     "9": "docs/projects/project-02-video-ingest-durable-work-verification.md (PR #10)"
   },
   "gates": {
-    "$comment": "docs/06-tasks.md: Task 23 and everything after it wait for the mandatory real-use gate. Only a human may set this true.",
+    "$comment": "Superseded by ops/policy.json gates, which is on the protected branch. Kept only so a pre-migration ledger can still refuse a gate; it can no longer grant one. See services/agentops/state.gate_passed.",
     "real_use_gate": false
   },
   "last_verified_main": "dab524f9c75c3e8dfac430422f717e57ef61985f",

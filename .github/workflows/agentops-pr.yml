@@ -44,7 +44,7 @@ jobs:
        startsWith(github.event.workflow_run.head_branch, 'task-'))
     runs-on: ubuntu-24.04
     permissions:
-      contents: write # record the repair on the state ledger
+      contents: write # write the agentops-state branch, nothing else
       actions: write # dispatch the repair worker, or rerun the reviewer
       issues: write # activity feed and Control Center
       pull-requests: read
@@ -54,7 +54,6 @@ jobs:
       FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
       FAILED_RUN_ID: ${{ github.event.workflow_run.id }}
       REPO: ${{ github.repository }}
-      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -65,6 +64,12 @@ jobs:
         with:
           version: '0.12.10'
           python-version: '3.11.16'
+
+      - name: Read the runtime ledger
+        # Triage below reads the lease to decide whether this branch is even
+        # ours, and `cli reviewer` reads it too. The copy committed on the
+        # default branch is a seed, not the live ledger.
+        run: uv run --locked python -m services.agentops.cli state-pull
 
       - name: Work out what failed and whether it is still worth repairing
         id: triage
@@ -183,27 +188,25 @@ jobs:
           REASON: ${{ steps.triage.outputs.reason }}
         run: |
           set -euo pipefail
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-
-          # The coordinator and watchdog push these same files, so this uses
-          # the repository's retry-and-reapply pattern rather than rebasing a
-          # commit built from state one of them has since replaced. Taking the
-          # shared `agentops-state` lock instead would block this reaction
-          # behind a ninety-minute coordinator run, and the failing check emits
-          # no second event to retry with.
+          # Re-runs its own mutation against freshly pulled state on every
+          # attempt, rather than relying on the push to merge for it. Two
+          # writers changing the same file is the one case a per-file re-apply
+          # cannot resolve, and this mutation is a single cheap command, so
+          # repeating it is both possible and strictly safer.
           #
-          # Re-applying is safe because the repair carries the triggering run as
+          # Taking the shared `agentops-state` lock instead would queue this
+          # behind a ninety-minute coordinator run, and a completed
+          # `workflow_run` emits no second event to retry with.
+          #
+          # Repeating is safe because the repair carries the triggering run as
           # a once-key: a retry cannot spend two cycles for one failure.
           granted=false
           pushed=false
           for attempt in 1 2 3 4 5; do
-            git fetch origin "$DEFAULT_BRANCH"
-            git checkout -B agentops-repair "origin/$DEFAULT_BRANCH"
-            git checkout "origin/$DEFAULT_BRANCH" -- ops/state
+            uv run --locked python -m services.agentops.cli state-pull
             # What came off the branch, before anything is built on top of it.
             # A ledger already carrying conflict markers would otherwise be
-            # re-committed here with a repair added to it.
+            # written back with a repair added to it.
             uv run --locked python -m services.agentops.cli validate
 
             uv run --locked python -m services.agentops.cli repair \
@@ -212,14 +215,8 @@ jobs:
             granted="$(jq -r '.repair // false' repair.json)"
             uv run --locked python -m services.agentops.cli validate
 
-            git add ops/state STATUS.md
-            if git diff --cached --quiet; then
-              echo 'the repair is already recorded'
-              pushed=true
-              break
-            fi
-            git commit -m "Record a repair cycle for branch ${BRANCH}"
-            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+            if uv run --locked python -m services.agentops.cli state-push \
+                 --message "Record a repair cycle for branch ${BRANCH}"; then
               pushed=true
               break
             fi
@@ -228,7 +225,7 @@ jobs:
 
           cat repair.json >> "$GITHUB_STEP_SUMMARY"
           if [ "$pushed" != 'true' ]; then
-            # The cycle and its once-key never reached the default branch, so
+            # The cycle and its once-key never reached the state branch, so
             # nothing recorded that this repair happened. Dispatching anyway
             # would run a writer whose cost is invisible to the ceiling, and
             # the next failure would be charged as if it were the first --

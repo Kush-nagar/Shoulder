@@ -263,21 +263,16 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
 
     completed += _reconcile_unleased(ctx, root, repo=repo)
 
-    status_updated = False
     if completed:
         state.write_json(ctx.paths.tasks, ctx.tasks)
         state.write_json(ctx.paths.progress, ctx.progress)
 
-        # Keep the human checkpoint honest. A worker told to read STATUS.md
-        # would otherwise see merged work still listed as outstanding.
-        fresh = coordinator.load_context(root)
-        candidate = coordinator.next_eligible(fresh)
-        next_task = (
-            f"Task {candidate.task.id} - {candidate.task.title}"
-            if candidate
-            else "none eligible"
-        )
-        status_updated = update_status_file(root, ctx.progress, next_task)
+        # STATUS.md is deliberately not written here. It lives on the
+        # protected default branch, which nothing in normal operation may push
+        # to, and a file that can only be updated through a reviewed pull
+        # request cannot be a live progress view. The Control Center issue is
+        # that view, and every worker reads its progress from the ledger
+        # through the brief rather than from the file.
         if repo:
             issue = notify.ensure_feed(ctx.policy, repo=repo)
             for entry in completed:
@@ -294,7 +289,6 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         "checked_at": state.now(),
         "completed": completed,
         "completed_tasks": sorted(state.completed_tasks(ctx.progress)),
-        "status_file_updated": status_updated,
     }
 
 

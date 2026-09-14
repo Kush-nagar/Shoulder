@@ -32,6 +32,7 @@ from . import (
     review,
     routing,
     state,
+    statebranch,
     watchdog,
 )
 
@@ -53,7 +54,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             "autonomy_enabled": state.autonomy_enabled(ctx.policy),
             "completed_tasks": sorted(done),
             "remaining_tasks": [t for t in ctx.backlog.task_ids() if t not in done],
-            "gates": ctx.progress.get("gates", {}),
+            # From policy, which is on the protected branch. The ledger's
+            # copy is historical and cannot grant a gate.
+            "gates": ctx.policy.get("gates", {}),
+            "state_branch": statebranch.BRANCH,
             "provider_health": state.provider_health(ctx.providers),
             "budget_blocked": sorted(state.budget_blocked(ctx.policy, ctx.budget)),
             "qualified_models": sorted(
@@ -513,7 +517,7 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         if breach:
             problems.append(f"lane {args.lane} {breach}")
 
-    if task.gated and not state.gate_passed(ctx.progress):
+    if task.gated and not state.gate_passed(ctx.policy, ctx.progress):
         problems.append("task is behind the mandatory real-use gate")
     if (
         any(p in task.phase for p in ("Phase D", "Phase E", "Phase F"))
@@ -803,25 +807,14 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         leases.release(ctx.tasks, candidate.task.id, "blocked")
         state.write_json(ctx.paths.tasks, ctx.tasks)
 
-        # Blocking changes what the next eligible task is, and STATUS.md is the
-        # file a human and every worker read. Leaving it naming a task nothing
-        # will pick up would be worse than not writing it at all.
-        fresh = coordinator.load_context(root)
-        following = coordinator.next_eligible(fresh)
-        refreshed = reconcile.update_status_file(
-            root,
-            fresh.progress,
-            (
-                f"Task {following.task.id} - {following.task.title}"
-                if following
-                else "none eligible"
-            ),
-        )
+        # Blocking changes what the next eligible task is. That used to be
+        # written into STATUS.md, which is on the protected default branch;
+        # nothing in normal operation pushes there now, so the Control Center
+        # reports it instead.
         return _emit(
             {
                 "dispatched": False,
                 "reason": f"BLOCKED_AUTOMATION: {exhausted}",
-                "status_file_updated": refreshed,
             }
         )
 
@@ -906,6 +899,65 @@ def cmd_control_center(args: argparse.Namespace) -> int:
         print(control_center.render(root, repo=args.repo))
         return 0
     return _emit(control_center.publish(root, repo=args.repo))
+
+
+def cmd_status_snapshot(args: argparse.Namespace) -> int:
+    """Rewrite the STATUS.md progress block from the current ledger.
+
+    Deliberately a command someone runs, not something automation does. The
+    file is on the protected default branch, so the only way it can change is
+    through a reviewed pull request; the live view is the Control Center.
+    """
+    root = _root(args)
+    ctx = coordinator.load_context(root)
+    candidate = coordinator.next_eligible(ctx)
+    updated = reconcile.update_status_file(
+        root,
+        ctx.progress,
+        (
+            f"Task {candidate.task.id} - {candidate.task.title}"
+            if candidate
+            else "none eligible"
+        ),
+    )
+    return _emit({"ok": True, "status_file_updated": updated})
+
+
+def cmd_state_pull(args: argparse.Namespace) -> int:
+    """Bring the runtime ledger in this worktree up to the state branch.
+
+    Every job that reads or writes state runs this first. Before the branch
+    exists the files committed on the default branch are the seed, so a fresh
+    repository and a migrating one take the same path.
+    """
+    try:
+        return _emit(statebranch.pull(_root(args)))
+    except statebranch.StateBranchError as failure:
+        return _emit({"ok": False, "reason": str(failure)}) or 1
+
+
+def cmd_state_push(args: argparse.Namespace) -> int:
+    """Commit the runtime ledger onto the state branch.
+
+    Exit 1 means another writer landed first and nothing was written. The
+    caller re-reads, re-applies its change and tries again; every mutation
+    here is written to be safe to repeat.
+    """
+    try:
+        result = statebranch.push(_root(args), args.message)
+    except statebranch.StateBranchError as failure:
+        _emit({"pushed": False, "reason": str(failure)})
+        return 1
+    _emit(result)
+    return 0 if result.get("pushed") else 1
+
+
+def cmd_state_contents(args: argparse.Namespace) -> int:
+    """Every path the state branch holds. Nothing outside ops/state may appear."""
+    paths = statebranch.contents(_root(args))
+    stray = [p for p in paths if not p.startswith(f"{statebranch.TRACKED}/")]
+    _emit({"branch": statebranch.BRANCH, "paths": paths, "stray": stray})
+    return 0 if not stray else 1
 
 
 def cmd_notify(args: argparse.Namespace) -> int:
@@ -1093,6 +1145,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the page instead of publishing it",
     )
     centre.set_defaults(func=cmd_control_center)
+
+    sub.add_parser(
+        "status-snapshot",
+        help="rewrite the STATUS.md progress block; commit it through a pull request",
+    ).set_defaults(func=cmd_status_snapshot)
+
+    state_pull = sub.add_parser(
+        "state-pull", help="read the runtime ledger from the state branch"
+    )
+    state_pull.set_defaults(func=cmd_state_pull)
+
+    state_push = sub.add_parser(
+        "state-push", help="write the runtime ledger to the state branch"
+    )
+    state_push.add_argument("--message", required=True)
+    state_push.set_defaults(func=cmd_state_push)
+
+    sub.add_parser(
+        "state-contents",
+        help="list what the state branch holds; exit 1 on a stray path",
+    ).set_defaults(func=cmd_state_contents)
 
     feed = sub.add_parser("notify", help="post one milestone to the activity feed")
     feed.add_argument("kind")

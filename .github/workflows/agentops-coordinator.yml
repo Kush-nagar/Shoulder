@@ -14,10 +14,10 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      # This workflow commits ops/state to main. Without ignoring it, its own
-      # state commit retriggers it, and because the catalogue refresh rewrites
-      # timestamps on every run, each run would push again and start another
-      # coordinator -- an unbounded loop, even with autonomy disabled.
+      # The runtime ledger lives on the agentops-state branch now, so this
+      # workflow no longer commits to main at all and cannot retrigger itself.
+      # ops/state stays listed because the seed copies are still on main: a
+      # reviewed change to one of them is not a reason to start a task.
       - 'ops/state/**'
       - 'docs/**'
       - '**/*.md'
@@ -31,10 +31,11 @@ on:
     types: [agentops-continue]
 
 concurrency:
-  # One writer of ops/state at a time. This group is shared with the watchdog:
-  # both push the ledger to main, and interleaving them loses a lease recovery
-  # or fails the push outright. It also keeps two coordinators from handing the
-  # same task to two workers before either lease is written.
+  # One heavy writer of the runtime ledger at a time. Shared with the watchdog:
+  # both rewrite several state files per run, and this is what keeps them from
+  # racing each other into a last-writer-wins resolution on the same file. It
+  # also keeps two coordinators from handing the same task to two workers
+  # before either lease is written.
   group: agentops-state
   cancel-in-progress: false
 
@@ -44,7 +45,7 @@ jobs:
   coordinate:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write # commit the state ledger, and open a Codex task branch
+      contents: write # write the state branch, and open a Codex task branch
       issues: write # post to the activity feed
       actions: write # dispatch the worker workflow
       pull-requests: write # open the pull request Codex Cloud attaches to
@@ -64,6 +65,12 @@ jobs:
           version: '0.12.10'
           python-version: '3.11.16'
 
+      - name: Read the runtime ledger
+        # Leases, provider health, spend and progress live on the
+        # agentops-state branch, not here. The default branch is protected and
+        # nothing in normal operation pushes to it.
+        run: uv run --locked python -m services.agentops.cli state-pull
+
       - name: Refresh the model catalogue
         continue-on-error: true
         run: uv run --locked python -m services.agentops.cli discover
@@ -74,7 +81,8 @@ jobs:
         # seeing the same task outstanding and held, and never advance.
         run: |
           set -euo pipefail
-          uv run --locked python -m services.agentops.reconcile --repo "$REPO"             > reconcile.json
+          uv run --locked python -m services.agentops.reconcile --repo "$REPO" \
+            > reconcile.json
           cat reconcile.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Probe provider health
@@ -119,27 +127,20 @@ jobs:
           echo "acquired=$(jq -r '.dispatched // false' dispatch.json)" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Commit the state ledger
+      - name: Write the runtime ledger
         if: always()
         run: |
           set -euo pipefail
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-          # A rebase between two state writers can leave conflict markers in a
-          # generated file nobody reads by hand. Never commit one.
+          # A rebase between two state writers could leave conflict markers in
+          # a generated file nobody reads by hand. Never write one.
           uv run --locked python -m services.agentops.cli validate
-          git add ops/state STATUS.md
-          if git diff --cached --quiet; then
-            echo 'no state change'
-            exit 0
-          fi
-          git commit -m 'Update the agentops state ledger'
-          # Another state writer may have landed while this run worked.
-          git pull --rebase --autostash origin main
-          # The rebase itself is what can leave conflict markers behind, so
-          # check again before this becomes someone else's starting point.
-          uv run --locked python -m services.agentops.cli validate
-          git push origin HEAD:main
+          # Retries internally, re-applying only the files this run changed, so
+          # a writer that landed first keeps everything it touched. This run
+          # cannot simply repeat its own work: taking a lease increments an
+          # attempt counter, and re-running it would spend the task's attempt
+          # budget on a push race.
+          uv run --locked python -m services.agentops.cli state-push \
+            --message 'Update the agentops runtime ledger'
 
       - name: Hand the task to its lane
         if: steps.lease.outputs.acquired == 'true'
@@ -164,34 +165,22 @@ jobs:
               --field branch="$(jq -r '.branch' dispatch.json)"
           fi
 
-      - name: Commit what the hand-off recorded
+      - name: Record what the hand-off left behind
         # Delegation attaches the Codex pull request to the lease, and that
-        # happens after the ledger commit above. Without this the attachment
-        # exists only in this runner and the watchdog, seeing no worker, can
+        # happens after the write above. Without this the attachment exists
+        # only in this runner, and the watchdog -- seeing no worker -- can
         # reclaim a lease Codex is still working on.
+        #
+        # Delegation leaves this checkout on the new task branch. That used to
+        # matter a great deal, because the ledger was pushed from HEAD and the
+        # task branch's starter commit could land on main. Nothing here pushes
+        # a branch any more: the tree is built from ops/state alone.
         if: steps.lease.outputs.acquired == 'true'
         run: |
           set -euo pipefail
           uv run --locked python -m services.agentops.cli validate
-          # Delegation leaves this checkout on the new task branch. Committing
-          # here and pushing HEAD to main would put that branch's starter
-          # commit on main, and reconcile would then read the branch as merged
-          # and mark the task complete before any work existed. Carry only the
-          # state files back onto main.
-          git stash push --include-untracked -- ops/state || true
-          git fetch origin main
-          git checkout -B agentops-state-handoff origin/main
-          git stash pop || true
-          uv run --locked python -m services.agentops.cli validate
-          git add ops/state STATUS.md
-          if git diff --cached --quiet; then
-            echo 'no hand-off state to record'
-            exit 0
-          fi
-          git commit -m 'Record the task hand-off'
-          git pull --rebase --autostash origin main
-          uv run --locked python -m services.agentops.cli validate
-          git push origin HEAD:main
+          uv run --locked python -m services.agentops.cli state-push \
+            --message 'Record the task hand-off'
 
       - name: Report to the activity feed
         # Runs even when planning failed, so it must not assume plan.json exists.

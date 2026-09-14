@@ -660,7 +660,10 @@ class TestIndependentReviewFindings(unittest.TestCase):
     def test_the_repair_write_retries_and_reapplies(self) -> None:
         text = read("agentops-pr.yml")
         self.assertIn("for attempt in 1 2 3 4 5", text)
-        self.assertIn('git push origin "HEAD:$DEFAULT_BRANCH"', text)
+        # Re-runs the mutation against freshly pulled state on each attempt,
+        # which is safer than letting the push merge for it.
+        self.assertIn("cli state-pull", text)
+        self.assertIn("cli state-push", text)
 
     def test_a_reapplied_repair_does_not_spend_a_second_cycle(self) -> None:
         """Incrementing is not idempotent, so a contended push would otherwise

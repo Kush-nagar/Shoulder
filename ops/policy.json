@@ -8,6 +8,11 @@
     "allow_phase_d_and_later": false,
     "$comment_phase_d": "AGENTS.md rule 5 and the mandatory real-use gate forbid starting Task 23+ automatically. A human must clear the gate."
   },
+  "gates": {
+    "$comment": "Human-only gates, deliberately here rather than in ops/state. This file is on the protected default branch and changes only through a reviewed pull request; the runtime ledger is on the agentops-state branch, which the orchestrator writes without review. A gate stored there would be a gate the system could open for itself.",
+    "$comment_real_use": "docs/06-tasks.md: Task 23 and everything after it wait for real coach and player use of the manual product and the human judgments that come out of it. No cloud agent can supply that evidence. Only a human sets this true.",
+    "real_use_gate": false
+  },
   "lanes": {
     "claude_subscription": {
       "provider": "anthropic",

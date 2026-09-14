@@ -129,7 +129,7 @@ def evaluate(
     if not satisfied:
         reasons.append(f"prerequisites not complete: {missing}")
 
-    if task.gated and not state.gate_passed(ctx.progress):
+    if task.gated and not state.gate_passed(ctx.policy, ctx.progress):
         reasons.append("mandatory real-use gate has not passed")
 
     if state.task_budget_exceeded(ctx.policy, ctx.budget, task.id):

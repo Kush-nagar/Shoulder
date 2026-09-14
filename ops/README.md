@@ -5,18 +5,105 @@ Architecture and the reasoning behind it: [ADR 0019](../decisions/0019-autonomou
 
 ## Layout
 
-| Path | What it is |
-|---|---|
-| `ops/policy.json` | Routing, budgets, limits, privacy. **Edit this to change behaviour.** |
-| `ops/state/progress.json` | Canonical task completion ledger |
-| `ops/state/models.json` | Discovered model catalogue and qualification verdicts |
-| `ops/state/providers.json` | Per-lane health |
-| `ops/state/tasks.json` | Active task leases and checkpoints |
-| `ops/state/budget.json` | Recorded API spend |
-| `services/agentops/` | The orchestrator itself |
-| `.github/workflows/agentops-*.yml` | Coordinator, worker, reviewer, watchdog |
+| Path | What it is | Lives on |
+|---|---|---|
+| `ops/policy.json` | Routing, budgets, limits, privacy, **human gates**. Edit this to change behaviour. | `main`, reviewed |
+| `ops/state/progress.json` | Task completion ledger | `agentops-state` |
+| `ops/state/models.json` | Discovered model catalogue and qualification verdicts | `agentops-state` |
+| `ops/state/providers.json` | Per-lane health | `agentops-state` |
+| `ops/state/tasks.json` | Active task leases, checkpoints and repair counters | `agentops-state` |
+| `ops/state/budget.json` | Recorded API spend | `agentops-state` |
+| `services/agentops/` | The orchestrator itself | `main`, reviewed |
+| `.github/workflows/agentops-*.yml` | Coordinator, worker, reviewer, watchdog, pull-request reaction | `main`, reviewed |
 
 Do not edit the orchestrator to change routing. Change `ops/policy.json`.
+
+## Where runtime state lives
+
+**Nothing in normal operation pushes to the default branch.**
+
+Leases, provider health, spend and progress change many times per task. They
+used to be committed straight to `main`, which only works if that branch is
+unprotected, or protected with a bypass actor for GitHub Actions. This is a
+personal repository, and its rulesets offer no such actor to grant: with
+protection on, every ledger write was rejected with `GH013` and the loop could
+not run at all.
+
+So the mutable ledger moved to its own branch:
+
+```
+main                 product code, policy, workflows, human gates
+                     protected: quality + verdict, reviewed pull requests only
+
+agentops-state       ops/state/*.json and nothing else
+                     an orphan branch; no product code has ever been on it
+```
+
+Every job that touches state does the same two things:
+
+```
+python -m services.agentops.cli state-pull     # before reading anything
+python -m services.agentops.cli state-push --message '...'   # after mutating
+```
+
+`state-contents` lists what the branch holds and exits non-zero on any path
+outside `ops/state/`.
+
+### Why it cannot carry anything else
+
+The commit is not made by switching branches. It is built from a throwaway
+index containing exactly one directory:
+
+```
+GIT_INDEX_FILE=$tmp git read-tree --empty
+GIT_INDEX_FILE=$tmp git add --all -- ops/state
+GIT_INDEX_FILE=$tmp git write-tree      ->  git commit-tree  ->  git push
+```
+
+Nothing else in the worktree can reach that tree. It is a property of how the
+commit is constructed rather than a rule someone has to remember — which
+matters, because the branch-switching dance this replaced was itself the source
+of several bugs, including a worker that could push task-branch content to
+`main`.
+
+### Concurrent writers
+
+`pull` records the commit it read. `push` makes that commit the parent and
+pushes without any force, so git's own fast-forward rule rejects it when
+another writer has landed in between. On a rejection the caller re-reads the
+branch and re-applies **only the files it changed**, leaving everything else at
+the other writer's version.
+
+Two writers changing the *same* file is the case that cannot be merged, and
+there the last writer wins. So the callers whose mutation is one cheap command
+— the worker and the pull-request reaction — re-run the mutation against
+freshly pulled state instead of relying on that. The coordinator cannot:
+acquiring a lease increments an attempt counter, and re-running it would spend
+a task's attempt budget on a push race.
+
+### The copies still committed on main
+
+`ops/state/*.json` on the default branch are the **seed**. Before the branch
+exists, `state-pull` leaves them in place and the first `state-push` turns them
+into the branch; after that the branch is authoritative and the committed
+copies are historical. That is also what makes a fresh clone and a migrating
+repository take exactly one path, with no separate migration step.
+
+### Human gates are not in the ledger
+
+`gates.real_use_gate` lives in `ops/policy.json`, on the protected branch.
+The ledger is written by automation without review, so a gate stored there
+would be a gate the system could open for itself — and this one is what stands
+between autonomy and the machine-learning phases AGENTS.md rule 5 forbids.
+`state.gate_passed` reads policy only; a ledger may still *refuse* a gate,
+never grant one.
+
+### STATUS.md
+
+Not written by automation any more, for the same reason: it is on the protected
+branch. The live picture is the Control Center issue, and workers read progress
+from the ledger through their brief rather than from the file. A human, or a
+reviewed pull request, can regenerate its block with `cli status-snapshot`.
 
 ## Stopping it
 

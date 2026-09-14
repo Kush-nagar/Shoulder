@@ -769,19 +769,32 @@ class TestFourthReviewFindings(unittest.TestCase):
         self.assertIn('git checkout -B "$BRANCH" "origin/$BRANCH"', text)
         self.assertIn("git ls-remote --exit-code origin", text)
 
-    def test_the_hand_off_commit_does_not_ride_the_task_branch(self) -> None:
+    def test_the_hand_off_write_cannot_ride_the_task_branch(self) -> None:
         """Delegation leaves the checkout on the task branch.
 
-        Pushing HEAD to main from there would put the branch's starter commit
-        on main, and reconcile would read the task as already merged.
+        Pushing HEAD from there used to be able to put that branch's starter
+        commit on main, and reconcile would then read the task as already
+        merged. The elaborate branch-switching that guarded against it is gone,
+        because the hazard is gone: the state commit's tree is built from
+        ops/state alone and HEAD is never pushed anywhere.
         """
         from agentops_fixtures import REPO_ROOT as root
+
+        from services.agentops import statebranch
 
         text = (root / ".github/workflows/agentops-coordinator.yml").read_text(
             encoding="utf-8"
         )
-        handoff = text.split("Commit what the hand-off recorded", 1)[1]
-        self.assertIn("git checkout -B agentops-state-handoff origin/main", handoff)
+        handoff = text.split("Record what the hand-off left behind", 1)[1]
+        self.assertIn("cli state-push", handoff)
+        self.assertNotIn("git push", handoff)
+        self.assertNotIn("git checkout", handoff)
+
+        # The tree is built from an empty index plus one directory, so nothing
+        # else in the worktree can reach it.
+        source = Path(statebranch.__file__).read_text(encoding="utf-8")
+        self.assertIn('"read-tree", "--empty"', source)
+        self.assertIn('"add", "--all", "--", TRACKED', source)
 
 
 class TestSixthReviewFindings(unittest.TestCase):
@@ -1106,87 +1119,79 @@ class TestFourteenthReviewFindings(unittest.TestCase):
             "the managed block drifted out of the checkpoint section",
         )
 
-    def test_blocking_a_task_refreshes_the_human_checkpoint(self) -> None:
-        """Only merges used to rewrite STATUS.md, so after a task exhausted its
-        attempts the checkpoint kept naming it as the next action forever."""
+    def test_blocking_a_task_shows_up_in_the_live_picture(self) -> None:
+        """After a task exhausts its attempts, the picture must stop naming it
+        as the next action. That was STATUS.md, now on the protected branch;
+        the Control Center reports it instead."""
+        import argparse
         import shutil
         import tempfile
 
         from agentops_fixtures import REPO_ROOT as source
 
-        from services.agentops import cli, reconcile
+        from services.agentops import cli, control_center
 
         tmp = tempfile.mkdtemp()
         root = Path(tmp)
         self.addCleanup(shutil.rmtree, tmp, True)
         for relative in ("ops", "docs", "services"):
             shutil.copytree(source / relative, root / relative)
-        shutil.copy(source / "STATUS.md", root / "STATUS.md")
 
         ctx = coordinator.load_context(root)
         ctx.policy["autonomy"]["enabled"] = True
         state.write_json(ctx.paths.policy, ctx.policy)
-        # The repository variable overrides the file, and it is false here.
         patched = mock.patch.dict(os.environ, {"AUTONOMY_ENABLED": "true"})
         patched.start()
         self.addCleanup(patched.stop)
 
         candidate = coordinator.next_eligible(ctx)
         assert candidate is not None
-        limit = int(ctx.policy["escalation"]["max_implementation_attempts"])
+        ceiling = int(ctx.policy["escalation"]["max_implementation_attempts"])
         ctx.tasks.setdefault("leases", {})[str(candidate.task.id)] = {
             "task_id": candidate.task.id,
-            "state": "implementing",
-            "branch": "block-04-t14",
-            "owner": "worker-gone",
-            "attempts": limit,
-            "expires_at": ago(9999),
-            "heartbeat_at": ago(9999),
+            "state": "assigned",
+            "owner": "run-old",
+            "branch": "block-04-t15-old",
+            "acquired_at": "2000-01-01T00:00:00+00:00",
+            "expires_at": "2000-01-01T00:00:00+00:00",
+            "heartbeat_at": "2000-01-01T00:00:00+00:00",
+            "attempts": ceiling,
         }
         state.write_json(ctx.paths.tasks, ctx.tasks)
 
-        before = (root / "STATUS.md").read_text(encoding="utf-8")
-        code = cli.main(
-            ["--root", str(root), "dispatch", "--owner", "run-2", "--run-id", "2"]
+        args = argparse.Namespace(
+            root=str(root), owner="run-new", run_id="new", repo=None
         )
-        self.assertEqual(code, 0)
+        cli.cmd_dispatch(args)
 
-        after = (root / "STATUS.md").read_text(encoding="utf-8")
-        self.assertNotEqual(before, after)
-        self.assertIn(reconcile.STATUS_BEGIN, after)
+        fresh = coordinator.load_context(root)
         self.assertEqual(
-            str(candidate.task.id),
-            str(
-                coordinator.load_context(root).tasks["leases"][str(candidate.task.id)][
-                    "task_id"
-                ]
-            ),
+            fresh.tasks["leases"][str(candidate.task.id)]["state"], "blocked"
         )
-        self.assertEqual(
-            coordinator.load_context(root).tasks["leases"][str(candidate.task.id)][
-                "state"
-            ],
-            "blocked",
-        )
+        with mock.patch.object(control_center, "pull_request_checks", return_value=[]):
+            page = control_center.render(root, repo=None)
+        self.assertIn("BLOCKED_AUTOMATION", page)
 
-    def test_recovering_a_lease_refreshes_the_human_checkpoint(self) -> None:
-        """The sibling of the blocked-task finding. Recovery puts a task back
-        in the pool, and the watchdog workflow already commits STATUS.md, so
-        without this it commits a checkpoint naming a task a dead worker holds.
+    def test_recovering_a_lease_updates_the_live_picture(self) -> None:
+        """Recovery puts a task back in the pool, which changes what comes next.
+
+        That used to be written into STATUS.md, which now lives on a protected
+        branch nothing may push to. The Control Center carries the live picture
+        instead, and it must name the recovered task rather than the one a dead
+        worker was holding.
         """
         import shutil
         import tempfile
 
         from agentops_fixtures import REPO_ROOT as source
 
-        from services.agentops import reconcile, watchdog
+        from services.agentops import control_center, watchdog
 
         tmp = tempfile.mkdtemp()
         root = Path(tmp)
         self.addCleanup(shutil.rmtree, tmp, True)
         for relative in ("ops", "docs", "services"):
             shutil.copytree(source / relative, root / relative)
-        shutil.copy(source / "STATUS.md", root / "STATUS.md")
 
         ctx = coordinator.load_context(root)
         candidate = coordinator.next_eligible(ctx)
@@ -1196,34 +1201,25 @@ class TestFourteenthReviewFindings(unittest.TestCase):
         ctx.tasks.setdefault("leases", {})[str(candidate.task.id)] = {
             "task_id": candidate.task.id,
             "state": "implementing",
-            "branch": "block-04-t14",
-            "owner": "worker-gone",
+            "owner": "run-dead",
+            "branch": "block-04-t15-dead",
+            "acquired_at": "2000-01-01T00:00:00+00:00",
+            "expires_at": "2000-01-01T00:00:00+00:00",
+            "heartbeat_at": "2000-01-01T00:00:00+00:00",
             "attempts": 1,
-            "expires_at": ago(9999),
-            "heartbeat_at": ago(9999),
         }
         state.write_json(ctx.paths.tasks, ctx.tasks)
 
-        # Leave the checkpoint saying something recovery must correct.
-        status = root / "STATUS.md"
-        text = status.read_text(encoding="utf-8")
-        head, rest = text.split(reconcile.STATUS_BEGIN, 1)
-        _, tail = rest.split(reconcile.STATUS_END, 1)
-        status.write_text(
-            head
-            + reconcile.STATUS_BEGIN
-            + chr(10)
-            + "- Next eligible task: none eligible"
-            + chr(10)
-            + reconcile.STATUS_END
-            + tail,
-            encoding="utf-8",
-            newline=chr(10),
-        )
-
         result = watchdog.sweep(root)
         self.assertTrue(result["recovered"])
-        self.assertTrue(result["status_file_updated"])
 
-        after = status.read_text(encoding="utf-8")
-        self.assertIn(f"Next eligible task: Task {candidate.task.id} ", after)
+        with mock.patch.object(control_center, "pull_request_checks", return_value=[]):
+            page = control_center.render(root, repo=None)
+        self.assertIn(f"Task {candidate.task.id}", page)
+
+    def test_recovery_does_not_write_the_protected_checkpoint(self) -> None:
+        """STATUS.md is on the default branch, which nothing may push to."""
+        from services.agentops import watchdog
+
+        source = Path(watchdog.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("update_status_file", source)

@@ -188,10 +188,19 @@ class TestWorkflowPermissions(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
         self.assertIn("- 'ops/state/**'", text)
 
-    def test_state_pushes_rebase_before_pushing(self) -> None:
+    def test_state_writes_go_to_the_state_branch_not_the_default_one(self) -> None:
+        """Superseded the rebase-before-push rule, which only made sense while
+        the ledger lived on the default branch.
+
+        Rebasing is gone because pushing there is gone: the default branch is
+        protected, no bypass actor exists to grant, and every runtime write now
+        lands on `agentops-state` instead.
+        """
         for name in ("agentops-coordinator.yml", "agentops-watchdog.yml"):
             with self.subTest(name):
-                self.assertIn("git pull --rebase", read(WORKFLOW_DIR / name))
+                text = read(WORKFLOW_DIR / name)
+                self.assertIn("cli state-push", text)
+                self.assertNotIn("git pull --rebase", text)
 
     def test_the_worker_rechecks_its_assignment(self) -> None:
         """Dispatch inputs are caller-controlled, so policy is re-derived."""
@@ -641,16 +650,16 @@ class TestThirdReviewFindings(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-verify.yml")
         self.assertIn("ref: ${{ github.event.repository.default_branch }}", text)
 
-    def test_a_provider_failure_is_pushed_not_just_written(self) -> None:
+    def test_a_provider_failure_leaves_the_runner(self) -> None:
         """The failing job runs no later step, so it must push for itself."""
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         failure = text.split("Record a provider failure", 1)[1]
-        self.assertIn("git push origin", failure.split("- name:", 1)[0])
+        self.assertIn("cli state-push", failure.split("- name:", 1)[0])
 
-    def test_the_hand_off_state_is_committed(self) -> None:
+    def test_the_hand_off_state_is_written(self) -> None:
         """Delegation attaches the Codex PR after the ledger commit runs."""
         text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
-        self.assertIn("Commit what the hand-off recorded", text)
+        self.assertIn("Record what the hand-off left behind", text)
 
     def test_an_open_delegated_pull_request_counts_as_live(self) -> None:
         from unittest import mock
@@ -874,11 +883,11 @@ class TestPostMergeVerifyFindings(unittest.TestCase):
 
     def test_only_a_deliberate_dispatch_writes_state(self) -> None:
         """A merge fires this workflow and the coordinator at the same moment.
-        Both committed ops/state to the default branch, and this one died in a
-        rebase conflict, losing the verdicts it had just paid for."""
+        Both wrote the ledger, and this one died in a conflict, losing the
+        verdicts it had just paid for."""
         for step in (
             "Qualify models against the synthetic suite",
-            "Commit the qualification verdicts",
+            "Record the qualification verdicts",
         ):
             after = self.text.split(f"- name: {step}", 1)[1].split("- name:", 1)[0]
             self.assertIn(
@@ -982,29 +991,36 @@ class TestVerdictDurability(unittest.TestCase):
         self.assertEqual(self._merge(root, source)["applied"], ["qwen/qwen3.7-flash"])
         self.assertEqual(self._merge(root, source)["applied"], [])
 
-    def test_the_commit_step_no_longer_rebases_generated_state(self) -> None:
+    def test_the_record_step_no_longer_rebases_generated_state(self) -> None:
         text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
             encoding="utf-8"
         )
-        after = text.split("- name: Commit the qualification verdicts", 1)[1]
+        after = text.split("- name: Record the qualification verdicts", 1)[1]
         self.assertNotIn("git pull --rebase", after)
         self.assertIn("merge-verdicts", after)
 
-    def test_the_verdict_commit_authenticates_its_own_remote_work(self) -> None:
+    def test_the_verdict_record_has_a_working_credential(self) -> None:
         """A run that had already paid for its verdicts failed on the first
-        fetch with "Password authentication is not supported", so this step
-        carries the job token itself rather than trusting what the checkout
-        left behind."""
+        fetch with "Password authentication is not supported".
+
+        The Claude smoke test earlier in this job replaces the credential the
+        first checkout left behind. That used to be worked around by carrying
+        an encoded token through the shell; checking out again restores it
+        without the token ever reaching a shell variable, a remote URL, or the
+        repository config.
+        """
         text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
             encoding="utf-8"
         )
-        step = text.split("- name: Commit the qualification verdicts", 1)[1].split(
-            "- name: Report", 1
-        )[0]
-        self.assertIn("git_auth fetch origin", step)
-        self.assertIn("git_auth push origin", step)
-        # The encoded credential is not the token itself, so the runner does
-        # not mask it automatically.
-        self.assertIn("::add-mask::$auth", step)
-        # And it never reaches the remote URL or the repository config.
+        smoke = text.index("- name: Smoke test the Claude subscription lane")
+        restore = text.index("- name: Restore the checkout credential")
+        record = text.index("- name: Record the qualification verdicts")
+        self.assertLess(smoke, restore, "the credential must be restored after it")
+        self.assertLess(restore, record, "and before anything needs it")
+
+        # The verdicts are preserved before the checkout replaces the worktree.
+        self.assertLess(text.index("- name: Preserve this run's verdicts"), restore)
+        step = text[record:].split("- name: Report", 1)[0]
+        self.assertNotIn("::add-mask::", step)
         self.assertNotIn("git remote set-url", step)
+        self.assertNotIn("extraheader", step)
