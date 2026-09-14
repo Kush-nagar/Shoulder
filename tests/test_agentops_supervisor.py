@@ -434,7 +434,9 @@ class TestControlCenter(unittest.TestCase):
         with mock.patch.object(control_center, "pull_request_checks", return_value=[]):
             page = control_center.render(REPO_ROOT, repo=None)
         self.assertIn("real_use_gate", page)
-        self.assertIn("a human sets", page)
+        self.assertIn("A human clears it", page)
+        # And says where, which is not the runtime ledger.
+        self.assertIn("ops/policy.json", page)
 
     def test_the_kill_switch_reads_as_paused_not_broken(self) -> None:
         with mock.patch.object(control_center, "pull_request_checks", return_value=[]):

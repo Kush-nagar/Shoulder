@@ -120,7 +120,11 @@ def _gates(ctx: coordinator.Context) -> list[str]:
         out.append(
             "**real_use_gate** — Task 23 onward needs real coach and player use of "
             "the manual product plus the human judgments that come out of it. No "
-            "cloud agent can supply that; a human sets `gates.real_use_gate`."
+            "cloud agent can supply that. A human clears it by setting "
+            "`gates.real_use_gate` in `ops/policy.json`, which is on the "
+            "protected branch and so takes a reviewed pull request. It is "
+            "deliberately not in the runtime ledger, which this system writes "
+            "without review."
         )
     if not ctx.policy["autonomy"]["allow_phase_d_and_later"]:
         out.append(
