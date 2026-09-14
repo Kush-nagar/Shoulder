@@ -1,36 +1,4 @@
 {
   "$comment": "Active task leases. One writer per task, per branch, per checkout.",
-  "leases": {
-    "14": {
-      "acquired_at": "2026-09-13T22:45:35+00:00",
-      "assignment": {
-        "capability_class": "STRONG_CODING",
-        "effort": "high",
-        "fallbacks": [],
-        "harness": "codex-cloud-github",
-        "harness_model": "account-configured",
-        "lane": "codex_cloud",
-        "mechanism": "github-mention",
-        "model": "openai/gpt-5.5",
-        "model_enforced": false,
-        "reason": "mixed/COMPLEX -> STRONG_CODING; strongest qualified model in lane codex_cloud at $5.000/Mtok in; tier is advisory, the account's configured Codex model runs",
-        "rejections": [
-          "claude_subscription: policy forbids implement of mixed work",
-          "openrouter: policy forbids implement of mixed work",
-          "codex_api: lane is disabled in policy"
-        ],
-        "representative_model": "openai/gpt-5.5"
-      },
-      "attempts": 1,
-      "branch": "block-04-t14-manual-clip-marking",
-      "checkpoint": null,
-      "expires_at": "2026-09-14T00:15:35+00:00",
-      "heartbeat_at": "2026-09-13T22:49:46+00:00",
-      "owner": "run-34787720379",
-      "pull_request": 21,
-      "run_id": "34787720379",
-      "state": "assigned",
-      "task_id": 14
-    }
-  }
+  "leases": {}
 }
