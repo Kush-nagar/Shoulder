@@ -2,11 +2,11 @@
   "$comment": "Per-lane health. The coordinator writes this; a lane returns to AVAILABLE only after a health check succeeds. codex_cloud has no secret: it is reached through the Codex GitHub integration, so it is gated on lane_qualified rather than on a credential.",
   "lanes": {
     "claude_subscription": {
-      "changed_at": "2026-09-15T02:30:31+00:00",
-      "failure_count": 0,
+      "changed_at": "2026-09-15T02:31:46+00:00",
+      "failure_count": 1,
       "last_success": "2026-09-15T02:30:31+00:00",
-      "reason": "CLAUDE_CODE_OAUTH_TOKEN is configured",
-      "status": "AVAILABLE"
+      "reason": "worker run 34921450581 failed",
+      "status": "DEGRADED"
     },
     "codex_api": {
       "changed_at": "2026-09-15T02:30:31+00:00",
