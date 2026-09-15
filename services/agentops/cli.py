@@ -25,6 +25,7 @@ from . import (
     classify,
     control_center,
     coordinator,
+    governance,
     leases,
     notify,
     qualify,
@@ -901,6 +902,54 @@ def cmd_control_center(args: argparse.Namespace) -> int:
     return _emit(control_center.publish(root, repo=args.repo))
 
 
+def cmd_governance_check(args: argparse.Namespace) -> int:
+    """Refuse an autonomous branch that changes what this system may do.
+
+    Exit 1 blocks the merge, because the caller is a required context. The
+    changed files come from the pull request itself; being unable to read them
+    is also a refusal, since the alternative is guessing.
+    """
+    import subprocess
+
+    result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "view",
+            str(args.pull_request),
+            "--repo",
+            args.repo,
+            "--json",
+            "files",
+            "--jq",
+            ".files[].path",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        _emit(
+            {
+                "ok": False,
+                "reason": "could not read the changed files; refusing rather "
+                "than guessing",
+                "detail": result.stderr.strip()[:200],
+            }
+        )
+        return 1
+
+    changed = [line for line in result.stdout.splitlines() if line.strip()]
+    found = governance.violations(changed)
+    _emit({"ok": not found, "changed": len(changed), "guarded": found})
+    if found:
+        print(governance.refusal(found))
+        return 1
+    return 0
+
+
 def cmd_status_snapshot(args: argparse.Namespace) -> int:
     """Rewrite the STATUS.md progress block from the current ledger.
 
@@ -1145,6 +1194,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the page instead of publishing it",
     )
     centre.set_defaults(func=cmd_control_center)
+
+    guard = sub.add_parser(
+        "governance-check",
+        help="refuse an autonomous branch that changes policy, workflows or gates",
+    )
+    guard.add_argument("--repo", required=True)
+    guard.add_argument("--pull-request", dest="pull_request", type=int, required=True)
+    guard.set_defaults(func=cmd_governance_check)
 
     sub.add_parser(
         "status-snapshot",

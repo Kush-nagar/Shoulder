@@ -259,14 +259,23 @@ class TestThirdRoundReviewFindings(unittest.TestCase):
     def test_an_autonomous_branch_may_not_change_governance(self) -> None:
         """Both required contexts are automated, so a branch that edited
         `ops/policy.json` would author, check and merge its own permission to
-        start the phases AGENTS.md rule 5 forbids."""
+        start the phases AGENTS.md rule 5 forbids.
+
+        The decision moved into `services/agentops/governance.py` so it could
+        be exercised rather than asserted as a string -- which is how the
+        first version shipped matching no workflow path at all. What the guard
+        actually does is covered by `test_agentops_governance.py`; this only
+        checks it is still reachable from the required context.
+        """
+        from services.agentops import governance
+
         text = read(WORKFLOW_DIR / "agentops-review.yml")
         guard = text.split("- name: Refuse an autonomous change to policy", 1)[1]
         guard = guard.split("- name: Decide the verdict", 1)[0]
+        self.assertIn("cli governance-check", guard)
         for path in ("ops/policy.json", ".github/workflows", "AGENTS.md"):
             with self.subTest(path):
-                self.assertIn(path, guard)
-        self.assertIn("exit 1", guard)
+                self.assertIn(path, governance.GUARDED)
 
     def test_the_guard_is_part_of_the_required_context(self) -> None:
         """A guard in a job nothing requires blocks nothing."""
