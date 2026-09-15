@@ -1331,3 +1331,65 @@ class TestLiveBootstrapDefects(unittest.TestCase):
         self.assertIn("governance-check", read(WORKFLOW_DIR / "agentops-review.yml"))
         # And the merge gate is still a required context, not a step that merges.
         self.assertIn("--auto", text)
+
+
+class TestHotfixReviewFindings(unittest.TestCase):
+    """Regressions for the review of the live-bootstrap hotfix."""
+
+    WORKER = WORKFLOW_DIR / "agentops-worker.yml"
+
+    def finalize(self) -> str:
+        text = read(self.WORKER)
+        return text.split("\n  finalize:", 1)[1].split("\n  relaunch:", 1)[0]
+
+    def test_finalize_can_ask_whether_a_pull_request_exists(self) -> None:
+        """`worker-finished` asks before it frees a lease, and the query fails
+        closed. Without the scope, a private repository answers 403 to every
+        ask and no recovery would ever happen -- the whole point, silently
+        absent rather than broken."""
+        finalize = self.finalize()
+        self.assertIn("cli worker-finished", finalize)
+        self.assertIn("pull-requests: read", finalize)
+        # Read, never write. That half of the PR #24 posture is unchanged.
+        self.assertNotIn("pull-requests: write", finalize)
+
+    def test_a_worker_that_opened_nothing_fails_its_job(self) -> None:
+        """`gh pr create` and `gh pr merge` both tolerate failure, so all three
+        pull-request commands could fail and still leave a green job with an
+        empty number -- which tells finalize there is nothing to recover."""
+        text = read(self.WORKER)
+        step = text.split("- name: Push the branch and open a pull request", 1)[1]
+        step = re.split(r"(?m)^  \w[\w-]*:$", step)[0]
+        self.assertIn("--state all", step)
+        self.assertIn('if [ -z "$existing" ]; then', step)
+        self.assertIn("exit 1", step)
+        # Across every state, so a pull request that merged between the two
+        # queries is not mistaken for one that never existed.
+        self.assertLess(step.index("--state open"), step.index("--state all"))
+
+    def test_the_relaunch_rechecks_the_branch_before_dispatching(self) -> None:
+        """Freeing the lease and pushing the ledger are not atomic with the
+        query that justified it. A pull request appearing in between would
+        otherwise put a second writer on a branch already under review."""
+        relaunch = read(self.WORKER).split("\n  relaunch:", 1)[1]
+        self.assertIn("gh pr list", relaunch)
+        self.assertIn("pull-requests: read", relaunch)
+        # The check has to come first, or it is not a check.
+        self.assertLess(
+            relaunch.index("gh pr list"),
+            relaunch.index("gh workflow run agentops-coordinator.yml"),
+        )
+        # Declining is not a failure: the worker really did finish.
+        self.assertIn("exit 0", relaunch)
+
+    def test_the_relaunch_still_cannot_write_anything(self) -> None:
+        relaunch = read(self.WORKER).split("\n  relaunch:", 1)[1]
+        for forbidden in (
+            "contents: write",
+            "issues: write",
+            "id-token: write",
+            "pull-requests: write",
+        ):
+            with self.subTest(forbidden):
+                self.assertNotIn(forbidden, relaunch)
+        self.assertNotIn("actions/checkout", relaunch)

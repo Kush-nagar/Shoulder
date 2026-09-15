@@ -401,6 +401,23 @@ jobs:
             --state open --json number --jq '.[0].number // empty' || true)"
           echo "number=${number}" >> "$GITHUB_OUTPUT"
 
+          # `gh pr create` and `gh pr merge` above both tolerate failure,
+          # because "a pull request already exists" and "auto-merge could not
+          # be enabled" are normal outcomes. This is where that tolerance is
+          # resolved. If no pull request exists on this branch at all, then
+          # none was opened whatever those commands printed, and the step must
+          # fail: a green work job with no pull request tells finalize there is
+          # nothing to recover, and the lease would be held until it expired.
+          #
+          # Asked across every state, not just open ones, so a pull request
+          # that merged between the two queries is not read as an absent one.
+          existing="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main \
+            --state all --json number --jq '.[0].number // empty' || true)"
+          if [ -z "$existing" ]; then
+            echo 'The worker opened no pull request.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
   finalize:
     # Everything that has to happen after the harness, run from trusted code.
     #
@@ -416,6 +433,12 @@ jobs:
     permissions:
       contents: write # the agentops-state branch only
       issues: write # activity feed and Control Center
+      # Read, never write. `worker-finished` asks whether this branch has an
+      # open pull request before it frees a lease, and on a private repository
+      # a token without this scope cannot answer. The query fails closed, so
+      # without it every recovery would decline and the lease would sit until
+      # it expired -- the behaviour this job exists to remove.
+      pull-requests: read
     outputs:
       # Read by the relaunch job below, which holds the dispatch scope this one
       # deliberately does not.
@@ -574,9 +597,30 @@ jobs:
     if: needs.finalize.outputs.recovered == 'true' && vars.AUTONOMY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     permissions:
-      actions: write # dispatch the coordinator, and nothing else
+      actions: write # dispatch the coordinator
+      pull-requests: read # re-check the branch before doing so
     steps:
+      # The lease was freed after a query that found no pull request, and the
+      # ledger push is not atomic with that query. A pull request appearing in
+      # between -- a slow `gh pr create` becoming visible, or a person pushing
+      # the branch -- would mean dispatching a second writer at a branch that
+      # is already under review. Asking again here closes that window at the
+      # last moment before new work starts.
+      #
+      # Declining leaves the lease abandoned, which is the honest state: the
+      # worker really did finish. The pull request carries the branch from
+      # there, and the watchdog reports anything left stuck.
       - env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh workflow run agentops-coordinator.yml --repo "$REPO"
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          open="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$open" ]; then
+            echo "pull request #${open} appeared on ${BRANCH}; not dispatching" \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run agentops-coordinator.yml --repo "$REPO"

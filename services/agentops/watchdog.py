@@ -195,9 +195,18 @@ def branch_pull_request_open(branch: str, *, repo: str | None = None) -> bool | 
     )
     if result.returncode != 0:
         return None
+    if not (result.stdout or "").strip():
+        # A zero exit with nothing on stdout is not an answer. Reading it as
+        # "no pull request" would free a lease on a truncated response, which
+        # is exactly what the fail-closed contract above forbids.
+        return None
     try:
-        payload = json.loads(result.stdout or "[]")
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, list):
+        # `--json number` returns an array. Anything else means the command
+        # answered a different question than the one that was asked.
         return None
     return bool(payload)
 

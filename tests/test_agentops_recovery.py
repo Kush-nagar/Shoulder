@@ -1482,3 +1482,100 @@ class TestBranchPullRequestQuery(unittest.TestCase):
 
     def test_unparseable_output_is_unanswerable(self) -> None:
         self.assertIsNone(self._answer(0, "not json"))
+
+
+class TestHotfixReviewFindings(unittest.TestCase):
+    """Regressions for the review of the live-bootstrap hotfix."""
+
+    RUN = "34921450581"
+    BRANCH = "block-04-t15-coach-judgments"
+
+    def _recovered(self) -> dict[str, Any]:
+        tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            tasks,
+            policy(),
+            task_id=15,
+            owner="run-1",
+            branch=self.BRANCH,
+            assignment=assignment(),
+            run_id="1",
+        )
+        leases.attach_worker(tasks, 15, run_id=self.RUN, run_attempt="1")
+        leases.abandon_finished_worker(
+            tasks,
+            15,
+            run_id=self.RUN,
+            branch=self.BRANCH,
+            failure_class="provider",
+            pull_request_open=False,
+        )
+        return tasks
+
+    def test_the_dead_run_is_detached_from_the_lease(self) -> None:
+        """Freeing a lease that still names the dead run frees nothing.
+
+        `acquire` rebuilds the next lease from this record and does not clear
+        these fields, and `verify-assignment` runs before a worker can attach
+        its own, so the successor would be refused as "held by worker run
+        <the dead one>" -- every attempt, until the task blocked.
+        """
+        lease = self._recovered()["leases"]["15"]
+        self.assertIsNone(lease.get("worker_run_id"))
+        self.assertIsNone(lease.get("worker_run_attempt"))
+
+    def test_the_next_worker_is_accepted_by_verify_assignment(self) -> None:
+        """The end-to-end form of the same defect, at the check that would
+        have rejected it."""
+        tasks = self._recovered()
+        leases.acquire(
+            tasks,
+            policy(),
+            task_id=15,
+            owner="run-2",
+            branch=self.BRANCH,
+            assignment=assignment(),
+            run_id="2",
+        )
+        lease = tasks["leases"]["15"]
+        # This is the comparison cmd_verify_assignment makes, before the new
+        # worker has had any chance to attach its own run.
+        attached = lease.get("worker_run_id")
+        self.assertFalse(
+            attached and str(attached) != "34999999999",
+            f"a fresh worker would be refused: lease still names run {attached}",
+        )
+
+    def test_repair_and_recovery_detach_the_run_the_same_way(self) -> None:
+        source = Path(leases.__file__).read_text(encoding="utf-8")
+        for function in ("begin_repair", "abandon_finished_worker"):
+            body = source.split(f"def {function}", 1)[1].split("\ndef ", 1)[0]
+            with self.subTest(function):
+                self.assertIn('lease.pop("worker_run_id", None)', body)
+                self.assertIn('lease.pop("worker_run_attempt", None)', body)
+
+
+class TestPullRequestQueryFailsClosed(unittest.TestCase):
+    """A zero exit is not by itself an answer."""
+
+    def _answer(self, returncode: int, stdout: str) -> bool | None:
+        import subprocess
+
+        from services.agentops import watchdog
+
+        completed = mock.Mock(returncode=returncode, stdout=stdout)
+        with mock.patch.object(subprocess, "run", return_value=completed):
+            return watchdog.branch_pull_request_open("block-04-t15", repo="o/r")
+
+    def test_empty_output_is_unanswerable(self) -> None:
+        """It used to read as "no pull request" and free the lease."""
+        self.assertIsNone(self._answer(0, ""))
+        self.assertIsNone(self._answer(0, "   \n"))
+
+    def test_a_non_list_payload_is_unanswerable(self) -> None:
+        for payload in ("null", "{}", '{"number": 41}', '"41"'):
+            with self.subTest(payload):
+                self.assertIsNone(self._answer(0, payload))
+
+    def test_a_real_empty_list_still_means_no_pull_request(self) -> None:
+        self.assertIs(self._answer(0, "[]"), False)

@@ -398,6 +398,16 @@ def abandon_finished_worker(
     # lead to different next attempts.
     lease["failure_class"] = failure_class
     lease["abandoned_by_run"] = str(run_id)
+    # Detaching the dead run matters for the same reason it does in
+    # `begin_repair`, and this is the whole recovery if it is missed. `acquire`
+    # rebuilds the next lease from this record and does not clear these, so the
+    # successor would inherit a `worker_run_id` naming a run that is over --
+    # and `verify-assignment` runs before a worker can attach its own, so it
+    # would refuse every attempt as "held by worker run <dead one>". The lease
+    # would be freed and still unusable, burning the attempt budget until the
+    # task blocked.
+    lease.pop("worker_run_id", None)
+    lease.pop("worker_run_attempt", None)
     recovered: dict[str, Any] = lease
     return recovered
 
