@@ -2,6 +2,8 @@
   "$comment": "Active task leases. One writer per task, per branch, per checkout.",
   "leases": {
     "15": {
+      "abandoned_at": "2026-09-15T07:41:29+00:00",
+      "abandoned_reason": "no heartbeat within the stale window",
       "acquired_at": "2026-09-15T02:30:31+00:00",
       "assignment": {
         "capability_class": "FRONTIER_REASONING",
@@ -35,7 +37,7 @@
       "heartbeat_at": "2026-09-15T02:30:59+00:00",
       "owner": "run-34921416961",
       "run_id": "34921416961",
-      "state": "assigned",
+      "state": "abandoned",
       "task_id": 15,
       "worker_run_attempt": "1",
       "worker_run_id": "34921450581"
