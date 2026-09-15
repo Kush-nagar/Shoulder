@@ -271,6 +271,12 @@ jobs:
         uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # This workflow is dispatched by the coordinator through the Actions
+          # API, so GITHUB_ACTOR is `github-actions`, and the action refuses a
+          # non-human actor unless it is named here. Named exactly, never '*':
+          # a wildcard would let any App that can dispatch this workflow run a
+          # prompt through our subscription.
+          allowed_bots: github-actions
           prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
           claude_args: --model ${{ inputs.model }} --max-turns 120
 
@@ -285,6 +291,8 @@ jobs:
           ANTHROPIC_API_KEY: ''
         with:
           anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          # Same dispatching actor as the Claude lane above, same narrow entry.
+          allowed_bots: github-actions
           prompt: 'Read brief.md in the repository root and carry out exactly what it specifies. Do not exceed its stated scope.'
           claude_args: --model ${{ inputs.model }} --max-turns 120
 
@@ -391,7 +399,7 @@ jobs:
 
           number="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main \
             --state open --json number --jq '.[0].number // empty' || true)"
-          echo "ner and checks out the default branch.
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
 
   finalize:
     # Everything that has to happen after the harness, run from trusted code.
@@ -408,9 +416,19 @@ jobs:
     permissions:
       contents: write # the agentops-state branch only
       issues: write # activity feed and Control Center
+    outputs:
+      # Read by the relaunch job below, which holds the dispatch scope this one
+      # deliberately does not.
+      recovered: ${{ steps.record.outputs.recovered }}
     env:
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
+      # The Control Center reports the kill switch, and `load_policy` reads it
+      # from the environment. Without it here the committed `enabled: false`
+      # seed is what gets rendered, so a live autonomous run published
+      # "AUTONOMY STATUS: PAUSED" while it was running. Absent or empty still
+      # means off, so the default-off behaviour is unchanged.
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
       TASK_ID: ${{ inputs.task_id }}
       LANE: ${{ inputs.lane }}
       COST: ${{ needs.work.outputs.cost }}
@@ -434,6 +452,7 @@ jobs:
           python-version: '3.11.16'
 
       - name: Record spend, the pull request, and any provider failure
+        id: record
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -443,8 +462,10 @@ jobs:
           # run's bytes would overwrite them.
           #
           # Every mutation here is safe to repeat: attaching sets a field,
-          # marking health sets a value, and spend carries a once-key so a
-          # retry cannot double-count against the per-task ceiling.
+          # marking health sets a value, spend carries a once-key so a retry
+          # cannot double-count against the per-task ceiling, and freeing the
+          # lease refuses once it is no longer active.
+          pushed=0
           for attempt in 1 2 3 4 5; do
             uv run --locked python -m services.agentops.cli state-pull
 
@@ -466,13 +487,43 @@ jobs:
                 --reason "worker run ${GITHUB_RUN_ID} failed" || true
             fi
 
+            # A worker that ended without a pull request leaves nothing for the
+            # repair path to work on, and its lease would otherwise sit
+            # `assigned` until `expires_at` -- the full 90-minute job timeout --
+            # before the watchdog could touch it. This job only runs once `work`
+            # has concluded, which is the proof that the writer has stopped;
+            # every other condition is checked by the command, which refuses
+            # rather than guesses. It does not fake completion: the lease is
+            # abandoned, keeping its attempts and checkpoint, so the coordinator
+            # picks the task up again on the normal fallback chain.
+            if [ "${WORK_RESULT:-}" != 'success' ] && [ -z "${PR_NUMBER:-}" ]; then
+              class=worker
+              if [ "${HARNESS_FAILED:-}" = 'true' ]; then
+                class=provider
+              fi
+              uv run --locked python -m services.agentops.cli worker-finished \
+                --task "$TASK_ID" --branch "$BRANCH" --run-id "$GITHUB_RUN_ID" \
+                --failure-class "$class" --repo "$REPO" \
+                > worker-finished.json || true
+            fi
+
             uv run --locked python -m services.agentops.cli validate || break
             if uv run --locked python -m services.agentops.cli state-push \
                  --message "Record worker run ${GITHUB_RUN_ID} for task ${TASK_ID}"; then
+              pushed=1
               break
             fi
             sleep $((attempt * 5))
           done
+
+          # Only a recovery that actually reached the ledger may restart the
+          # loop. Claiming one that was never pushed would dispatch a
+          # coordinator that still sees the lease held, which does nothing.
+          if [ "$pushed" = '1' ] && [ -s worker-finished.json ] && \
+             [ "$(jq -r '.recovered // false' worker-finished.json)" = 'true' ]; then
+            echo 'recovered=true' >> "$GITHUB_OUTPUT"
+          fi
+          rm -f worker-finished.json
 
       - name: Report to the activity feed
         # Also moved off the task branch. `cli notify` is orchestrator code and
@@ -501,3 +552,31 @@ jobs:
           uv run --locked python -m services.agentops.cli state-pull || true
           uv run --locked python -m services.agentops.cli control-center \
             --repo "$REPO" || echo 'control center unavailable'
+
+  relaunch:
+    # Continuation after a recovered lease. Freeing it is only half the job:
+    # the task produced no pull request, so no merge and no failing check will
+    # ever fire, and nothing else would notice until the hourly watchdog saw
+    # the system idle.
+    #
+    # Its own job for the same reason the watchdog splits `rearm` out of
+    # `sweep`. Dispatching a workflow needs `actions: write`, and finalize must
+    # not hold it: that job pushes the state branch, so the scopes are kept on
+    # separate runners rather than pooled on one. This job checks nothing out
+    # and can only start the coordinator, which then re-derives every decision
+    # itself.
+    #
+    # Attempts stay bounded by max_implementation_attempts, so a task that
+    # keeps dying this way is blocked rather than dispatched forever.
+    needs: finalize
+    # Gated on the repository variable, not on a value carried through the run:
+    # this starts new work, so the kill switch has to be able to stop it.
+    if: needs.finalize.outputs.recovered == 'true' && vars.AUTONOMY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write # dispatch the coordinator, and nothing else
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run agentops-coordinator.yml --repo "$REPO"

@@ -721,6 +721,61 @@ def cmd_attach(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_worker_finished(args: argparse.Namespace) -> int:
+    """Free a lease whose worker is over and left no pull request behind.
+
+    Run from the worker's finalize job, which only starts once the work job has
+    reached a conclusion -- that job dependency is what proves the writer has
+    stopped. Everything else is checked in `leases.abandon_finished_worker`,
+    which refuses rather than guesses.
+
+    A refusal is not an error. This runs on every failed worker, and most of
+    those have a pull request to repair instead, so exit 0 either way and let
+    the caller read `recovered`.
+    """
+    root = _root(args)
+    paths = state.Paths(root)
+    tasks = state.read_json(paths.tasks, {"leases": {}})
+
+    # Fails closed: an unanswerable query means a pull request may exist, so
+    # the lease is left for the normal stale path rather than freed on a guess.
+    open_pr = watchdog.branch_pull_request_open(args.branch, repo=args.repo)
+    if open_pr is None:
+        return _emit(
+            {
+                "recovered": False,
+                "task": args.task,
+                "reason": "could not tell whether a pull request is open; "
+                "leaving the lease alone",
+            }
+        )
+
+    try:
+        lease = leases.abandon_finished_worker(
+            tasks,
+            args.task,
+            run_id=args.run_id,
+            branch=args.branch,
+            failure_class=args.failure_class,
+            pull_request_open=open_pr,
+        )
+    except (leases.LeaseConflict, ValueError) as refused:
+        return _emit({"recovered": False, "task": args.task, "reason": str(refused)})
+
+    state.write_json(paths.tasks, tasks)
+    return _emit(
+        {
+            "recovered": True,
+            "task": args.task,
+            "branch": args.branch,
+            "failure_class": lease.get("failure_class"),
+            "reason": lease.get("abandoned_reason"),
+            "attempts": lease.get("attempts"),
+            "checkpoint_kept": bool(lease.get("checkpoint")),
+        }
+    )
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     """Check every state file parses and holds the shape the system expects.
 
@@ -1128,6 +1183,22 @@ def build_parser() -> argparse.ArgumentParser:
     attach.add_argument("--run-attempt", dest="run_attempt")
     attach.add_argument("--pull-request", dest="pull_request", type=int)
     attach.set_defaults(func=cmd_attach)
+
+    finished = sub.add_parser(
+        "worker-finished",
+        help="free a lease whose worker ended without opening a pull request",
+    )
+    finished.add_argument("--task", type=int, required=True)
+    finished.add_argument("--branch", required=True)
+    finished.add_argument("--run-id", dest="run_id", required=True)
+    finished.add_argument(
+        "--failure-class",
+        dest="failure_class",
+        required=True,
+        choices=sorted(leases.FAILURE_CLASSES),
+    )
+    finished.add_argument("--repo")
+    finished.set_defaults(func=cmd_worker_finished)
 
     sub.add_parser(
         "validate", help="check the state files parse and are well formed"

@@ -1223,3 +1223,262 @@ class TestFourteenthReviewFindings(unittest.TestCase):
 
         source = Path(watchdog.__file__).read_text(encoding="utf-8")
         self.assertNotIn("update_status_file", source)
+
+
+class TestWorkerFinishedWithoutPullRequest(unittest.TestCase):
+    """The first live worker died in under a minute and wedged the loop.
+
+    Its lease stayed `assigned` with `expires_at` 90 minutes out, so nothing
+    could touch it until that timeout passed even though the run was provably
+    over. These cover the explicit transition that replaces the wait, and --
+    more importantly -- every condition under which it must refuse.
+    """
+
+    RUN = "34921450581"
+    BRANCH = "block-04-t15-coach-judgments"
+
+    def setUp(self) -> None:
+        self.policy = policy()
+        self.tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=15,
+            owner="run-34921416961",
+            branch=self.BRANCH,
+            assignment=assignment(),
+            run_id="34921416961",
+        )
+        leases.attach_worker(self.tasks, 15, run_id=self.RUN, run_attempt="1")
+
+    def lease(self) -> dict[str, Any]:
+        held: dict[str, Any] = self.tasks["leases"]["15"]
+        return held
+
+    def recover(self, **overrides: Any) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "run_id": self.RUN,
+            "branch": self.BRANCH,
+            "failure_class": "provider",
+            "pull_request_open": False,
+        }
+        kwargs.update(overrides)
+        return leases.abandon_finished_worker(self.tasks, 15, **kwargs)
+
+    def test_a_finished_worker_with_no_pull_request_frees_the_lease(self) -> None:
+        lease = self.recover()
+        self.assertEqual(lease["state"], "abandoned")
+        self.assertNotIn(lease["state"], leases.ACTIVE_STATES)
+        self.assertTrue(lease["abandoned_at"])
+        self.assertEqual(lease["abandoned_by_run"], self.RUN)
+
+    def test_the_lease_does_not_have_to_go_stale_first(self) -> None:
+        """The whole point: the 90-minute expiry is still in the future."""
+        expires = datetime.fromisoformat(self.lease()["expires_at"])
+        self.assertGreater(expires, datetime.now(UTC))
+        self.assertFalse(leases.is_stale(self.lease(), self.policy))
+        self.assertEqual(self.recover()["state"], "abandoned")
+
+    def test_attempt_accounting_survives(self) -> None:
+        self.assertEqual(self.lease()["attempts"], 1)
+        self.recover()
+        self.assertEqual(self.lease()["attempts"], 1)
+
+    def test_a_checkpoint_survives(self) -> None:
+        leases.checkpoint(
+            self.tasks,
+            15,
+            "run-34921416961",
+            state="implementing",
+            commit="abc1234",
+            complete=["migration written"],
+            remaining=["router"],
+        )
+        self.recover()
+        self.assertEqual(self.lease()["checkpoint"]["commit"], "abc1234")
+        self.assertEqual(self.lease()["checkpoint"]["complete"], ["migration written"])
+
+    def test_provider_failure_stays_classified_apart_from_worker_failure(self) -> None:
+        self.assertEqual(
+            self.recover(failure_class="provider")["failure_class"], "provider"
+        )
+        self.setUp()
+        self.assertEqual(
+            self.recover(failure_class="worker")["failure_class"], "worker"
+        )
+        self.assertNotEqual(
+            leases.FAILURE_CLASSES["provider"], leases.FAILURE_CLASSES["worker"]
+        )
+
+    def test_an_unknown_failure_class_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            self.recover(failure_class="ci")
+        self.assertEqual(self.lease()["state"], "assigned")
+
+    def test_an_open_pull_request_holds_the_lease(self) -> None:
+        """The branch is still in play; the repair path owns it, not this."""
+        with self.assertRaises(leases.LeaseConflict):
+            self.recover(pull_request_open=True)
+        self.assertEqual(self.lease()["state"], "assigned")
+
+    def test_an_attached_pull_request_holds_the_lease(self) -> None:
+        leases.attach_worker(self.tasks, 15, pull_request=41)
+        with self.assertRaises(leases.LeaseConflict):
+            self.recover()
+        self.assertEqual(self.lease()["state"], "assigned")
+
+    def test_another_run_may_not_free_this_lease(self) -> None:
+        """A re-run, or a finalize job reporting late, must not take a branch a
+        newer worker now holds. This is the two-writer guard."""
+        with self.assertRaises(leases.LeaseConflict) as caught:
+            self.recover(run_id="99999999999")
+        self.assertIn("attached to worker run", str(caught.exception))
+        self.assertEqual(self.lease()["state"], "assigned")
+
+    def test_a_lease_with_no_attached_worker_is_refused(self) -> None:
+        """Nothing proves which run this would be freeing."""
+        self.lease().pop("worker_run_id")
+        with self.assertRaises(leases.LeaseConflict):
+            self.recover()
+
+    def test_another_branch_may_not_free_this_lease(self) -> None:
+        with self.assertRaises(leases.LeaseConflict):
+            self.recover(branch="block-04-t16-something-else")
+        self.assertEqual(self.lease()["state"], "assigned")
+
+    def test_a_terminal_lease_is_left_alone(self) -> None:
+        """Which is also what makes the caller's retry loop idempotent."""
+        self.recover()
+        with self.assertRaises(leases.LeaseConflict) as caught:
+            self.recover()
+        self.assertIn("nothing to recover", str(caught.exception))
+
+    def test_a_merged_lease_is_never_reopened(self) -> None:
+        leases.release(self.tasks, 15, "merged")
+        with self.assertRaises(leases.LeaseConflict):
+            self.recover()
+        self.assertEqual(self.lease()["state"], "merged")
+
+    def test_an_unknown_task_is_refused(self) -> None:
+        with self.assertRaises(leases.LeaseConflict):
+            leases.abandon_finished_worker(
+                self.tasks,
+                99,
+                run_id=self.RUN,
+                branch=self.BRANCH,
+                failure_class="worker",
+                pull_request_open=False,
+            )
+
+    def test_completion_is_never_faked(self) -> None:
+        """Recovery must not look like success to anything downstream."""
+        lease = self.recover()
+        self.assertNotEqual(lease["state"], "merged")
+        self.assertIsNone(lease.get("pull_request"))
+
+
+class TestRecoveredLeaseIsRedispatchable(unittest.TestCase):
+    """The transition is only worth anything if the coordinator can act on it."""
+
+    RUN = "34921450581"
+    BRANCH = "block-04-t15-coach-judgments"
+
+    def setUp(self) -> None:
+        self.policy = policy()
+        self.tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=15,
+            owner="run-1",
+            branch=self.BRANCH,
+            assignment=assignment(),
+            run_id="1",
+        )
+        leases.attach_worker(self.tasks, 15, run_id=self.RUN)
+        leases.checkpoint(
+            self.tasks, 15, "run-1", state="implementing", commit="abc1234"
+        )
+        leases.abandon_finished_worker(
+            self.tasks,
+            15,
+            run_id=self.RUN,
+            branch=self.BRANCH,
+            failure_class="provider",
+            pull_request_open=False,
+        )
+
+    def test_the_freed_lease_stops_counting_as_a_live_writer(self) -> None:
+        self.assertEqual(leases.active_leases(self.tasks, self.policy), [])
+
+    def test_the_next_attempt_is_permitted_and_counted(self) -> None:
+        lease = leases.acquire(
+            self.tasks,
+            self.policy,
+            task_id=15,
+            owner="run-2",
+            branch=self.BRANCH,
+            assignment=assignment(),
+            run_id="2",
+        )
+        self.assertEqual(lease["attempts"], 2)
+        self.assertEqual(lease["state"], "assigned")
+        self.assertEqual(lease["checkpoint"]["commit"], "abc1234")
+
+    def test_the_attempt_budget_still_ends_the_retrying(self) -> None:
+        """Recovery must not become an unbounded redispatch loop."""
+        ceiling = int(self.policy["escalation"]["max_implementation_attempts"])
+        for attempt in range(2, ceiling + 1):
+            leases.acquire(
+                self.tasks,
+                self.policy,
+                task_id=15,
+                owner=f"run-{attempt}",
+                branch=self.BRANCH,
+                assignment=assignment(),
+                run_id=str(attempt),
+            )
+            leases.attach_worker(self.tasks, 15, run_id=f"worker-{attempt}")
+            leases.abandon_finished_worker(
+                self.tasks,
+                15,
+                run_id=f"worker-{attempt}",
+                branch=self.BRANCH,
+                failure_class="provider",
+                pull_request_open=False,
+            )
+        with self.assertRaises(leases.AttemptsExhausted):
+            leases.acquire(
+                self.tasks,
+                self.policy,
+                task_id=15,
+                owner="run-last",
+                branch=self.BRANCH,
+                assignment=assignment(),
+                run_id="last",
+            )
+
+
+class TestBranchPullRequestQuery(unittest.TestCase):
+    """The open-pull-request question the recovery command fails closed on."""
+
+    def _answer(self, returncode: int, stdout: str) -> bool | None:
+        import subprocess
+
+        from services.agentops import watchdog
+
+        completed = mock.Mock(returncode=returncode, stdout=stdout)
+        with mock.patch.object(subprocess, "run", return_value=completed):
+            return watchdog.branch_pull_request_open("block-04-t15", repo="o/r")
+
+    def test_an_open_pull_request_reads_as_open(self) -> None:
+        self.assertIs(self._answer(0, '[{"number": 41}]'), True)
+
+    def test_no_pull_request_reads_as_none_open(self) -> None:
+        self.assertIs(self._answer(0, "[]"), False)
+
+    def test_a_failed_query_is_unanswerable(self) -> None:
+        self.assertIsNone(self._answer(1, ""))
+
+    def test_unparseable_output_is_unanswerable(self) -> None:
+        self.assertIsNone(self._answer(0, "not json"))

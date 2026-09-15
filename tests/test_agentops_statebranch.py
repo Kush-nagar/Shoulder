@@ -28,6 +28,12 @@ AGENTOPS_WORKFLOWS = sorted(WORKFLOW_DIR.glob("agentops-*.yml"))
 PRODUCT_DIRS = ("services/api", "apps/web", "migrations", "packages", "scripts")
 
 
+def job(text: str, name: str) -> str:
+    """One top-level job's block, without the jobs that follow it."""
+    body = text.split(f"\n  {name}:\n", 1)[1]
+    return re.split(r"(?m)^  \w[\w-]*:$", body)[0]
+
+
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -320,8 +326,11 @@ class TestThirdRoundReviewFindings(unittest.TestCase):
         self.assertIn("cli notify", finalize)
 
     def test_the_finalize_job_holds_no_more_than_it_needs(self) -> None:
-        text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        finalize = text.split("\n  finalize:", 1)[1]
+        # Scoped to the job, not to everything after its header. A later job may
+        # legitimately hold a scope this one must not, and reading to the end of
+        # the file would report that as a finalize permission.
+        finalize = job(read(WORKFLOW_DIR / "agentops-worker.yml"), "finalize")
+        self.assertIn("contents: write", finalize)
         self.assertNotIn("pull-requests: write", finalize)
         self.assertNotIn("actions: write", finalize)
         self.assertNotIn("id-token: write", finalize)

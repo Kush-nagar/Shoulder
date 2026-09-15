@@ -158,7 +158,23 @@ class TestWorkflowPermissions(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         for needed in ("contents: write", "pull-requests: write", "id-token: write"):
             self.assertIn(needed, text)
-        self.assertNotIn("actions: write", text)
+        # The job that runs agent code must never be able to dispatch a
+        # workflow. `relaunch` may -- that is all it can do, it checks nothing
+        # out, and it runs after every other job has finished -- so this is
+        # asserted per job rather than across the file.
+        jobs = dict(
+            zip(
+                re.findall(r"(?m)^  (\w[\w-]*):$", text),
+                re.split(r"(?m)^  \w[\w-]*:$", text)[1:],
+                strict=True,
+            )
+        )
+        for name, block in jobs.items():
+            with self.subTest(name):
+                if name == "relaunch":
+                    continue
+                self.assertNotIn("actions: write", block)
+        self.assertIn("actions: write", jobs["relaunch"])
 
     def test_every_action_is_pinned_to_a_commit_sha(self) -> None:
         for path in AGENTOPS_WORKFLOWS:
@@ -1047,3 +1063,271 @@ class TestVerdictDurability(unittest.TestCase):
         self.assertNotIn("::add-mask::", step)
         self.assertNotIn("git remote set-url", step)
         self.assertNotIn("extraheader", step)
+
+
+def shell_blocks(text: str) -> list[tuple[str, str]]:
+    """Every `run:` block scalar in a workflow, with the step that owns it.
+
+    The blocks are found by indentation, exactly as YAML ends them, which is
+    what makes a truncated final line visible: a block does not stop where its
+    author thought it did, it stops where the indentation drops.
+    """
+    found = []
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)-?\s*run: \|-?\s*$", line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        body = []
+        for following in lines[index + 1 :]:
+            if following.strip() and len(following) - len(following.lstrip()) <= indent:
+                break
+            body.append(following)
+        name = "unnamed step"
+        for previous in reversed(lines[:index]):
+            if "- name:" in previous:
+                name = previous.split("- name:", 1)[1].strip()
+                break
+        found.append((name, "\n".join(body)))
+    return found
+
+
+class TestLiveBootstrapDefects(unittest.TestCase):
+    """The first real autonomous launch, 2026-09-15.
+
+    The coordinator ran, chose Task 15, and dispatched worker run 34921450581,
+    which failed before writing a line of code. Each test here is one of the
+    defects that live run exposed.
+    """
+
+    WORKER = WORKFLOW_DIR / "agentops-worker.yml"
+
+    # 1. The harness refused the actor that dispatches it.
+
+    def test_both_autonomous_worker_lanes_admit_the_dispatching_bot(self) -> None:
+        """ "Workflow initiated by non-human actor: github-actions (type: Bot)."
+
+        The coordinator dispatches this workflow through the Actions API, so
+        GITHUB_ACTOR is `github-actions`, and claude-code-action rejects a
+        non-human actor unless it is named. Both lanes run the same harness and
+        are dispatched the same way, so both need it or the fallback chain
+        fails exactly as the first lane did.
+        """
+        text = read(self.WORKER)
+        for lane in ("Implement with Claude", "Implement with an OpenRouter model"):
+            step = text.split(f"- name: {lane}", 1)[1].split("- name:", 1)[0]
+            with self.subTest(lane):
+                self.assertIn("anthropics/claude-code-action@", step)
+                self.assertRegex(step, r"(?m)^\s*allowed_bots: github-actions\s*$")
+
+    def test_no_workflow_admits_every_bot(self) -> None:
+        """'*' would let any App that can dispatch a workflow in this
+        repository run a prompt through the subscription."""
+        for path in AGENTOPS_WORKFLOWS:
+            with self.subTest(path.name):
+                text = read(path)
+                self.assertNotRegex(text, r"allowed_bots:\s*['\"]?\*")
+                for value in re.findall(r"allowed_bots:\s*(.+)", text):
+                    self.assertEqual(value.strip().strip("'\""), "github-actions")
+
+    def test_no_workflow_bypasses_the_write_permission_check(self) -> None:
+        """A neighbouring input that would have "fixed" the same error by
+        disabling the check instead of naming the actor."""
+        for path in AGENTOPS_WORKFLOWS:
+            with self.subTest(path.name):
+                self.assertNotIn("allowed_non_write_users", read(path))
+
+    # 2. The pull-request step could not have run.
+
+    def test_the_pull_request_number_reaches_the_step_output(self) -> None:
+        """`steps.pr.outputs.number` is what the finalize job attaches to the
+        lease. The line that writes it had been truncated mid-string to
+        `echo "ner and checks out the default branch.`, which is an
+        unterminated quote: bash would have failed to parse the whole script.
+        It stayed invisible because the first worker died before reaching it.
+        """
+        text = read(self.WORKER)
+        step = text.split("- name: Push the branch and open a pull request", 1)[1]
+        step = re.split(r"(?m)^  \w[\w-]*:$", step)[0]
+        self.assertIn('echo "number=${number}" >> "$GITHUB_OUTPUT"', step)
+
+    def test_every_referenced_step_output_is_actually_written(self) -> None:
+        """The general form of the same defect. A step output that nothing
+        writes is an empty string at runtime, not an error, so the reference
+        keeps working and the value silently disappears."""
+        for path in AGENTOPS_WORKFLOWS:
+            text = read(path)
+            for step_id, key in re.findall(r"steps\.([\w-]+)\.outputs\.([\w-]+)", text):
+                if f"\n        id: {step_id}\n" not in text:
+                    continue  # declared in another workflow's context
+                step = text.split(f"\n        id: {step_id}\n", 1)[1]
+                step = re.split(r"(?m)^      - ", step)[0]
+                if "uses:" in step:
+                    continue  # a third-party action supplies its own outputs
+                with self.subTest(f"{path.name}:{step_id}.{key}"):
+                    # DOTALL because the write is often wrapped over a line
+                    # continuation. The question is only whether anything
+                    # writes the key at all -- the corrupted pull-request step
+                    # had neither the assignment nor the redirect.
+                    self.assertRegex(
+                        step,
+                        rf"(?s){re.escape(key)}=.*?>> \"\$GITHUB_OUTPUT\"",
+                        f"nothing writes {step_id}.{key}",
+                    )
+
+    def test_every_shell_block_is_a_parseable_script(self) -> None:
+        """Catches the truncation directly, and anything else that leaves a
+        block scalar holding something that is not a shell script.
+
+        `bash -n` where there is a bash, and an unbalanced-quote check
+        everywhere, so this never becomes a test that quietly does nothing.
+        """
+        import shutil
+        import subprocess
+        import tempfile
+
+        bash = shutil.which("bash")
+        for path in AGENTOPS_WORKFLOWS:
+            for name, body in shell_blocks(read(path)):
+                if "shell: pwsh" in read(path).split(name, 1)[-1][:200]:
+                    continue
+                with self.subTest(f"{path.name}: {name}"):
+                    stripped = re.sub(r"(?m)^\s*#.*$", "", body)
+                    self.assertEqual(
+                        len(re.findall(r'(?<!\\)"', stripped)) % 2,
+                        0,
+                        "unbalanced double quote; a line is probably truncated",
+                    )
+                    if not bash:
+                        continue
+                    with tempfile.NamedTemporaryFile(
+                        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+                    ) as handle:
+                        handle.write(body)
+                        script = handle.name
+                    self.addCleanup(Path(script).unlink, True)
+                    parsed = subprocess.run(
+                        [bash, "-n", script],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    self.assertEqual(parsed.returncode, 0, parsed.stderr.strip())
+
+    # 3. A dead worker left the loop waiting on a 90-minute lease.
+
+    def test_a_worker_that_opens_no_pull_request_frees_its_lease(self) -> None:
+        text = read(self.WORKER)
+        finalize = text.split("\n  finalize:", 1)[1].split("\n  relaunch:", 1)[0]
+        self.assertIn("cli worker-finished", finalize)
+        # Guarded on both halves of the condition it exists for.
+        self.assertIn("\"${WORK_RESULT:-}\" != 'success'", finalize)
+        self.assertIn('-z "${PR_NUMBER:-}"', finalize)
+        # And bound to this run and this branch, so it can only free its own.
+        self.assertIn('--run-id "$GITHUB_RUN_ID"', finalize)
+        self.assertIn('--branch "$BRANCH"', finalize)
+
+    def test_the_recovery_runs_only_after_the_worker_has_concluded(self) -> None:
+        """The job dependency is the liveness proof. Doing this in the work
+        job would mean a worker freeing its own lease while still running."""
+        text = read(self.WORKER)
+        work = text.split("\n  work:", 1)[1].split("\n  finalize:", 1)[0]
+        self.assertNotIn("cli worker-finished", work)
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("needs: work", finalize)
+
+    def test_a_provider_failure_stays_classified_as_one(self) -> None:
+        text = read(self.WORKER)
+        finalize = text.split("\n  finalize:", 1)[1].split("\n  relaunch:", 1)[0]
+        self.assertIn("--failure-class", finalize)
+        self.assertIn("if [ \"${HARNESS_FAILED:-}\" = 'true' ]; then", finalize)
+        # The lane still leaves the pool, so the next attempt takes a fallback.
+        self.assertIn("--status DEGRADED", finalize)
+
+    def test_recovery_restarts_the_loop(self) -> None:
+        """Nothing else would: the task produced no pull request, so no merge
+        and no failing check will ever fire for it."""
+        text = read(self.WORKER)
+        relaunch = text.split("\n  relaunch:", 1)[1]
+        self.assertIn("needs.finalize.outputs.recovered == 'true'", relaunch)
+        self.assertIn("gh workflow run agentops-coordinator.yml", relaunch)
+
+    def test_restarting_the_loop_obeys_the_kill_switch(self) -> None:
+        text = read(self.WORKER)
+        relaunch = text.split("\n  relaunch:", 1)[1]
+        self.assertIn("vars.AUTONOMY_ENABLED == 'true'", relaunch)
+
+    def test_the_relaunch_job_can_only_dispatch(self) -> None:
+        """It exists as its own job so the dispatch scope is never pooled with
+        the state-branch write scope, the same split the watchdog makes."""
+        text = read(self.WORKER)
+        relaunch = text.split("\n  relaunch:", 1)[1]
+        self.assertIn("actions: write", relaunch)
+        for forbidden in ("contents: write", "issues: write", "id-token: write"):
+            with self.subTest(forbidden):
+                self.assertNotIn(forbidden, relaunch)
+        self.assertNotIn("actions/checkout", relaunch)
+
+    def test_recovery_is_claimed_only_once_the_ledger_has_it(self) -> None:
+        """Dispatching on a recovery that never reached the state branch would
+        start a coordinator that still sees the lease held."""
+        text = read(self.WORKER)
+        finalize = text.split("\n  finalize:", 1)[1].split("\n  relaunch:", 1)[0]
+        record = finalize.split("- name: Record spend", 1)[1]
+        self.assertIn("pushed=1", record)
+        self.assertIn("[ \"$pushed\" = '1' ]", record)
+
+    def test_the_recovery_command_refuses_rather_than_guesses(self) -> None:
+        from services.agentops import cli, leases
+
+        source = Path(leases.__file__).read_text(encoding="utf-8")
+        body = source.split("def abandon_finished_worker", 1)[1].split("\ndef ", 1)[0]
+        # Every condition that must hold before a lease may be freed.
+        for guard in ("ACTIVE_STATES", "worker_run_id", "branch", "pull_request"):
+            with self.subTest(guard):
+                self.assertIn(guard, body)
+        # Attempts and the checkpoint are not touched, so the next attempt
+        # counts against the same budget and keeps whatever progress was saved.
+        self.assertNotIn('lease["attempts"]', body)
+        self.assertNotIn('lease["checkpoint"]', body)
+
+        command = Path(cli.__file__).read_text(encoding="utf-8")
+        command = command.split("def cmd_worker_finished", 1)[1].split("\ndef ", 1)[0]
+        # An unanswerable pull-request query leaves the lease alone.
+        self.assertIn("if open_pr is None", command)
+
+    # 4. The Control Center reported PAUSED during a live autonomous run.
+
+    def test_the_watchdog_publishes_the_live_kill_switch(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-watchdog.yml")
+        step = text.split("- name: Refresh the Control Center", 1)[1]
+        step = step.split("\n      - ", 1)[0]
+        self.assertIn("AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}", step)
+
+    def test_the_worker_finalize_job_publishes_the_live_kill_switch(self) -> None:
+        text = read(self.WORKER)
+        finalize = text.split("\n  finalize:", 1)[1].split("\n  relaunch:", 1)[0]
+        self.assertIn("cli control-center", finalize)
+        self.assertIn("AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}", finalize)
+
+    def test_the_kill_switch_is_never_defaulted_on(self) -> None:
+        """Passing the variable must not turn into passing a literal true."""
+        for path in AGENTOPS_WORKFLOWS:
+            with self.subTest(path.name):
+                text = read(path)
+                self.assertNotRegex(text, r"AUTONOMY_ENABLED:\s*['\"]?true")
+
+    # 5. None of the above may have loosened what PRs #24 and #26 established.
+
+    def test_the_hotfix_left_the_security_posture_alone(self) -> None:
+        text = read(self.WORKER)
+        # Runtime state still goes to the state branch, never the default one.
+        self.assertIn("cli state-push", text)
+        self.assertNotIn('git push origin "HEAD:$DEFAULT_BRANCH"', text)
+        # The governance guard still runs on task branches.
+        self.assertIn("governance-check", read(WORKFLOW_DIR / "agentops-review.yml"))
+        # And the merge gate is still a required context, not a step that merges.
+        self.assertIn("--auto", text)

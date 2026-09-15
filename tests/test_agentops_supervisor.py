@@ -8,6 +8,7 @@ catch, because every one of them is a way the autonomous loop silently stops.
 from __future__ import annotations
 
 import json
+import os
 import re
 import unittest
 from pathlib import Path
@@ -30,6 +31,12 @@ WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 
 def read(name: str) -> str:
     return (WORKFLOW_DIR / name).read_text(encoding="utf-8")
+
+
+def job(text: str, name: str) -> str:
+    """One top-level job's block, without the jobs that follow it."""
+    body = text.split(f"\n  {name}:\n", 1)[1]
+    return re.split(r"(?m)^  \w[\w-]*:$", body)[0]
 
 
 def only_branch(wanted: str) -> Any:
@@ -862,8 +869,10 @@ class TestSecondRoundReviewFindings(unittest.TestCase):
     def test_the_control_center_refresh_runs_from_trusted_code(self) -> None:
         """Checking out only the state files leaves services/agentops on the
         task branch, so a worker could edit it and run it with the token."""
-        text = read("agentops-worker.yml")
-        report = text.split("\n  finalize:", 1)[1]
+        # Scoped to the job itself. Reading to the end of the file would fold a
+        # later job's permissions into this assertion, which is the difference
+        # between "finalize holds nothing else" and "no job after it does".
+        report = job(read("agentops-worker.yml"), "finalize")
         self.assertIn("ref: ${{ github.event.repository.default_branch }}", report)
         # `contents: write` is unavoidable here -- this job pushes the state
         # branch -- so what bounds it is that the code it runs comes from the
@@ -952,3 +961,94 @@ class TestShellOutputIsDecodedExplicitly(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestControlCenterReadsTheLiveKillSwitch(unittest.TestCase):
+    """Issue #25 rendered "AUTONOMY STATUS: PAUSED -- AUTONOMY_ENABLED is
+    false" while the first live worker was running with it set to true.
+
+    The page reads the variable out of the environment, and two of the trusted
+    jobs that publish it -- worker finalize and the watchdog refresh -- never
+    passed it in, so those refreshes rendered the committed `enabled: false`
+    seed instead of the repository variable.
+    """
+
+    def _root(self) -> Path:
+        import shutil
+        import tempfile
+
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for relative in ("ops", "docs", "services"):
+            shutil.copytree(REPO_ROOT / relative, tmp / relative)
+        return tmp
+
+    def _refresh(self, root: Path, variable: str | None) -> str:
+        """One Control Center refresh, as a cloud job performs it."""
+        environment = {k: v for k, v in os.environ.items() if k != "AUTONOMY_ENABLED"}
+        if variable is not None:
+            environment["AUTONOMY_ENABLED"] = variable
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch.object(control_center, "pull_request_checks", return_value=[]),
+        ):
+            return control_center.render(root, repo=None)
+
+    def _with_a_task_in_flight(self, root: Path) -> Path:
+        paths = state.Paths(root)
+        tasks = state.read_json(paths.tasks, {"leases": {}})
+        leases.acquire(
+            tasks,
+            policy(),
+            task_id=15,
+            owner="run-34921416961",
+            branch="block-04-t15-coach-judgments",
+            assignment={"lane": "claude_subscription"},
+            run_id="34921416961",
+        )
+        state.write_json(paths.tasks, tasks)
+        return root
+
+    def test_a_refresh_reports_running_when_the_variable_is_true(self) -> None:
+        root = self._with_a_task_in_flight(self._root())
+        self.assertIn("AUTONOMY STATUS: RUNNING", self._refresh(root, "true"))
+
+    def test_a_refresh_reports_paused_when_the_variable_is_false(self) -> None:
+        root = self._with_a_task_in_flight(self._root())
+        page = self._refresh(root, "false")
+        self.assertIn("AUTONOMY STATUS: PAUSED", page)
+        self.assertIn("AUTONOMY_ENABLED is false", page)
+
+    def test_an_unset_variable_still_reads_as_paused(self) -> None:
+        """Default-off is the safety behaviour and this must not change it."""
+        root = self._with_a_task_in_flight(self._root())
+        self.assertIn("AUTONOMY STATUS: PAUSED", self._refresh(root, None))
+        # GitHub renders an undefined repository variable as the empty string,
+        # which reaches the process rather than being absent.
+        self.assertIn("AUTONOMY STATUS: PAUSED", self._refresh(root, ""))
+
+    def test_every_job_that_publishes_the_page_is_given_the_variable(self) -> None:
+        """Static half of the same defect: a job that renders the page without
+        the variable in scope reports PAUSED however the repository is set."""
+        for path in sorted(WORKFLOW_DIR.glob("agentops-*.yml")):
+            text = read(path.name)
+            for job in re.split(r"(?m)^  (?=\w[\w-]*:$)", text)[1:]:
+                if "cli control-center" not in job:
+                    continue
+                name = job.split(":", 1)[0]
+                # The variable has to be in scope where the page is rendered:
+                # on the job, or on the step that renders it.
+                step = job.split("- name:")[
+                    next(
+                        index
+                        for index, block in enumerate(job.split("- name:"))
+                        if "cli control-center" in block
+                    )
+                ]
+                scope = job.split("steps:", 1)[0] + step
+                with self.subTest(f"{path.name}:{name}"):
+                    self.assertIn(
+                        "AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}",
+                        scope,
+                        "the Control Center would render the committed seed",
+                    )
