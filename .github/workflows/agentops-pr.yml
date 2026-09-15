@@ -1,0 +1,311 @@
+name: AgentOps PR
+
+# What happens to an autonomous pull request after its checks report.
+#
+# Merging is deliberately NOT here. A pull request merges once every required
+# context is green, so nothing in this repository polls for green or holds a
+# runner open waiting for it. This workflow handles the other outcome: a check
+# that failed, which is ordinary engineering and belongs back with the writer
+# rather than with a human.
+#
+# It triggers on `workflow_run`, so it runs from the default branch with the
+# repository's own trusted code, never from the pull request's copy of it. That
+# matters: the branch under review is written by an autonomous agent, and this
+# job is credentialed.
+
+on:
+  workflow_run:
+    workflows: ['Quality', 'AgentOps Review']
+    types: [completed]
+
+concurrency:
+  # One reaction per branch. Quality and the review verdict often finish within
+  # seconds of each other, and two repair dispatches for one branch would put
+  # two writers on it.
+  group: agentops-pr-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  react:
+    # Only a real failure, on a branch this system produced, IN THIS REPOSITORY.
+    #
+    # The head-repository check is not redundant with the branch-name check. On
+    # a public repository anyone may open a fork pull request whose branch is
+    # named after the active canonical task, fail Quality on purpose, and reach
+    # this credentialed workflow through `workflow_run`. Repair lookup is by
+    # task number, so without this such a run would spend the real task's
+    # repair budget and dispatch a credentialed worker at the real branch.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (startsWith(github.event.workflow_run.head_branch, 'block-') ||
+       startsWith(github.event.workflow_run.head_branch, 'task-'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # write the agentops-state branch, nothing else
+      actions: write # dispatch the repair worker, or rerun the reviewer
+      issues: write # activity feed and Control Center
+      pull-requests: read
+    env:
+      AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+      FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
+      FAILED_RUN_ID: ${{ github.event.workflow_run.id }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Read the runtime ledger
+        # Triage below reads the lease to decide whether this branch is even
+        # ours, and `cli reviewer` reads it too. The copy committed on the
+        # default branch is a seed, not the live ledger.
+        run: uv run --locked python -m services.agentops.cli state-pull
+
+      - name: Work out what failed and whether it is still worth repairing
+        id: triage
+        run: |
+          set -euo pipefail
+          # The branch encodes its task: block-04-t15-... or task-15-...
+          task="$(printf '%s' "$BRANCH" | sed -n 's/.*[-]t\?\([0-9][0-9]*\)-.*/\1/p')"
+          if [ -z "$task" ]; then
+            echo 'no task number in the branch name; nothing to repair'
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "task=${task}" >> "$GITHUB_OUTPUT"
+
+          # A merged or closed pull request is not worth repairing, and the
+          # branch must be the one the lease actually names -- the task number
+          # alone is not proof of which branch this is.
+          pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$pr" ]; then
+            echo "no open pull request for $BRANCH; not repairing"
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+
+          # A branch prefix is not proof that this system wrote the branch: a
+          # person may name a branch `task-15-...` too, and repair is looked up
+          # by task number alone. Without this, such a pull request would spend
+          # the canonical task's repair budget, move its lease, and point a
+          # credentialed worker at a branch the lease does not name. The lease
+          # must exist AND name exactly this branch.
+          leased="$(jq -r --arg t "$task" '.leases[$t].branch // empty' \
+            ops/state/tasks.json)"
+          if [ "$leased" != "$BRANCH" ]; then
+            echo "task $task is not leased on $BRANCH (lease: ${leased:-none});"
+            echo 'not an autonomous branch; not repairing'
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${AUTONOMY_ENABLED:-false}" != 'true' ]; then
+            echo 'AUTONOMY_ENABLED is not true; recording the failure only'
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$FAILED_WORKFLOW" != 'AgentOps Review' ]; then
+            echo 'reason=ci' >> "$GITHUB_OUTPUT"
+            echo 'action=repair' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Review failing is three different events wearing one face:
+          #   - the reviewer found something          -> repair the branch
+          #   - the reviewer has not answered yet     -> wait, do nothing
+          #   - the reviewer itself could not run     -> rerun the reviewer
+          #
+          # Sending the second or third to the writer spends a review cycle,
+          # produces no commit, and therefore emits no `synchronize` to rerun
+          # the review: the pull request sticks forever. Rerunning the second
+          # is worse still -- `gh run rerun --failed` reruns dependencies, so
+          # it reposts the mention and fails again until the review lands.
+          #
+          # The verdict is asked exactly as the gate asks it, flags included,
+          # or the intentional `pending` reads as a clean-but-failed run.
+          uv run --locked python -m services.agentops.cli reviewer \
+            --task "$task" > reviewer.json
+          mechanism="$(jq -r '.mechanism // empty' reviewer.json)"
+          login="$(jq -r '.review_bot_login // empty' reviewer.json)"
+          if [ "$mechanism" = 'github-mention' ] && [ -n "$login" ]; then
+            uv run --locked python -m services.agentops.cli review-verdict \
+              --repo "$REPO" --pull-request "$pr" --require-submitted-review \
+              --reviewer-login "$login" > verdict.json || true
+          else
+            uv run --locked python -m services.agentops.cli review-verdict \
+              --repo "$REPO" --pull-request "$pr" > verdict.json || true
+          fi
+          blocking="$(jq -r '.blocking // 0' verdict.json)"
+          readable="$(jq -r '.ok // false' verdict.json)"
+          decision="$(jq -r '.verdict // "unknown"' verdict.json)"
+
+          reason_text="$(jq -r '.reason // ""' verdict.json)"
+
+          if [ "$decision" = 'pending' ]; then
+            echo 'the reviewer has not answered yet; leaving it to answer'
+            echo 'action=none' >> "$GITHUB_OUTPUT"
+          elif [ "$decision" = 'unknown' ] && \
+               printf '%s' "$reason_text" | grep -q 'exceed the'; then
+            # The pull request has more threads or reviews than the gate can
+            # read, so it fails closed -- permanently. Rerunning cannot lower
+            # either count, and `gh run rerun --failed` reruns dependencies, so
+            # it would repost the mention, add yet another review, and produce
+            # the same failure forever. Stop and say so instead.
+            echo 'the review state is larger than the gate can evaluate'
+            echo 'action=escalate' >> "$GITHUB_OUTPUT"
+          elif [ "$readable" = 'true' ] && [ "$blocking" -gt 0 ]; then
+            echo 'reason=review' >> "$GITHUB_OUTPUT"
+            echo 'action=repair' >> "$GITHUB_OUTPUT"
+          else
+            echo 'the reviewer left no finding; treating this as reviewer failure'
+            echo 'action=rerun-review' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the reviewer again
+        # Infrastructure, not code: a timeout, a lost credential, a provider
+        # blip. Rerunning the failed jobs re-reports the same check on the same
+        # commit, which is what an unchanged branch needs. No repair cycle is
+        # spent, because nothing was wrong with the branch.
+        if: steps.triage.outputs.action == 'rerun-review'
+        run: |
+          set -euo pipefail
+          # Deliberately not swallowed. This completed `workflow_run` is the
+          # only reaction that will ever fire for that failed review, and
+          # nothing else retries one -- the watchdog sweeps leases, re-arms
+          # merges, and restarts an idle coordinator, none of which reach a
+          # stranded pull request. Failing here makes the run red and puts the
+          # branch on the Control Center as the latest error, which is a thing
+          # a person can see, rather than a silent stall.
+          gh run rerun "$FAILED_RUN_ID" --repo "$REPO" --failed
+
+      - name: Take a repair cycle and record it
+        id: repair
+        if: steps.triage.outputs.action == 'repair'
+        env:
+          TASK: ${{ steps.triage.outputs.task }}
+          REASON: ${{ steps.triage.outputs.reason }}
+        run: |
+          set -euo pipefail
+          # Re-runs its own mutation against freshly pulled state on every
+          # attempt, rather than relying on the push to merge for it. Two
+          # writers changing the same file is the one case a per-file re-apply
+          # cannot resolve, and this mutation is a single cheap command, so
+          # repeating it is both possible and strictly safer.
+          #
+          # Taking the shared `agentops-state` lock instead would queue this
+          # behind a ninety-minute coordinator run, and a completed
+          # `workflow_run` emits no second event to retry with.
+          #
+          # Repeating is safe because the repair carries the triggering run as
+          # a once-key: a retry cannot spend two cycles for one failure.
+          granted=false
+          pushed=false
+          for attempt in 1 2 3 4 5; do
+            uv run --locked python -m services.agentops.cli state-pull
+            # What came off the branch, before anything is built on top of it.
+            # A ledger already carrying conflict markers would otherwise be
+            # written back with a repair added to it.
+            uv run --locked python -m services.agentops.cli validate
+
+            uv run --locked python -m services.agentops.cli repair \
+              --task "$TASK" --reason "$REASON" \
+              --once-key "run-${FAILED_RUN_ID}" > repair.json
+            granted="$(jq -r '.repair // false' repair.json)"
+            uv run --locked python -m services.agentops.cli validate
+
+            if uv run --locked python -m services.agentops.cli state-push \
+                 --message "Record a repair cycle for branch ${BRANCH}"; then
+              pushed=true
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
+          cat repair.json >> "$GITHUB_STEP_SUMMARY"
+          if [ "$pushed" != 'true' ]; then
+            # The cycle and its once-key never reached the state branch, so
+            # nothing recorded that this repair happened. Dispatching anyway
+            # would run a writer whose cost is invisible to the ceiling, and
+            # the next failure would be charged as if it were the first --
+            # repairs could then run past the bound indefinitely. The failing
+            # run emits no replacement event, so this stops visibly instead.
+            echo 'could not record the repair on the ledger; refusing to dispatch' >&2
+            echo 'granted=false' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "granted=${granted}" >> "$GITHUB_OUTPUT"
+          echo "lane=$(jq -r '.lane // empty' repair.json)" >> "$GITHUB_OUTPUT"
+          echo "model=$(jq -r '.model // empty' repair.json)" >> "$GITHUB_OUTPUT"
+          echo "effort=$(jq -r '.effort // empty' repair.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Send the repair back to the writer
+        # The same lane that wrote the branch. A failing test or a review
+        # finding is a code problem, not a provider problem, so switching
+        # providers here would spend fallback capacity on an ordinary bug.
+        if: steps.repair.outputs.granted == 'true'
+        env:
+          TASK: ${{ steps.triage.outputs.task }}
+          REASON: ${{ steps.triage.outputs.reason }}
+          LANE: ${{ steps.repair.outputs.lane }}
+          MODEL: ${{ steps.repair.outputs.model }}
+          EFFORT: ${{ steps.repair.outputs.effort }}
+        run: |
+          set -euo pipefail
+          if [ "$LANE" != 'claude_subscription' ] && [ "$LANE" != 'openrouter' ]; then
+            # Codex Cloud is reached by mention, not by dispatch. Ask it on the
+            # pull request instead of starting a worker that cannot run it.
+            gh pr comment "$BRANCH" --repo "$REPO" --body \
+              "@codex the required checks are failing on this branch (${REASON}). Fix the cause without weakening any check, and push to this branch."
+            exit 0
+          fi
+          gh workflow run agentops-worker.yml \
+            --field task_id="$TASK" \
+            --field lane="$LANE" \
+            --field model="$MODEL" \
+            --field effort="$EFFORT" \
+            --field branch="$BRANCH" \
+            --field mode=repair \
+            --field repair_reason="$REASON"
+
+      - name: Report
+        if: always()
+        env:
+          # Through the environment, never through ${{ }} in a run: block.
+          # That substitution is textual, and a branch name is attacker-shaped
+          # input on a workflow that holds write permissions.
+          GRANTED: ${{ steps.repair.outputs.granted }}
+          ACTION: ${{ steps.triage.outputs.action }}
+        run: |
+          set -uo pipefail
+          kind=ci_fail
+          headline="Checks failed on ${BRANCH}"
+          if [ "${GRANTED:-false}" = 'true' ]; then
+            headline="Repairing ${BRANCH} after ${FAILED_WORKFLOW} failed"
+          elif [ "${ACTION:-none}" = 'rerun-review' ]; then
+            headline="Rerunning the reviewer on ${BRANCH}; it left no finding"
+          elif [ "${ACTION:-none}" = 'escalate' ]; then
+            kind=blocked
+            headline="${BRANCH} has more review threads than the merge gate can read"
+          elif [ "${ACTION:-none}" = 'repair' ]; then
+            kind=blocked
+            headline="Repair ceiling reached on ${BRANCH}"
+          fi
+          details="$(jq -nc --arg b "$BRANCH" --arg w "$FAILED_WORKFLOW" \
+            --arg a "${ACTION:-none}" '{branch: $b, failed: $w, action: $a}')"
+          uv run --locked python -m services.agentops.cli notify "$kind" "$headline" \
+            --details "$details" --repo "$REPO" || echo 'activity feed unavailable'
+          uv run --locked python -m services.agentops.cli control-center \
+            --repo "$REPO" || echo 'control center unavailable'

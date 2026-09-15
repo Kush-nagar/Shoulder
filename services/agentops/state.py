@@ -108,8 +108,28 @@ def dependencies_satisfied(
     return (not missing), missing
 
 
-def gate_passed(progress: dict[str, Any], name: str = "real_use_gate") -> bool:
-    return bool(progress.get("gates", {}).get(name, False))
+def gate_passed(
+    policy: dict[str, Any],
+    progress: dict[str, Any] | None = None,
+    name: str = "real_use_gate",
+) -> bool:
+    """Whether a human has cleared a mandatory gate.
+
+    Read from policy, which lives on the protected default branch, and never
+    from the runtime ledger. The ledger lives on a branch the orchestrator
+    writes without review; a gate stored there would be a gate the system
+    could open for itself, and this particular one is what stands between
+    autonomy and the machine-learning phases AGENTS.md rule 5 forbids.
+
+    `progress` is still accepted and still consulted, but only to keep a
+    pre-migration ledger honest: it can refuse a gate, never grant one.
+    """
+    granted = bool(policy.get("gates", {}).get(name, False))
+    if granted and progress is not None and "gates" in progress:
+        stale = progress.get("gates", {})
+        if name in stale and not stale.get(name):
+            return False
+    return granted
 
 
 # --- provider health -------------------------------------------------------

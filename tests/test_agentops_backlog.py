@@ -192,10 +192,26 @@ class TestEligibility(unittest.TestCase):
         self.ctx = coordinator.load_context(REPO_ROOT)
 
     def test_next_eligible_task_is_the_real_one(self) -> None:
+        """The lowest-numbered task whose prerequisites are genuinely met.
+
+        Asserted as an invariant rather than against a fixed number: pinning
+        one meant finishing that task failed this check, so it had to be edited
+        at every boundary instead of guarding anything.
+        """
         candidate = coordinator.next_eligible(self.ctx)
         assert candidate is not None and candidate.block is not None
-        self.assertEqual(candidate.task.id, 14)
-        self.assertEqual(candidate.block.slug, "block-04")
+        done = state.completed_tasks(self.ctx.progress)
+        self.assertNotIn(candidate.task.id, done)
+        self.assertTrue(set(candidate.task.prerequisites) <= done)
+        earlier = [
+            task_id
+            for task_id in self.ctx.backlog.task_ids()
+            if task_id < candidate.task.id and task_id not in done
+        ]
+        self.assertEqual(earlier, [], "a lower-numbered task was skipped")
+        self.assertIn(
+            candidate.task.id, self.ctx.backlog.blocks[candidate.block.id].tasks
+        )
 
     def test_completed_tasks_are_excluded(self) -> None:
         for task_id in state.completed_tasks(self.ctx.progress):
@@ -232,9 +248,31 @@ class TestEligibility(unittest.TestCase):
 
     def test_branch_name_is_derived_from_the_task(self) -> None:
         candidate = coordinator.next_eligible(self.ctx)
-        assert candidate is not None
+        assert candidate is not None and candidate.block is not None
         branch = coordinator.branch_name(candidate.task, candidate.block)
-        self.assertEqual(branch, "block-04-t14-manual-clip-marking")
+        self.assertTrue(
+            branch.startswith(f"{candidate.block.slug}-t{candidate.task.id}-")
+        )
+        self.assertRegex(branch, r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+        # The review and repair workflows read the task number back out of
+        # the branch name with a greedy sed expression. If extraction and
+        # derivation ever disagree, a failing branch silently stops being
+        # repairable and the loop stalls there with no error anywhere.
+        import re
+
+        # Greedy prefix, exactly as the workflows' sed behaves: the LAST
+        # -<digits>- in the name is the task number, not the first, which
+        # is the block.
+        extract = re.compile(r".*[-]t?([0-9]+)-")
+        for task_id in self.ctx.backlog.task_ids():
+            task = self.ctx.backlog.tasks[task_id]
+            name = coordinator.branch_name(
+                task, self.ctx.backlog.block_for_task(task_id)
+            )
+            recovered = extract.match(name + "-")
+            with self.subTest(name):
+                assert recovered is not None
+                self.assertEqual(recovered.group(1), str(task_id))
 
     def test_progress_ledger_matches_the_roadmap(self) -> None:
         """The seeded ledger must agree with the block table it claims to finish."""

@@ -8,14 +8,19 @@
     "allow_phase_d_and_later": false,
     "$comment_phase_d": "AGENTS.md rule 5 and the mandatory real-use gate forbid starting Task 23+ automatically. A human must clear the gate."
   },
+  "gates": {
+    "$comment": "Human-only gates, deliberately here rather than in ops/state. This file is on the protected default branch and changes only through a reviewed pull request; the runtime ledger is on the agentops-state branch, which the orchestrator writes without review. A gate stored there would be a gate the system could open for itself.",
+    "$comment_real_use": "docs/06-tasks.md: Task 23 and everything after it wait for real coach and player use of the manual product and the human judgments that come out of it. No cloud agent can supply that evidence. Only a human sets this true.",
+    "real_use_gate": false
+  },
   "lanes": {
     "claude_subscription": {
       "provider": "anthropic",
       "harness": "claude-code-action",
       "billing": "subscription",
       "secret": "CLAUDE_CODE_OAUTH_TOKEN",
-      "may_write_frontend": false,
-      "$comment": "AGENTS-level project policy: Claude is never the frontend implementation writer.",
+      "may_write_frontend": true,
+      "$comment": "Owner decision, 2026-09-14: Claude is the primary implementation writer for functional frontend as well as backend, so a canonical task containing UI does not stall the autonomous loop. Scope is functional completeness -- correct, accessible, keyboard-operable, responsive, wired to the real backend, covered by the task's named tests. Final visual polish is a separate later pass and is NOT this lane's job. This is not an AGENTS.md rule; it is routing policy, and this file is the place to change it.",
       "may_write_backend": true,
       "may_review": true,
       "priority": 1,
@@ -34,7 +39,7 @@
       "secret": "OPENROUTER_API_KEY",
       "base_url": "https://openrouter.ai/api",
       "may_write_frontend": false,
-      "$comment": "DeepSeek and other OpenRouter models are not permitted to write Shoulder frontend code under current project policy.",
+      "$comment": "Unchanged by the 2026-09-14 owner decision, which covered the Claude lane only: DeepSeek and other OpenRouter models are still not permitted to write Shoulder frontend code. A frontend task therefore falls from Claude to codex_cloud rather than to this lane.",
       "may_write_backend": true,
       "may_review": true,
       "priority": 3,
@@ -57,6 +62,8 @@
       "provider": "openai",
       "harness": "codex-cloud-github",
       "mechanism": "github-mention",
+      "review_bot_login": "chatgpt-codex-connector",
+      "$comment_review_bot": "A mention reviewer answers minutes after the job that asked it has finished, so the merge gate has to wait for the review rather than for the job. It waits for THIS author: another integration or a person leaving a passing remark first would otherwise satisfy the wait and the branch would merge without the chosen independent reviewer ever answering. Matched as a prefix, because an app posts as `name` through GraphQL and `name[bot]` through REST.",
       "billing": "subscription",
       "secret": null,
       "enabled": true,

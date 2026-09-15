@@ -48,20 +48,44 @@ def pull_request_merged(
         "--state",
         "merged",
         "--json",
-        "number,mergedAt",
+        "number,mergedAt,headRepositoryOwner,headRepository",
         "--limit",
-        "1",
+        "10",
     ]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return None
     try:
         found = json.loads(result.stdout or "[]")
     except json.JSONDecodeError:
         return None
+    if repo:
+        # A fork may open a pull request whose head branch carries a canonical
+        # task name. Merging that is not the task landing from this
+        # repository's own branch, and counting it would mark the task
+        # complete and release everything waiting on code main never received.
+        found = [pr for pr in found if _from_repository(pr, repo)]
     return bool(found)
+
+
+def _from_repository(pull_request: dict[str, Any], repo: str) -> bool:
+    """Whether a pull request's head branch lives in `repo` itself."""
+    owner = (pull_request.get("headRepositoryOwner") or {}).get("login")
+    name = (pull_request.get("headRepository") or {}).get("name")
+    if not owner or not name:
+        # The fields exist on every pull request whose head repository still
+        # exists. Missing means a deleted fork, which is not this repository.
+        return False
+    return f"{owner}/{name}".lower() == repo.lower()
 
 
 def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool:
@@ -72,6 +96,8 @@ def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
+            errors="replace",
         )
         if exists.returncode != 0:
             continue
@@ -80,6 +106,8 @@ def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
+            errors="replace",
         )
         if merged.returncode == 0:
             return True
@@ -144,6 +172,69 @@ def update_status_file(root: Path, progress: dict[str, Any], next_task: str) -> 
     return True
 
 
+def _record_completion(
+    ctx: coordinator.Context, task_id: int, branch: str, how: str
+) -> None:
+    """Mark one task complete and close its block if that finished it."""
+    done = state.completed_tasks(ctx.progress)
+    if task_id not in done:
+        done.add(task_id)
+        ctx.progress["completed_tasks"] = sorted(done)
+        ctx.progress.setdefault("evidence", {})[str(task_id)] = (
+            f"merged branch {branch} ({how})"
+        )
+        ctx.progress["updated_at"] = state.now()
+
+    block = ctx.backlog.block_for_task(task_id)
+    if block and set(block.tasks) <= set(state.completed_tasks(ctx.progress)):
+        blocks = {int(b) for b in ctx.progress.get("completed_blocks", [])}
+        blocks.add(block.id)
+        ctx.progress["completed_blocks"] = sorted(blocks)
+
+
+def _reconcile_unleased(
+    ctx: coordinator.Context, root: Path, *, repo: str | None = None
+) -> list[dict[str, Any]]:
+    """Complete merged tasks that no live lease points at.
+
+    The lease loop above cannot see these, and without them the coordinator
+    re-dispatches work that already landed on main.
+    """
+    outstanding = [
+        task_id
+        for task_id in ctx.backlog.task_ids()
+        if task_id not in state.completed_tasks(ctx.progress)
+    ]
+    if not outstanding:
+        return []
+
+    found: list[dict[str, Any]] = []
+    for task_id in outstanding:
+        task = ctx.backlog.tasks[task_id]
+        branch = coordinator.branch_name(task, ctx.backlog.block_for_task(task_id))
+        # Asked per branch rather than by listing recent merges. A listing has
+        # to be bounded, and a canonical task whose pull request fell outside
+        # that window would silently look outstanding and be dispatched again;
+        # `--head` is exact however much unrelated traffic the repository has.
+        # It also proves the head repository, which a branch name cannot.
+        if pull_request_merged(branch, repo=repo, base="main"):
+            how = "pull request for the canonical task branch was merged into main"
+        elif branch_is_merged(root, branch):
+            how = "canonical task branch is an ancestor of main"
+        else:
+            continue
+        # A lease may still exist in a non-terminal state -- an expired one the
+        # loop above skipped, or one released as blocked before the work in
+        # fact landed. Close it, or the task stays held against its own
+        # completion.
+        lease = ctx.tasks.get("leases", {}).get(str(task_id))
+        if lease is not None and lease.get("state") != "merged":
+            leases.release(ctx.tasks, task_id, "merged")
+        _record_completion(ctx, task_id, branch, how)
+        found.append({"task_id": task_id, "branch": branch, "how": how})
+    return found
+
+
 def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     """Mark merged tasks complete, release their leases, and record it."""
     ctx = coordinator.load_context(root)
@@ -167,40 +258,21 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
             continue
 
         leases.release(ctx.tasks, task_id, "merged")
-
-        done = state.completed_tasks(ctx.progress)
-        if task_id not in done:
-            done.add(task_id)
-            ctx.progress["completed_tasks"] = sorted(done)
-            ctx.progress.setdefault("evidence", {})[str(task_id)] = (
-                f"merged branch {branch} ({how})"
-            )
-            ctx.progress["updated_at"] = state.now()
-
-        # A block is complete when every task in it is.
-        block = ctx.backlog.block_for_task(task_id)
-        if block and set(block.tasks) <= set(state.completed_tasks(ctx.progress)):
-            blocks = {int(b) for b in ctx.progress.get("completed_blocks", [])}
-            blocks.add(block.id)
-            ctx.progress["completed_blocks"] = sorted(blocks)
-
+        _record_completion(ctx, task_id, str(branch), how)
         completed.append({"task_id": task_id, "branch": branch, "how": how})
 
-    status_updated = False
+    completed += _reconcile_unleased(ctx, root, repo=repo)
+
     if completed:
         state.write_json(ctx.paths.tasks, ctx.tasks)
         state.write_json(ctx.paths.progress, ctx.progress)
 
-        # Keep the human checkpoint honest. A worker told to read STATUS.md
-        # would otherwise see merged work still listed as outstanding.
-        fresh = coordinator.load_context(root)
-        candidate = coordinator.next_eligible(fresh)
-        next_task = (
-            f"Task {candidate.task.id} - {candidate.task.title}"
-            if candidate
-            else "none eligible"
-        )
-        status_updated = update_status_file(root, ctx.progress, next_task)
+        # STATUS.md is deliberately not written here. It lives on the
+        # protected default branch, which nothing in normal operation may push
+        # to, and a file that can only be updated through a reviewed pull
+        # request cannot be a live progress view. The Control Center issue is
+        # that view, and every worker reads its progress from the ledger
+        # through the brief rather than from the file.
         if repo:
             issue = notify.ensure_feed(ctx.policy, repo=repo)
             for entry in completed:
@@ -217,7 +289,6 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         "checked_at": state.now(),
         "completed": completed,
         "completed_tasks": sorted(state.completed_tasks(ctx.progress)),
-        "status_file_updated": status_updated,
     }
 
 

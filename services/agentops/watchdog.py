@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import coordinator, leases, notify, reconcile, state
+from . import coordinator, leases, notify, state
 
 RUNNING_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 
@@ -122,7 +122,14 @@ def _run_finished(run_id: str, *, repo: str | None = None) -> bool | None:
     command = ["gh", "run", "view", run_id, "--json", "status"]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return None
     try:
@@ -137,7 +144,14 @@ def _pull_request_finished(number: int, *, repo: str | None = None) -> bool | No
     command = ["gh", "pr", "view", str(number), "--json", "state"]
     if repo:
         command += ["--repo", repo]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         return None
     try:
@@ -198,24 +212,11 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
             )
             returned.append(lane)
 
-    status_updated = False
     if recovered:
         state.write_json(ctx.paths.tasks, ctx.tasks)
-        # Recovering a lease puts its task back in the pool, which changes what
-        # comes next. The workflow already commits STATUS.md; without this it
-        # would commit a checkpoint that still names the task a dead worker
-        # holds. Same reason reconcile and a blocked dispatch rewrite it.
-        fresh = coordinator.load_context(root)
-        candidate = coordinator.next_eligible(fresh)
-        status_updated = reconcile.update_status_file(
-            root,
-            fresh.progress,
-            (
-                f"Task {candidate.task.id} - {candidate.task.title}"
-                if candidate
-                else "none eligible"
-            ),
-        )
+        # STATUS.md is not written here any more: it is on the protected
+        # default branch and nothing in normal operation pushes there. The
+        # Control Center carries the live picture instead.
     if returned:
         state.write_json(ctx.paths.providers, ctx.providers)
 
@@ -237,7 +238,6 @@ def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         "stuck_unresolved": stuck,
         "autonomy_enabled": state.autonomy_enabled(ctx.policy),
         "recovered": recovered,
-        "status_file_updated": status_updated,
         "providers_returned": returned,
         "active_leases": len(active),
         # Idle means autonomy is on, nothing is in flight, and work remains.

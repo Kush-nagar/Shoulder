@@ -5,9 +5,9 @@ name: AgentOps Review
 # The writer must not be the only judge of its own work, so the reviewer is
 # chosen from a different provider family than the one that wrote the branch.
 #
-# The work is split across two jobs on purpose. Choosing the reviewer runs
+# The work is split across jobs on purpose. Choosing the reviewer runs
 # orchestrator code, so it runs from the base revision with no secrets at all.
-# Only the second job holds credentials, and its workspace contains only the
+# Only the reviewing job holds credentials, and its workspace contains only the
 # trusted base revision. Without that split a branch could edit services/agentops
 # and read the provider secrets out of the runner -- and an autonomous writer's
 # branch is exactly that kind of branch.
@@ -19,6 +19,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+  # A reviewer reached by mention answers minutes after the job that asked it
+  # has finished. Without this the verdict is computed once, before that review
+  # exists, and a pull request nobody has looked at reads as clean. The jobs
+  # that run a reviewer are gated to `pull_request` below, so arriving here
+  # re-derives the verdict rather than asking for a second review.
+  pull_request_review:
+    types: [submitted, dismissed]
 
 concurrency:
   group: agentops-review-${{ github.event.pull_request.number }}
@@ -28,9 +35,12 @@ permissions: {}
 
 jobs:
   choose:
-    # Only branches this system produced. An ordinary human pull request is
-    # reviewed by whatever the repository already uses.
-    if: startsWith(github.head_ref, 'block-') || startsWith(github.head_ref, 'task-')
+    # Only branches this system produced, and only when the pull request itself
+    # changed. A review arriving must not trigger a request for another one.
+    if: >-
+      github.event_name == 'pull_request' &&
+      (startsWith(github.head_ref, 'block-') ||
+       startsWith(github.head_ref, 'task-'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -119,6 +129,10 @@ jobs:
         # documented trigger is exactly `@codex review` in a pull request
         # comment; Codex reacts, reviews the diff against AGENTS.md, and posts
         # a standard GitHub review. No API key and no action to run.
+        #
+        # It answers asynchronously, so this step succeeding means the request
+        # was posted and nothing more. The verdict job waits for the review
+        # itself; see --require-submitted-review.
         if: needs.choose.outputs.lane == 'codex_cloud'
         env:
           PR: ${{ github.event.pull_request.number }}
@@ -128,3 +142,144 @@ jobs:
           set -euo pipefail
           gh pr comment "$PR" --repo "$REPO" \
             --body '@codex review for correctness, privacy, row-level security, migration safety, and anything outside this task'
+
+  verdict:
+    # The merge gate. Required contexts must report on every pull request,
+    # including ones this system did not write and ones where the reviewer job
+    # was skipped -- a required check that never runs leaves a pull request
+    # pending forever. So this job always runs and always reports.
+    #
+    # It merges nothing itself. Merging happens once every required context is
+    # green, which is why nothing here polls for it.
+    needs: [choose, review]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      # Set on both event types this workflow accepts, unlike github.head_ref.
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      EVENT: ${{ github.event_name }}
+      REVIEW_RESULT: ${{ needs.review.result }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Skip branches this system did not write
+        id: scope
+        run: |
+          set -euo pipefail
+          case "$HEAD_REF" in
+            block-*|task-*) echo 'autonomous=true' >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo 'autonomous=false' >> "$GITHUB_OUTPUT"
+              echo 'Not an autonomous branch; the review verdict does not apply.' \
+                >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.scope.outputs.autonomous == 'true'
+        with:
+          # The base revision again: this runs orchestrator code, and the pull
+          # request's copy of it is what is under review.
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        if: steps.scope.outputs.autonomous == 'true'
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Refuse an autonomous change to policy or governance
+        # Moving the real-use gate onto the protected branch did NOT by itself
+        # make it human-only. The required contexts are both automated, so an
+        # autonomous branch could edit `ops/policy.json` to set
+        # `real_use_gate: true` and the system would author, check and merge
+        # its own permission to start the phases AGENTS.md rule 5 forbids.
+        #
+        # This is a required context, so failing it blocks the merge. A person
+        # changing policy does so from their own branch, which is not an
+        # autonomous one and never reaches this step.
+        if: steps.scope.outputs.autonomous == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null \
+            || git fetch --no-tags origin
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true)"
+          guarded=''
+          for path in ops/policy.json .github/workflows CODEOWNERS AGENTS.md; do
+            if printf '%s\n' "$changed" | grep -qx -e "$path" \
+               || printf '%s\n' "$changed" | grep -q "^${path}/"; then
+              guarded="${guarded} ${path}"
+            fi
+          done
+          if [ -n "$guarded" ]; then
+            {
+              echo "## Refused: an autonomous branch changed governance"
+              echo
+              echo "Changed:${guarded}"
+              echo
+              echo 'These decide what this system is permitted to do -- routing,'
+              echo 'budgets, banned providers, the human gates, and the checks'
+              echo 'themselves. A branch this system wrote may not change them,'
+              echo 'because both required contexts are automated and it would be'
+              echo 'granting itself the permission.'
+              echo
+              echo 'A human makes this change from their own branch.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "refusing governance changes from an autonomous branch:${guarded}" >&2
+            exit 1
+          fi
+
+      - name: Decide the verdict
+        if: steps.scope.outputs.autonomous == 'true'
+        run: |
+          set -uo pipefail
+          # A reviewer that failed to run is not an approval. Fail closed: the
+          # pull request waits rather than merging unreviewed. Only meaningful
+          # on the event that actually runs a reviewer; a review arriving later
+          # re-enters here with those jobs skipped.
+          if [ "$EVENT" = 'pull_request' ] && [ "$REVIEW_RESULT" != 'success' ]; then
+            echo "Independent review did not complete (result: $REVIEW_RESULT)." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          task="$(printf '%s' "$HEAD_REF" | sed -n 's/.*[-]t\?\([0-9][0-9]*\)-.*/\1/p')"
+          if [ -z "$task" ]; then
+            echo 'could not read a task number from the branch' >&2
+            exit 1
+          fi
+
+          # A reviewer reached by mentioning a bot answers asynchronously, so
+          # its job succeeding proves only that the request was posted. The
+          # verdict then has to wait for a review of this exact head commit, or
+          # "not looked at yet" passes as "reviewed and clean".
+          uv run --locked python -m services.agentops.cli reviewer \
+            --task "$task" > reviewer.json
+          mechanism="$(jq -r '.mechanism // empty' reviewer.json)"
+          login="$(jq -r '.review_bot_login // empty' reviewer.json)"
+          if [ "$mechanism" = 'github-mention' ]; then
+            # And it must be that reviewer's answer. A passing remark from any
+            # other integration would otherwise end the wait and let the branch
+            # merge without the chosen reviewer ever looking at it.
+            if [ -z "$login" ]; then
+              echo 'a mention reviewer with no configured identity cannot be waited for' >&2
+              exit 1
+            fi
+            uv run --locked python -m services.agentops.cli review-verdict \
+              --repo "$REPO" --pull-request "$PR" --require-submitted-review \
+              --reviewer-login "$login" > verdict.json
+          else
+            uv run --locked python -m services.agentops.cli review-verdict \
+              --repo "$REPO" --pull-request "$PR" > verdict.json
+          fi
+          status=$?
+          cat verdict.json >> "$GITHUB_STEP_SUMMARY"
+          exit $status

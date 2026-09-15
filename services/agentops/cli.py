@@ -23,13 +23,16 @@ from typing import Any
 from . import (
     catalog,
     classify,
+    control_center,
     coordinator,
     leases,
     notify,
     qualify,
     reconcile,
+    review,
     routing,
     state,
+    statebranch,
     watchdog,
 )
 
@@ -51,7 +54,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             "autonomy_enabled": state.autonomy_enabled(ctx.policy),
             "completed_tasks": sorted(done),
             "remaining_tasks": [t for t in ctx.backlog.task_ids() if t not in done],
-            "gates": ctx.progress.get("gates", {}),
+            # From policy, which is on the protected branch. The ledger's
+            # copy is historical and cannot grant a gate.
+            "gates": ctx.policy.get("gates", {}),
+            "state_branch": statebranch.BRANCH,
             "provider_health": state.provider_health(ctx.providers),
             "budget_blocked": sorted(state.budget_blocked(ctx.policy, ctx.budget)),
             "qualified_models": sorted(
@@ -416,6 +422,14 @@ def cmd_reviewer(args: argparse.Namespace) -> int:
             "model": reviewer.harness_model,
             "effort": reviewer.effort,
             "capability_class": reviewer.capability_class,
+            # The merge gate needs both. `mechanism` says whether this reviewer
+            # answers inside its own job or asynchronously afterwards, and the
+            # login says whose answer to wait for. Without them the gate either
+            # cannot wait or waits for anyone at all.
+            "mechanism": reviewer.mechanism,
+            "review_bot_login": ctx.policy["lanes"][reviewer.lane].get(
+                "review_bot_login"
+            ),
         }
     )
     return 0
@@ -503,7 +517,7 @@ def cmd_verify_assignment(args: argparse.Namespace) -> int:
         if breach:
             problems.append(f"lane {args.lane} {breach}")
 
-    if task.gated and not state.gate_passed(ctx.progress):
+    if task.gated and not state.gate_passed(ctx.policy, ctx.progress):
         problems.append("task is behind the mandatory real-use gate")
     if (
         any(p in task.phase for p in ("Phase D", "Phase E", "Phase F"))
@@ -793,25 +807,14 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         leases.release(ctx.tasks, candidate.task.id, "blocked")
         state.write_json(ctx.paths.tasks, ctx.tasks)
 
-        # Blocking changes what the next eligible task is, and STATUS.md is the
-        # file a human and every worker read. Leaving it naming a task nothing
-        # will pick up would be worse than not writing it at all.
-        fresh = coordinator.load_context(root)
-        following = coordinator.next_eligible(fresh)
-        refreshed = reconcile.update_status_file(
-            root,
-            fresh.progress,
-            (
-                f"Task {following.task.id} - {following.task.title}"
-                if following
-                else "none eligible"
-            ),
-        )
+        # Blocking changes what the next eligible task is. That used to be
+        # written into STATUS.md, which is on the protected default branch;
+        # nothing in normal operation pushes there now, so the Control Center
+        # reports it instead.
         return _emit(
             {
                 "dispatched": False,
                 "reason": f"BLOCKED_AUTOMATION: {exhausted}",
-                "status_file_updated": refreshed,
             }
         )
 
@@ -822,6 +825,139 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         k: lease[k] for k in ("owner", "branch", "expires_at", "attempts")
     }
     return _emit(payload)
+
+
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Hand a failing task back to its writer, within the repair ceilings.
+
+    A failing check or a review finding is ordinary engineering, not a provider
+    problem, so this deliberately does not change lane: it reuses the writer
+    already recorded on the lease. Exit 1 means the ceiling is spent and the
+    task is genuinely stuck, which is a thing to surface rather than retry.
+    """
+    root = _root(args)
+    ctx = coordinator.load_context(root)
+    try:
+        lease = leases.begin_repair(
+            ctx.tasks,
+            ctx.policy,
+            args.task,
+            reason=args.reason,
+            once_key=args.once_key,
+        )
+    except leases.RepairBudgetExhausted as spent:
+        leases.release(ctx.tasks, args.task, "blocked")
+        state.write_json(ctx.paths.tasks, ctx.tasks)
+        return _emit(
+            {
+                "repair": False,
+                "reason": f"BLOCKED_AUTOMATION: {spent}",
+                "task": args.task,
+            }
+        )
+    except (leases.LeaseConflict, ValueError) as problem:
+        return _emit({"repair": False, "reason": str(problem), "task": args.task})
+
+    state.write_json(ctx.paths.tasks, ctx.tasks)
+    assignment = lease.get("assignment") or {}
+    return _emit(
+        {
+            "repair": True,
+            "task": args.task,
+            "reason": args.reason,
+            "branch": lease.get("branch"),
+            "lane": assignment.get("lane"),
+            "model": assignment.get("harness_model"),
+            "effort": assignment.get("effort"),
+            "pull_request": lease.get("pull_request"),
+            "ci_repair_cycles": lease.get("ci_repair_cycles", 0),
+            "review_repair_cycles": lease.get("review_repair_cycles", 0),
+        }
+    )
+
+
+def cmd_review_verdict(args: argparse.Namespace) -> int:
+    """Whether a pull request is clear to merge on review grounds.
+
+    Exit 1 is the merge gate. It is a required status check rather than a step
+    that merges by itself, so GitHub's own auto-merge does the merging and this
+    system never needs to poll for green.
+    """
+    result = review.verdict(
+        args.repo,
+        args.pull_request,
+        require_submitted_review=args.require_submitted_review,
+        reviewer_login=args.reviewer_login,
+    )
+    _emit(result)
+    return 0 if result.get("verdict") == "pass" else 1
+
+
+def cmd_control_center(args: argparse.Namespace) -> int:
+    root = _root(args)
+    if args.render_only:
+        print(control_center.render(root, repo=args.repo))
+        return 0
+    return _emit(control_center.publish(root, repo=args.repo))
+
+
+def cmd_status_snapshot(args: argparse.Namespace) -> int:
+    """Rewrite the STATUS.md progress block from the current ledger.
+
+    Deliberately a command someone runs, not something automation does. The
+    file is on the protected default branch, so the only way it can change is
+    through a reviewed pull request; the live view is the Control Center.
+    """
+    root = _root(args)
+    ctx = coordinator.load_context(root)
+    candidate = coordinator.next_eligible(ctx)
+    updated = reconcile.update_status_file(
+        root,
+        ctx.progress,
+        (
+            f"Task {candidate.task.id} - {candidate.task.title}"
+            if candidate
+            else "none eligible"
+        ),
+    )
+    return _emit({"ok": True, "status_file_updated": updated})
+
+
+def cmd_state_pull(args: argparse.Namespace) -> int:
+    """Bring the runtime ledger in this worktree up to the state branch.
+
+    Every job that reads or writes state runs this first. Before the branch
+    exists the files committed on the default branch are the seed, so a fresh
+    repository and a migrating one take the same path.
+    """
+    try:
+        return _emit(statebranch.pull(_root(args)))
+    except statebranch.StateBranchError as failure:
+        return _emit({"ok": False, "reason": str(failure)}) or 1
+
+
+def cmd_state_push(args: argparse.Namespace) -> int:
+    """Commit the runtime ledger onto the state branch.
+
+    Exit 1 means another writer landed first and nothing was written. The
+    caller re-reads, re-applies its change and tries again; every mutation
+    here is written to be safe to repeat.
+    """
+    try:
+        result = statebranch.push(_root(args), args.message, retries=args.retries)
+    except statebranch.StateBranchError as failure:
+        _emit({"pushed": False, "reason": str(failure)})
+        return 1
+    _emit(result)
+    return 0 if result.get("pushed") else 1
+
+
+def cmd_state_contents(args: argparse.Namespace) -> int:
+    """Every path the state branch holds. Nothing outside ops/state may appear."""
+    paths = statebranch.contents(_root(args))
+    stray = [p for p in paths if not p.startswith(f"{statebranch.TRACKED}/")]
+    _emit({"branch": statebranch.BRANCH, "paths": paths, "stray": stray})
+    return 0 if not stray else 1
 
 
 def cmd_notify(args: argparse.Namespace) -> int:
@@ -965,6 +1101,79 @@ def build_parser() -> argparse.ArgumentParser:
         help="apply this charge at most once, so a retry cannot double count",
     )
     spend.set_defaults(func=cmd_spend)
+
+    repair = sub.add_parser(
+        "repair", help="hand a failing task back to its writer, within the ceilings"
+    )
+    repair.add_argument("--task", type=int, required=True)
+    repair.add_argument("--reason", required=True, choices=("ci", "review"))
+    repair.add_argument(
+        "--once-key",
+        dest="once_key",
+        help="apply this repair at most once, so a retried state write "
+        "cannot spend two cycles for one failure",
+    )
+    repair.set_defaults(func=cmd_repair)
+
+    verdict = sub.add_parser(
+        "review-verdict",
+        help="decide a pull request's review verdict; exit 1 blocks the merge",
+    )
+    verdict.add_argument("--repo", required=True)
+    verdict.add_argument("--pull-request", dest="pull_request", type=int, required=True)
+    verdict.add_argument(
+        "--require-submitted-review",
+        dest="require_submitted_review",
+        action="store_true",
+        help="the reviewer answers asynchronously; wait for a review of this head",
+    )
+    verdict.add_argument(
+        "--reviewer-login",
+        dest="reviewer_login",
+        help="whose review satisfies the wait; anyone else's does not",
+    )
+    verdict.set_defaults(func=cmd_review_verdict)
+
+    centre = sub.add_parser(
+        "control-center", help="rewrite the Control Center issue body"
+    )
+    centre.add_argument("--repo")
+    centre.add_argument(
+        "--render-only",
+        dest="render_only",
+        action="store_true",
+        help="print the page instead of publishing it",
+    )
+    centre.set_defaults(func=cmd_control_center)
+
+    sub.add_parser(
+        "status-snapshot",
+        help="rewrite the STATUS.md progress block; commit it through a pull request",
+    ).set_defaults(func=cmd_status_snapshot)
+
+    state_pull = sub.add_parser(
+        "state-pull", help="read the runtime ledger from the state branch"
+    )
+    state_pull.set_defaults(func=cmd_state_pull)
+
+    state_push = sub.add_parser(
+        "state-push", help="write the runtime ledger to the state branch"
+    )
+    state_push.add_argument("--message", required=True)
+    state_push.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        help="re-apply this run's files and try again on a lost race. Only for "
+        "a caller that cannot re-run its own mutation; re-applying overwrites "
+        "the winner when both writers touched the same file.",
+    )
+    state_push.set_defaults(func=cmd_state_push)
+
+    sub.add_parser(
+        "state-contents",
+        help="list what the state branch holds; exit 1 on a stray path",
+    ).set_defaults(func=cmd_state_contents)
 
     feed = sub.add_parser("notify", help="post one milestone to the activity feed")
     feed.add_argument("kind")

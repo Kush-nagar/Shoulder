@@ -35,6 +35,10 @@ class TestWorkflowsExist(unittest.TestCase):
                 "agentops-watchdog.yml",
                 "agentops-review.yml",
                 "agentops-verify.yml",
+                # Reacts to a failing check on an autonomous pull request.
+                # Merging is not here on purpose: GitHub's auto-merge does that
+                # once the required contexts pass, so nothing polls for green.
+                "agentops-pr.yml",
             },
         )
 
@@ -113,8 +117,23 @@ class TestWorkflowPermissions(unittest.TestCase):
             self.assertNotIn(harness, text)
 
     def test_watchdog_cannot_write_pull_requests(self) -> None:
+        """Asserted per job, which is where a token is actually scoped.
+
+        The sweep job pushes the default branch and dispatches workflows.
+        Adding merge rights to that same token is the concentration this
+        exists to prevent, so re-arming a stranded merge lives in its own job
+        that can do nothing else. That is stricter than the single blanket
+        grant this test used to check for.
+        """
         text = read(WORKFLOW_DIR / "agentops-watchdog.yml")
-        self.assertNotIn("pull-requests: write", text)
+        sweep = text.split("  sweep:", 1)[1].split("\n  rearm:", 1)[0]
+        self.assertNotIn("pull-requests: write", sweep)
+
+        rearm = text.split("  rearm:", 1)[1]
+        self.assertIn("pull-requests: write", rearm)
+        self.assertNotIn("contents: write", rearm)
+        self.assertNotIn("actions: write", rearm)
+        self.assertNotIn("issues: write", rearm)
 
     def test_verify_cannot_open_or_merge_pull_requests(self) -> None:
         """It proves lanes work; it must not be able to land anything."""
@@ -169,10 +188,19 @@ class TestWorkflowPermissions(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
         self.assertIn("- 'ops/state/**'", text)
 
-    def test_state_pushes_rebase_before_pushing(self) -> None:
+    def test_state_writes_go_to_the_state_branch_not_the_default_one(self) -> None:
+        """Superseded the rebase-before-push rule, which only made sense while
+        the ledger lived on the default branch.
+
+        Rebasing is gone because pushing there is gone: the default branch is
+        protected, no bypass actor exists to grant, and every runtime write now
+        lands on `agentops-state` instead.
+        """
         for name in ("agentops-coordinator.yml", "agentops-watchdog.yml"):
             with self.subTest(name):
-                self.assertIn("git pull --rebase", read(WORKFLOW_DIR / name))
+                text = read(WORKFLOW_DIR / name)
+                self.assertIn("cli state-push", text)
+                self.assertNotIn("git pull --rebase", text)
 
     def test_the_worker_rechecks_its_assignment(self) -> None:
         """Dispatch inputs are caller-controlled, so policy is re-derived."""
@@ -370,13 +398,29 @@ class TestWorkerBrief(unittest.TestCase):
 class TestDryRunEvidence(unittest.TestCase):
     """48. The dry run against the real backlog is the readiness proof."""
 
-    def test_dry_run_selects_task_14_with_a_complete_plan(self) -> None:
+    def test_dry_run_selects_the_next_real_task_with_a_complete_plan(self) -> None:
+        """Asserted as an invariant rather than against a task number.
+
+        This used to pin Task 14, so finishing Task 14 failed the readiness
+        proof -- the check had to be edited at every task boundary, which makes
+        it a chore rather than a guard. What actually matters is that the plan
+        is complete and internally consistent with the backlog it came from.
+        """
         result = coordinator.dry_run(REPO_ROOT)
-        self.assertEqual(result["task_id"], 14)
-        self.assertEqual(result["block"], "block-04")
-        self.assertEqual(result["prerequisites"], [7, 13])
-        self.assertEqual(result["branch"], "block-04-t14-manual-clip-marking")
-        self.assertIn("Playwright", result["verification"])
+        ctx = coordinator.load_context(REPO_ROOT)
+        task_id = result["task_id"]
+        self.assertIsNotNone(task_id, result.get("blocked"))
+
+        task = ctx.backlog.tasks[task_id]
+        block = ctx.backlog.block_for_task(task_id)
+        self.assertNotIn(task_id, state.completed_tasks(ctx.progress))
+        self.assertEqual(result["block"], block.slug if block else None)
+        self.assertEqual(result["prerequisites"], list(task.prerequisites))
+        self.assertEqual(result["branch"], coordinator.branch_name(task, block))
+        self.assertTrue(result["verification"])
+        self.assertIsNone(result["blocked_reason"])
+        self.assertIsNotNone(result["writer"])
+        self.assertIsNotNone(result["reviewer"])
 
     def test_dry_run_is_serialisable_for_a_workflow_summary(self) -> None:
         json.dumps(coordinator.dry_run(REPO_ROOT), default=str)
@@ -439,7 +483,11 @@ class TestReviewWorkflow(unittest.TestCase):
         self.assertNotIn("secrets.", choose)
 
     def test_the_credentialed_job_checks_out_only_the_trusted_base(self) -> None:
-        review = self.text.split("  review:", 1)[1]
+        # Bounded at the next job. This asserts what the *credentialed* job
+        # does, and reading to end of file would fold the uncredentialed
+        # verdict job into it -- which does legitimately read the head ref,
+        # holds no secret, and is covered separately.
+        review = self.text.split("  review:", 1)[1].split("\n  verdict:", 1)[0]
         checkout = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
         self.assertEqual(review.count("actions/checkout@"), 1)
         self.assertEqual(review.count(checkout), 1)
@@ -485,10 +533,14 @@ class TestLoopCompletion(unittest.TestCase):
         self.assertTrue(reconcile.branch_is_merged(REPO_ROOT, "HEAD", base="HEAD"))
 
     def test_the_worker_records_a_provider_failure(self) -> None:
-        """Failover states are useless if nothing ever enters them."""
+        """Failover states are useless if nothing ever enters them.
+
+        The work job flags it; the finalize job records it, from trusted code.
+        """
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        self.assertIn("Record a provider failure", text)
-        self.assertIn("--status DEGRADED", text)
+        self.assertIn("Flag a provider failure", text)
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("--status DEGRADED", finalize)
 
     def test_the_worker_job_receives_the_kill_switch(self) -> None:
         """Scoped to the guard job alone, every worker would refuse."""
@@ -602,16 +654,28 @@ class TestThirdReviewFindings(unittest.TestCase):
         text = read(WORKFLOW_DIR / "agentops-verify.yml")
         self.assertIn("ref: ${{ github.event.repository.default_branch }}", text)
 
-    def test_a_provider_failure_is_pushed_not_just_written(self) -> None:
-        """The failing job runs no later step, so it must push for itself."""
-        text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        failure = text.split("Record a provider failure", 1)[1]
-        self.assertIn("git push origin", failure.split("- name:", 1)[0])
+    def test_a_provider_failure_leaves_the_runner(self) -> None:
+        """A failure recorded only in the runner is not recorded at all.
 
-    def test_the_hand_off_state_is_committed(self) -> None:
+        The write itself moved to the finalize job, which runs on a clean
+        runner from the default branch -- by the time the harness has failed,
+        this worktree is a task branch a model has been editing, and running
+        orchestrator code there with a write token is the hazard. The failing
+        job now only publishes the fact; finalize is what persists it.
+        """
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        flag = text.split("- name: Flag a provider failure", 1)[1]
+        self.assertIn("failed=true", flag.split("- name:", 1)[0])
+
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("HARNESS_FAILED", finalize)
+        self.assertIn("--status DEGRADED", finalize)
+        self.assertIn("cli state-push", finalize)
+
+    def test_the_hand_off_state_is_written(self) -> None:
         """Delegation attaches the Codex PR after the ledger commit runs."""
         text = read(WORKFLOW_DIR / "agentops-coordinator.yml")
-        self.assertIn("Commit what the hand-off recorded", text)
+        self.assertIn("Record what the hand-off left behind", text)
 
     def test_an_open_delegated_pull_request_counts_as_live(self) -> None:
         from unittest import mock
@@ -663,10 +727,17 @@ class TestFifthReviewFindings(unittest.TestCase):
         self.assertIn("steps.openrouter.outcome == 'failure'", text)
 
     def test_spend_and_the_pull_request_reach_the_ledger(self) -> None:
-        """Both were written on the task branch and never carried back."""
+        """Both were produced on the task branch and never carried back.
+
+        They are carried by the finalize job now, which runs on a clean runner
+        from the default branch: doing it in the work job would execute
+        orchestrator code a model had just been able to edit, holding a token.
+        """
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        self.assertIn("Carry spend and the pull request back to the ledger", text)
-        self.assertIn("--pull-request", text)
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("Record spend, the pull request", finalize)
+        self.assertIn("--pull-request", finalize)
+        self.assertIn("cli spend", finalize)
 
     def test_an_ineligible_task_is_refused(self) -> None:
         """Eligibility was computed and then only reported."""
@@ -835,11 +906,11 @@ class TestPostMergeVerifyFindings(unittest.TestCase):
 
     def test_only_a_deliberate_dispatch_writes_state(self) -> None:
         """A merge fires this workflow and the coordinator at the same moment.
-        Both committed ops/state to the default branch, and this one died in a
-        rebase conflict, losing the verdicts it had just paid for."""
+        Both wrote the ledger, and this one died in a conflict, losing the
+        verdicts it had just paid for."""
         for step in (
             "Qualify models against the synthetic suite",
-            "Commit the qualification verdicts",
+            "Record the qualification verdicts",
         ):
             after = self.text.split(f"- name: {step}", 1)[1].split("- name:", 1)[0]
             self.assertIn(
@@ -943,29 +1014,36 @@ class TestVerdictDurability(unittest.TestCase):
         self.assertEqual(self._merge(root, source)["applied"], ["qwen/qwen3.7-flash"])
         self.assertEqual(self._merge(root, source)["applied"], [])
 
-    def test_the_commit_step_no_longer_rebases_generated_state(self) -> None:
+    def test_the_record_step_no_longer_rebases_generated_state(self) -> None:
         text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
             encoding="utf-8"
         )
-        after = text.split("- name: Commit the qualification verdicts", 1)[1]
+        after = text.split("- name: Record the qualification verdicts", 1)[1]
         self.assertNotIn("git pull --rebase", after)
         self.assertIn("merge-verdicts", after)
 
-    def test_the_verdict_commit_authenticates_its_own_remote_work(self) -> None:
+    def test_the_verdict_record_has_a_working_credential(self) -> None:
         """A run that had already paid for its verdicts failed on the first
-        fetch with "Password authentication is not supported", so this step
-        carries the job token itself rather than trusting what the checkout
-        left behind."""
+        fetch with "Password authentication is not supported".
+
+        The Claude smoke test earlier in this job replaces the credential the
+        first checkout left behind. That used to be worked around by carrying
+        an encoded token through the shell; checking out again restores it
+        without the token ever reaching a shell variable, a remote URL, or the
+        repository config.
+        """
         text = (REPO_ROOT / ".github/workflows/agentops-verify.yml").read_text(
             encoding="utf-8"
         )
-        step = text.split("- name: Commit the qualification verdicts", 1)[1].split(
-            "- name: Report", 1
-        )[0]
-        self.assertIn("git_auth fetch origin", step)
-        self.assertIn("git_auth push origin", step)
-        # The encoded credential is not the token itself, so the runner does
-        # not mask it automatically.
-        self.assertIn("::add-mask::$auth", step)
-        # And it never reaches the remote URL or the repository config.
+        smoke = text.index("- name: Smoke test the Claude subscription lane")
+        restore = text.index("- name: Restore the checkout credential")
+        record = text.index("- name: Record the qualification verdicts")
+        self.assertLess(smoke, restore, "the credential must be restored after it")
+        self.assertLess(restore, record, "and before anything needs it")
+
+        # The verdicts are preserved before the checkout replaces the worktree.
+        self.assertLess(text.index("- name: Preserve this run's verdicts"), restore)
+        step = text[record:].split("- name: Report", 1)[0]
+        self.assertNotIn("::add-mask::", step)
         self.assertNotIn("git remote set-url", step)
+        self.assertNotIn("extraheader", step)

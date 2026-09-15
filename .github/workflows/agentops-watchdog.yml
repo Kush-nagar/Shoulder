@@ -11,9 +11,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Shared with the coordinator: both push ops/state to main, and interleaving
-  # them loses a lease recovery or fails the push. Not cancel-in-progress, for
-  # the same reason -- a half-finished recovery is worse than a delayed one.
+  # Shared with the coordinator: both rewrite several runtime state files per
+  # run, and this keeps them from racing each other. Not cancel-in-progress,
+  # for the same reason -- a half-finished recovery is worse than a delayed
+  # one.
   group: agentops-state
   cancel-in-progress: false
 
@@ -34,6 +35,9 @@ jobs:
           version: '0.12.10'
           python-version: '3.11.16'
 
+      - name: Read the runtime ledger
+        run: uv run --locked python -m services.agentops.cli state-pull
+
       - name: Sweep stale leases and recover providers
         id: sweep
         env:
@@ -48,23 +52,25 @@ jobs:
           echo "recovered=$(jq -r '.recovered | length' sweep.json)" >> "$GITHUB_OUTPUT"
           echo "idle=$(jq -r '.idle' sweep.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Commit any recovery
+      - name: Write any recovery to the runtime ledger
         run: |
           set -euo pipefail
-          git config user.name 'shoulder-agentops[bot]'
-          git config user.email 'shoulder-agentops@users.noreply.github.com'
-          # A rebase between two state writers can leave conflict markers in a
-          # generated file nobody reads by hand. Never commit one.
+          # A conflict-marked ledger is invisible until something fails to load
+          # it. Never write one.
           uv run --locked python -m services.agentops.cli validate
-          git add ops/state STATUS.md
-          if git diff --cached --quiet; then
-            echo 'nothing to recover'
-            exit 0
-          fi
-          git commit -m 'Recover stale agentops state'
-          git pull --rebase --autostash origin main
-          uv run --locked python -m services.agentops.cli validate
-          git push origin HEAD:main
+          uv run --locked python -m services.agentops.cli state-push \
+            --message 'Recover stale agentops state'
+
+      - name: Refresh the Control Center
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          uv run --locked python -m services.agentops.cli control-center \
+            --repo "$REPO" || echo 'control center unavailable'
 
       - name: Restart a lost continuation
         # Only when autonomy is on, nothing is in flight, and the coordinator
@@ -74,3 +80,84 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run agentops-coordinator.yml
+
+  rearm:
+    # Recovery for a worker that opened its pull request and died before
+    # arming the merge. Without it the branch is finished, green, and waits
+    # forever for a human -- the loop stopping on a success, which no failure
+    # path would ever notice.
+    #
+    # Its own job on purpose. The sweep above can push the default branch and
+    # dispatch workflows; this can only arm a merge, and holds neither of
+    # those. Arming merges nothing by itself: the required contexts still have
+    # to pass.
+    if: vars.AUTONOMY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          # Credentials are kept here, unlike the review jobs: this is a private
+          # repository and reading the state branch is a fetch. The job's own
+          # permissions are what bound it -- contents: read, so the credential
+          # it keeps cannot write anything at all.
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+
+      - name: Read the runtime ledger
+        # It decides which open pull requests this system actually owns, and
+        # the copy on the default branch is only a seed.
+        run: uv run --locked python -m services.agentops.cli state-pull
+
+      - name: Re-arm auto-merge on stranded autonomous pull requests
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # Only branches the ledger actually names. A branch prefix is not
+          # proof of authorship -- a person may name a branch `task-15-...`
+          # too, and the verdict context deliberately succeeds on a
+          # non-autonomous pull request, so arming a merge on prefix alone
+          # would merge someone's work for them the moment Quality went green.
+          leased="$(jq -r '[.leases[] | select(.state != "merged"
+                    and .state != "abandoned") | .branch] | join("\n")' \
+                    ops/state/tasks.json)"
+          if [ -z "$leased" ]; then
+            echo 'no leased branch to re-arm'
+            exit 0
+          fi
+          # The head repository is checked as well as the branch name. `--base
+          # main` restricts where a pull request merges TO, never where its
+          # head lives, so on a public repository a fork could open a branch
+          # named exactly like the leased one and have its merge armed
+          # alongside the real branch. The comparison is done in the shell
+          # because `gh` has no way to pass a variable into its jq filter.
+          gh pr list --repo "$REPO" --state open --base main \
+            --json number,headRefName,autoMergeRequest,headRepositoryOwner,headRepository \
+            --jq '.[] | select(.autoMergeRequest == null)
+                  | [(.number|tostring),
+                     .headRefName,
+                     ((.headRepositoryOwner.login // "") + "/"
+                      + (.headRepository.name // ""))]
+                  | @tsv' \
+          | while IFS="$(printf '\t')" read -r pr branch origin; do
+              [ -n "$pr" ] || continue
+              if [ "$origin" != "$REPO" ]; then
+                echo "skipping #${pr}: head lives in ${origin}, not ${REPO}"
+                continue
+              fi
+              if ! printf '%s\n' "$leased" | grep -qxF "$branch"; then
+                continue
+              fi
+              echo "re-arming auto-merge on #${pr} (${branch})"
+              gh pr merge "$pr" --repo "$REPO" --auto --squash --delete-branch \
+                || echo "could not enable auto-merge on #${pr}"
+            done

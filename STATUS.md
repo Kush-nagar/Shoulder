@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `dab524f9c75c3e8dfac430422f717e57ef61985f` |
-| Completed blocks | Tasks 1–5; Block 01 (Tasks 6–7, PR #8, `ba3b52e`); Block 02 (Tasks 8–10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11–13, PR #13, `dab524f`) |
-| Current block | Block 04, Task 14 implementation complete; awaiting review and merge |
-| Current worker / branch | Codex / `block-04-t14-manual-clip-marking` |
-| Open PRs | #21 — Task 14: Manual clip marking |
+| Last verified `main` | `175d71a8489fed1874a1070e4fc1cd6aaaf99142` |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
+| Current block | Block 04 complete through Task 14. Autonomy infrastructure upgrade in flight on its own branch; no product task is started from it. |
+| Current worker / branch | AgentOps cloud supervisor upgrade / `agentops-cloud-supervisor` |
+| Open PRs | autonomy infrastructure (this branch) |
 | Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-13 on the Task 14 branch: `scripts/check.ps1` passed; 672 database-enabled Python tests passed (one intentional 2 GB skip); 41 Node tests passed; 6 Task 14 marking and 12 coach-playback regression cases passed across Chromium, Firefox, and WebKit; PR CI pending the final push |
-| Blockers | none that require a human |
+| Last full verification | 2026-09-14 on `agentops-cloud-supervisor` at `7ca44c8`: `scripts/check.ps1` passed end to end - 764 Python tests (288 skipped, all Docker or remote dependent), 410 of them AgentOps; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. PR #24 `quality` and `verdict` green; two independent review rounds, 19 findings, all answered and resolved. |
+| Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Review and merge PR #21 after its final checks pass. Do not begin Task 15 from this branch. |
+| Next action | Owner action required first: add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 and the loop cannot run. Then merge PR #24 and set `AUTONOMY_ENABLED=true`. The coordinator selects Task 15 by itself; do not dispatch it by hand. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
@@ -27,10 +27,10 @@ The rows above are the human narrative. Completion and next-task selection are m
 
 ### Autonomous progress
 
-- Updated: 2026-09-12T00:00:00+00:00
-- Completed tasks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+- Updated: 2026-09-14T21:08:23+00:00
+- Completed tasks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 - Completed blocks: [1, 2, 3]
-- Next eligible task: Task 14 - Manual clip marking
+- Next eligible task: Task 15 - Coach judgments
 
 Maintained by `services/agentops/reconcile.py`. Edit around this
 block, not inside it.

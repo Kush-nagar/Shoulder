@@ -5,18 +5,105 @@ Architecture and the reasoning behind it: [ADR 0019](../decisions/0019-autonomou
 
 ## Layout
 
-| Path | What it is |
-|---|---|
-| `ops/policy.json` | Routing, budgets, limits, privacy. **Edit this to change behaviour.** |
-| `ops/state/progress.json` | Canonical task completion ledger |
-| `ops/state/models.json` | Discovered model catalogue and qualification verdicts |
-| `ops/state/providers.json` | Per-lane health |
-| `ops/state/tasks.json` | Active task leases and checkpoints |
-| `ops/state/budget.json` | Recorded API spend |
-| `services/agentops/` | The orchestrator itself |
-| `.github/workflows/agentops-*.yml` | Coordinator, worker, reviewer, watchdog |
+| Path | What it is | Lives on |
+|---|---|---|
+| `ops/policy.json` | Routing, budgets, limits, privacy, **human gates**. Edit this to change behaviour. | `main`, reviewed |
+| `ops/state/progress.json` | Task completion ledger | `agentops-state` |
+| `ops/state/models.json` | Discovered model catalogue and qualification verdicts | `agentops-state` |
+| `ops/state/providers.json` | Per-lane health | `agentops-state` |
+| `ops/state/tasks.json` | Active task leases, checkpoints and repair counters | `agentops-state` |
+| `ops/state/budget.json` | Recorded API spend | `agentops-state` |
+| `services/agentops/` | The orchestrator itself | `main`, reviewed |
+| `.github/workflows/agentops-*.yml` | Coordinator, worker, reviewer, watchdog, pull-request reaction | `main`, reviewed |
 
 Do not edit the orchestrator to change routing. Change `ops/policy.json`.
+
+## Where runtime state lives
+
+**Nothing in normal operation pushes to the default branch.**
+
+Leases, provider health, spend and progress change many times per task. They
+used to be committed straight to `main`, which only works if that branch is
+unprotected, or protected with a bypass actor for GitHub Actions. This is a
+personal repository, and its rulesets offer no such actor to grant: with
+protection on, every ledger write was rejected with `GH013` and the loop could
+not run at all.
+
+So the mutable ledger moved to its own branch:
+
+```
+main                 product code, policy, workflows, human gates
+                     protected: quality + verdict, reviewed pull requests only
+
+agentops-state       ops/state/*.json and nothing else
+                     an orphan branch; no product code has ever been on it
+```
+
+Every job that touches state does the same two things:
+
+```
+python -m services.agentops.cli state-pull     # before reading anything
+python -m services.agentops.cli state-push --message '...'   # after mutating
+```
+
+`state-contents` lists what the branch holds and exits non-zero on any path
+outside `ops/state/`.
+
+### Why it cannot carry anything else
+
+The commit is not made by switching branches. It is built from a throwaway
+index containing exactly one directory:
+
+```
+GIT_INDEX_FILE=$tmp git read-tree --empty
+GIT_INDEX_FILE=$tmp git add --all -- ops/state
+GIT_INDEX_FILE=$tmp git write-tree      ->  git commit-tree  ->  git push
+```
+
+Nothing else in the worktree can reach that tree. It is a property of how the
+commit is constructed rather than a rule someone has to remember — which
+matters, because the branch-switching dance this replaced was itself the source
+of several bugs, including a worker that could push task-branch content to
+`main`.
+
+### Concurrent writers
+
+`pull` records the commit it read. `push` makes that commit the parent and
+pushes without any force, so git's own fast-forward rule rejects it when
+another writer has landed in between. On a rejection the caller re-reads the
+branch and re-applies **only the files it changed**, leaving everything else at
+the other writer's version.
+
+Two writers changing the *same* file is the case that cannot be merged, and
+there the last writer wins. So the callers whose mutation is one cheap command
+— the worker and the pull-request reaction — re-run the mutation against
+freshly pulled state instead of relying on that. The coordinator cannot:
+acquiring a lease increments an attempt counter, and re-running it would spend
+a task's attempt budget on a push race.
+
+### The copies still committed on main
+
+`ops/state/*.json` on the default branch are the **seed**. Before the branch
+exists, `state-pull` leaves them in place and the first `state-push` turns them
+into the branch; after that the branch is authoritative and the committed
+copies are historical. That is also what makes a fresh clone and a migrating
+repository take exactly one path, with no separate migration step.
+
+### Human gates are not in the ledger
+
+`gates.real_use_gate` lives in `ops/policy.json`, on the protected branch.
+The ledger is written by automation without review, so a gate stored there
+would be a gate the system could open for itself — and this one is what stands
+between autonomy and the machine-learning phases AGENTS.md rule 5 forbids.
+`state.gate_passed` reads policy only; a ledger may still *refuse* a gate,
+never grant one.
+
+### STATUS.md
+
+Not written by automation any more, for the same reason: it is on the protected
+branch. The live picture is the Control Center issue, and workers read progress
+from the ledger through their brief rather than from the file. A human, or a
+reviewed pull request, can regenerate its block with `cli status-snapshot`.
 
 ## Stopping it
 
@@ -61,15 +148,122 @@ model.
 
 ## Lanes
 
-| Lane | Harness | Billing | May write frontend |
-|---|---|---|---|
-| `claude_subscription` | Claude Code action | Claude subscription | no |
-| `codex_api` | Codex action | OpenAI API | **yes, only this one** |
-| `openrouter` | Claude Code action via OpenRouter | OpenRouter credits | no |
+| Lane | Harness | Billing | Priority | May write frontend |
+|---|---|---|---|---|
+| `claude_subscription` | Claude Code action | Claude subscription | 1 | yes |
+| `codex_cloud` | `@codex` mention | ChatGPT subscription | 2 | yes |
+| `openrouter` | Claude Code action via OpenRouter | OpenRouter credits | 3 | **no** |
+| `codex_api` | Codex action | OpenAI API | 4 (disabled) | yes |
 
-Frontend implementation is written by the OpenAI lane or it does not happen. If
-that lane is unavailable, frontend tasks report `BLOCKED_PROVIDER` rather than
-falling back to a forbidden writer.
+Claude is the primary writer for both halves of a task. That changed on
+2026-09-14: frontend work used to be Codex-only, which meant every canonical
+task containing UI stalled the autonomous loop waiting for a second provider.
+Claude now writes the interface a task requires, bounded to *functional*
+completeness — real data flow, states, keyboard operation, labels and roles,
+phone width, and the task's named tests. Visual polish is a separate later
+pass and the brief says so explicitly.
+
+The OpenRouter restriction is unchanged: that lane never writes frontend. If
+both permitted lanes are down, frontend tasks report `BLOCKED_PROVIDER` rather
+than falling back to a forbidden writer.
+
+## How the loop closes
+
+Each stage hands to the next through GitHub, not through a conversation, so any
+stage can be resumed by a fresh run that reads only repository state.
+
+```
+merge to main ─▶ coordinator ─▶ worker ─▶ pull request
+                     ▲                        │
+                     │                        ▼
+                 reconcile ◀── merge ◀── Quality + review verdict
+                                              │ (failed)
+                                              ▼
+                                        agentops-pr ─▶ repair worker
+```
+
+**Nothing in this repository merges a pull request.** GitHub's own auto-merge
+does, once every required branch-protection context passes. The worker enables
+it when it opens the pull request; the watchdog re-arms it on any open
+autonomous pull request that has none, which is the recovery path for a worker
+that died between opening the pull request and arming the merge. No workflow
+polls for green and no runner is held open waiting for a check that outlasts
+it.
+
+The required contexts are:
+
+| Context | Workflow | What it proves |
+|---|---|---|
+| `quality` | `ci.yml` | format, lint, types, tests, contracts, build, browser smoke |
+| `verdict` | `agentops-review.yml` | independent review left nothing unresolved |
+
+`verdict` is counted, not judged: unresolved, non-outdated review threads plus
+each reviewer's **latest** review state. It fails closed — a review state that
+cannot be read blocks the merge rather than passing it. It reports on every
+pull request including a human's, because a required context that never runs
+leaves one pending forever.
+
+Three things it deliberately does not do:
+
+- **Count review history.** A reviewer that requested changes and then approved
+  the repaired branch would otherwise stay blocking forever, so the branch
+  could never go green and the repair ceiling would be spent on nothing.
+- **Count outdated threads.** A pushed repair makes every earlier thread
+  outdated; counting them would keep the branch red whatever the repair fixed.
+- **Trust a mention-based reviewer's job result.** Codex Cloud answers minutes
+  after the job that asked it finishes, so "not looked at yet" and "reviewed
+  and clean" are the same picture. For a `github-mention` reviewer the verdict
+  stays `pending` until a review is submitted against the current head commit,
+  and `pull_request_review` re-derives it when that review lands.
+
+`agentops-pr.yml` reacts to a failing required check on an autonomous branch by
+taking a repair cycle and dispatching the **same** writer again with a repair
+brief. A failing test is a code problem, not a provider problem, so a repair
+never spends fallback capacity and never spends an implementation attempt. The
+two ceilings — `max_ci_repair_cycles` and `max_review_repair_cycles` — are
+independent, and when one is spent the task is released as blocked instead of
+retried forever.
+
+### The liveness cost of failing closed
+
+An unresolved review thread blocks the merge, and the gate cannot tell "already
+fixed" from "ignored". Changing the lines a finding points at marks its thread
+outdated and it stops counting, which covers most repairs — this pull request
+went from fourteen blocking threads to six that way. A fix made *elsewhere*
+leaves its thread standing, and the branch then stays blocked for every
+remaining repair cycle until the task is released as blocked.
+
+That is deliberate. The alternative — dropping findings from older commits —
+merges on the assumption that a silent reviewer means a fixed problem, and gets
+it wrong in the direction that ships the defect. Blocking is wrong in the
+direction that stops and asks, which is the trade this system is supposed to
+make.
+
+The repair brief therefore tells the writer to reply to and resolve each thread
+it answers, and gives it the exact `gh api graphql` calls. If that does not
+happen, the task blocks visibly on the Control Center rather than merging
+something unreviewed.
+
+It separates a reviewer that *found* something from a reviewer that *could not
+run*. Only the first is a repair; the second reruns the reviewer and spends no
+cycle, because a writer handed no finding pushes no commit, which emits no
+`synchronize`, which leaves the pull request stuck on the original failed check
+forever.
+
+It also requires the failing run's head repository to be this repository. On a
+public repository anyone may open a fork pull request named after the live
+canonical branch and fail a check deliberately; repair lookup is by task
+number, so without that check such a run would spend the real task's repair
+budget and point a credentialed worker at the real branch.
+
+## Watching it
+
+`cli control-center` rewrites the body of one issue, **Shoulder AgentOps
+Control Center**, on every meaningful transition: autonomy status, current task
+and stage, provider and model, checks, last durable checkpoint, repair counts,
+next eligible tasks, blocked tasks, and the real gates. The activity feed issue
+stays a feed — event comments — because a page that answers "what is happening
+now" and a log that answers "what happened at 03:14" are different things.
 
 ## Secrets
 

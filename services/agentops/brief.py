@@ -12,6 +12,7 @@ repository will read the whole repository.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from . import classify, coordinator
@@ -47,13 +48,123 @@ DISCIPLINE = """## Working rules
 - Use these domain words exactly: `observation`, `judgment`, `review_publication`,
   `player_reflection`, `development_goal`, `evidence_clip`.
 - Never commit secrets, `.env.remote`, or machine-specific artefacts.
+- Never change `ops/policy.json`, `.github/workflows/`, `AGENTS.md`, or
+  `CODEOWNERS`. Those decide what this system is allowed to do -- routing,
+  budgets, banned providers, the human gates, and the checks themselves. Both
+  required checks are automated, so a branch that edited them would be granting
+  itself the permission. The merge gate refuses such a branch outright; if the
+  task seems to need one, say so in the pull request and stop.
 - Never weaken, skip, or mark expected-failure any load-bearing test in `AGENTS.md`.
 - Run the named verification below, plus lint and type checks for what you touched.
 - Commit at coherent points. If you run out of room, leave the tree working.
 """
 
 
-def render(root: Path, task_id: int) -> str:
+FRONTEND_SCOPE = """## What "done" means for the user interface
+
+This task includes interface work, and the interface is in scope: the task is
+not complete until a user can actually carry out what it describes against the
+real backend. Build it.
+
+Build it to be correct, not decorated. In scope: real data flow, correct
+states including loading, empty and error, keyboard operation, focus order,
+labels and roles, sensible behaviour at phone width, and the tests this task
+names. Out of scope, and deliberately deferred to a later dedicated pass:
+visual redesign, brand work, animation, motion, typographic refinement, and
+component abstraction nothing yet needs.
+
+Follow `docs/09-frontend-design-system.md` for the tokens and components that
+already exist rather than inventing a parallel set. Never invent player-facing
+wording: `applied` renders as "You did this.", `opportunity` as "Chance to do
+this.", and `not_relevant` is never shown to a player.
+"""
+
+REPAIR_HEADER = """# Repair brief
+
+A previous attempt at this task is already on the branch and has opened a pull
+request. It did not pass. Your job is to fix what is listed below and nothing
+else.
+
+- Do not restart the task or rewrite working code.
+- Read the existing diff first (`git log`, `git diff origin/main...HEAD`).
+- Treat each finding on its merit. A finding that is wrong, or that asks for
+  something this canonical task explicitly excludes, should be answered in the
+  pull request rather than implemented -- say why, and leave the code alone.
+- Add regression coverage for anything that was genuinely broken.
+- Re-run the verification this task owes before you finish.
+"""
+
+
+RESOLVING = """The full thread for each is on the pull request.
+
+**Answer every thread before you finish.** The merge gate counts unresolved
+threads, and it cannot tell "already fixed" from "ignored". Changing the lines
+a finding points at marks its thread outdated automatically and it stops
+counting -- but a fix made anywhere else leaves the thread standing, and the
+branch then stays blocked through every remaining repair cycle until the task
+is given up on. That is the most likely way this task fails from here.
+
+So: reply saying where you fixed it, or why you are declining it, and then
+resolve it. List the open threads and resolve one with:
+
+```
+gh api graphql -F o=OWNER -F n=REPO -F p=NUMBER -f query='
+  query($o:String!,$n:String!,$p:Int!){ repository(owner:$o,name:$n){
+    pullRequest(number:$p){ reviewThreads(first:100){ nodes{
+      id isResolved isOutdated
+      comments(first:1){ nodes{ path line body } } } } } } }'
+
+gh api graphql -F t=THREAD_ID -f query='
+  mutation($t:ID!){ resolveReviewThread(input:{threadId:$t}){
+    thread{ isResolved } } }'
+```
+
+Resolve only what you actually answered. Resolving a finding you did not
+address hides a real defect from the one gate that would have caught it."""
+
+
+def _repair_section(reason: str, findings_path: Path | None) -> str:
+    """What failed, in the smallest form a repairer can act on."""
+    lines = ["## What failed"]
+    if reason == "ci":
+        lines.append(
+            "A required check failed on the pull request. Read the failing "
+            "job's log through `gh run view --log-failed`, find the cause, "
+            "and fix it. Do not disable, skip, or weaken the check."
+        )
+    else:
+        lines.append("Independent review left unresolved findings on the pull request.")
+
+    if findings_path and findings_path.exists():
+        try:
+            payload = json.loads(findings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+        found = payload.get("findings") or []
+        if found:
+            lines.append("")
+            lines.append("### Review findings")
+            for item in found:
+                where = item.get("path") or "unknown file"
+                line_no = item.get("line")
+                at = f"{where}:{line_no}" if line_no else where
+                lines.append(f"- `{at}` -- {item.get('summary', '').strip()}")
+    if reason == "review":
+        # Unconditional, not only when the findings file parsed. A review
+        # repair means threads exist by definition; if fetching them failed,
+        # the writer needs this more, not less.
+        lines.append(RESOLVING)
+    lines.append("")
+    return "\n\n".join(lines)
+
+
+def render(
+    root: Path,
+    task_id: int,
+    *,
+    repair: str | None = None,
+    findings: Path | None = None,
+) -> str:
     ctx = coordinator.load_context(root)
     task = ctx.backlog.tasks.get(task_id)
     if task is None:
@@ -64,7 +175,9 @@ def render(root: Path, task_id: int) -> str:
     result = classify.classify(task)
     block = ctx.backlog.block_for_task(task_id)
 
-    lines: list[str] = [HEADER]
+    lines: list[str] = [REPAIR_HEADER if repair else HEADER]
+    if repair:
+        lines.append(_repair_section(repair, findings))
     lines.append(f"## Task {task.id} — {task.title}\n")
     lines.append(f"- Phase: {task.phase}")
     if block:
@@ -136,6 +249,9 @@ def render(root: Path, task_id: int) -> str:
             "it, then continue from there rather than starting over.\n"
         )
 
+    if result.category in ("frontend", "mixed"):
+        lines.append(FRONTEND_SCOPE)
+
     lines.append(RULES)
     lines.append(DISCIPLINE)
     return "\n".join(lines)
@@ -146,9 +262,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", type=int, required=True)
     parser.add_argument("--root", default=".")
     parser.add_argument("--out")
+    parser.add_argument(
+        "--repair",
+        choices=("ci", "review"),
+        help="write a repair brief for an existing branch instead of a fresh one",
+    )
+    parser.add_argument(
+        "--findings", help="path to a saved review verdict, for a review repair"
+    )
     args = parser.parse_args(argv)
 
-    text = render(Path(args.root).resolve(), args.task)
+    text = render(
+        Path(args.root).resolve(),
+        args.task,
+        repair=args.repair,
+        findings=Path(args.findings) if args.findings else None,
+    )
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
     else:
