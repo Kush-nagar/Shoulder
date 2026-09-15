@@ -32,11 +32,13 @@
       "branch": "block-04-t15-coach-judgments",
       "checkpoint": null,
       "expires_at": "2026-09-15T04:00:31+00:00",
-      "heartbeat_at": "2026-09-15T02:30:31+00:00",
+      "heartbeat_at": "2026-09-15T02:30:59+00:00",
       "owner": "run-34921416961",
       "run_id": "34921416961",
       "state": "assigned",
-      "task_id": 15
+      "task_id": 15,
+      "worker_run_attempt": "1",
+      "worker_run_id": "34921450581"
     }
   }
 }
