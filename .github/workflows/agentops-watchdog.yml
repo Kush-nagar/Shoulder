@@ -134,12 +134,26 @@ jobs:
             echo 'no leased branch to re-arm'
             exit 0
           fi
+          # The head repository is checked as well as the branch name. `--base
+          # main` restricts where a pull request merges TO, never where its
+          # head lives, so on a public repository a fork could open a branch
+          # named exactly like the leased one and have its merge armed
+          # alongside the real branch. The comparison is done in the shell
+          # because `gh` has no way to pass a variable into its jq filter.
           gh pr list --repo "$REPO" --state open --base main \
-            --json number,headRefName,autoMergeRequest \
+            --json number,headRefName,autoMergeRequest,headRepositoryOwner,headRepository \
             --jq '.[] | select(.autoMergeRequest == null)
-                  | "\(.number) \(.headRefName)"' \
-          | while read -r pr branch; do
+                  | [(.number|tostring),
+                     .headRefName,
+                     ((.headRepositoryOwner.login // "") + "/"
+                      + (.headRepository.name // ""))]
+                  | @tsv' \
+          | while IFS="$(printf '\t')" read -r pr branch origin; do
               [ -n "$pr" ] || continue
+              if [ "$origin" != "$REPO" ]; then
+                echo "skipping #${pr}: head lives in ${origin}, not ${REPO}"
+                continue
+              fi
               if ! printf '%s\n' "$leased" | grep -qxF "$branch"; then
                 continue
               fi

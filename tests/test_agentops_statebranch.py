@@ -92,6 +92,44 @@ class TestNothingPushesTheProtectedBranch(unittest.TestCase):
                 with self.subTest(f"{path.name}:{directory}"):
                     self.assertNotIn(f"git add {directory}", text)
 
+    def test_every_control_center_refresh_reads_the_ledger_first(self) -> None:
+        """Rendered from the seed, the page reports the state the task started
+        from -- no lease, no pull request, no spend -- at exactly the moment
+        the real one was just written. Asserted per job, because a pull in a
+        different job is on a different runner and does nothing for this one.
+        """
+        import re as _re
+
+        for path in AGENTOPS_WORKFLOWS:
+            text = read(path)
+            if "cli control-center" not in text:
+                continue
+            for block in _re.split(r"(?m)^  (?=\w[\w-]*:$)", text)[1:]:
+                name = block.split(":", 1)[0]
+                if "cli control-center" not in block:
+                    continue
+                with self.subTest(f"{path.name}:{name}"):
+                    self.assertIn("cli state-pull", block)
+                    self.assertLess(
+                        block.index("cli state-pull"),
+                        block.index("cli control-center"),
+                    )
+
+    def test_a_job_that_reads_the_ledger_keeps_its_credential(self) -> None:
+        """Reading the state branch is a fetch, and this is a private
+        repository. A job that drops the checkout credential and then pulls
+        would fail every time."""
+        import re as _re
+
+        for path in AGENTOPS_WORKFLOWS:
+            text = read(path)
+            for block in _re.split(r"(?m)^  (?=\w[\w-]*:$)", text)[1:]:
+                name = block.split(":", 1)[0]
+                if "cli state-pull" not in block:
+                    continue
+                with self.subTest(f"{path.name}:{name}"):
+                    self.assertNotIn("persist-credentials: false", block)
+
     def test_the_worker_pushes_only_its_own_task_branch(self) -> None:
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
         self.assertIn('git push --force-with-lease origin "$BRANCH"', text)
@@ -206,6 +244,159 @@ class TestTheGateCannotBeOpenedByTheSystem(unittest.TestCase):
         for candidate in gated:
             with self.subTest(candidate.task.id):
                 self.assertFalse(candidate.eligible, candidate.reasons)
+
+
+class TestThirdRoundReviewFindings(unittest.TestCase):
+    """Review of the state-branch redesign. Two of these corrected a claim.
+
+    Moving the gate onto the protected branch did NOT by itself make it
+    human-only, and moving the Control Center off the task branch did not move
+    the ledger writes with it.
+    """
+
+    # The gate is not human-only just because it is on the protected branch.
+
+    def test_an_autonomous_branch_may_not_change_governance(self) -> None:
+        """Both required contexts are automated, so a branch that edited
+        `ops/policy.json` would author, check and merge its own permission to
+        start the phases AGENTS.md rule 5 forbids."""
+        text = read(WORKFLOW_DIR / "agentops-review.yml")
+        guard = text.split("- name: Refuse an autonomous change to policy", 1)[1]
+        guard = guard.split("- name: Decide the verdict", 1)[0]
+        for path in ("ops/policy.json", ".github/workflows", "AGENTS.md"):
+            with self.subTest(path):
+                self.assertIn(path, guard)
+        self.assertIn("exit 1", guard)
+
+    def test_the_guard_is_part_of_the_required_context(self) -> None:
+        """A guard in a job nothing requires blocks nothing."""
+        text = read(WORKFLOW_DIR / "agentops-review.yml")
+        verdict = text.split("\n  verdict:", 1)[1]
+        self.assertIn("Refuse an autonomous change to policy", verdict)
+
+    def test_the_guard_only_applies_to_autonomous_branches(self) -> None:
+        """A person changing policy does so from their own branch."""
+        text = read(WORKFLOW_DIR / "agentops-review.yml")
+        guard = text.split("- name: Refuse an autonomous change to policy", 1)[1]
+        guard = guard.split("- name: Decide the verdict", 1)[0]
+        self.assertIn("steps.scope.outputs.autonomous == 'true'", guard)
+
+    def test_the_brief_tells_the_writer_the_same_thing(self) -> None:
+        from services.agentops import brief
+
+        text = brief.render(REPO_ROOT, 15)
+        self.assertIn("ops/policy.json", text)
+        self.assertIn("granting", text)
+
+    # Post-harness ledger writes must not run task-branch code.
+
+    def test_no_ledger_write_runs_from_the_task_branch(self) -> None:
+        """After the harness, that worktree is code a model has just edited.
+        Running `services.agentops` there with a write token would let it
+        replace the structurally-restricted state push with an arbitrary one.
+        """
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        work = text.split("  work:", 1)[1].split("\n  finalize:", 1)[0]
+        after = work.split("- name: Check out the task branch", 1)[1]
+        for forbidden in ("cli state-push", "cli spend", "cli attach", "cli notify"):
+            with self.subTest(forbidden):
+                self.assertNotIn(forbidden, after)
+
+    def test_the_finalize_job_runs_the_default_branch(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("ref: ${{ github.event.repository.default_branch }}", finalize)
+        self.assertIn("cli state-push", finalize)
+        self.assertIn("cli spend", finalize)
+        self.assertIn("cli notify", finalize)
+
+    def test_the_finalize_job_holds_no_more_than_it_needs(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertNotIn("pull-requests: write", finalize)
+        self.assertNotIn("actions: write", finalize)
+        self.assertNotIn("id-token: write", finalize)
+
+    def test_what_the_worker_hands_over_is_data_not_code(self) -> None:
+        """Job outputs, so nothing the branch produced is executed."""
+        text = read(WORKFLOW_DIR / "agentops-worker.yml")
+        self.assertIn("cost: ${{ steps.cost.outputs.cost }}", text)
+        self.assertIn("pull_request: ${{ steps.pr.outputs.number }}", text)
+        self.assertIn("harness_failed: ${{ steps.harness.outputs.failed }}", text)
+
+    # A lost race must reach the caller that can re-run its mutation.
+
+    def test_a_conflict_is_reported_rather_than_retried_by_default(self) -> None:
+        """Retrying internally returned success to a loop whose whole purpose
+        was to re-run the mutation, so the mutation never re-ran and the
+        winner's same-file change was overwritten."""
+        import inspect
+
+        signature = inspect.signature(statebranch.push)
+        self.assertEqual(signature.parameters["retries"].default, 0)
+
+    def test_only_the_coordinator_asks_for_retries(self) -> None:
+        for path in AGENTOPS_WORKFLOWS:
+            text = read(path)
+            if "--retries" not in text:
+                continue
+            with self.subTest(path.name):
+                self.assertEqual(path.name, "agentops-coordinator.yml")
+
+    def test_changed_files_is_measured_from_the_pulled_ledger(self) -> None:
+        """HEAD is the product branch and carries the seed, so diffing against
+        it reported nearly every file as changed -- and a lost race then
+        re-applied stale copies of files this run never touched."""
+        source = read(Path(statebranch.__file__))
+        self.assertIn('"diff", "--name-only", "--", TRACKED', source)
+        self.assertNotIn('"status", "--porcelain"', source)
+        self.assertIn('"ls-files", "--others"', source)
+
+    # The awaited reviewer must be exactly the reviewer.
+
+    def test_a_lookalike_login_does_not_satisfy_the_wait(self) -> None:
+        """`chatgpt-codex-connector-evil` could otherwise leave a passing
+        remark and let the verdict pass with no independent review."""
+        from services.agentops import review
+
+        impostor = {"author": {"login": "chatgpt-codex-connector-evil"}}
+        self.assertFalse(review._is_reviewer(impostor, "chatgpt-codex-connector"))
+
+    def test_both_spellings_of_the_real_reviewer_are_accepted(self) -> None:
+        from services.agentops import review
+
+        for login in ("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"):
+            with self.subTest(login):
+                self.assertTrue(
+                    review._is_reviewer(
+                        {"author": {"login": login}}, "chatgpt-codex-connector"
+                    )
+                )
+
+    # A fork must not have its merge armed.
+
+    def test_the_rearm_checks_the_head_repository(self) -> None:
+        """`--base main` restricts where a pull request merges to, never where
+        its head lives."""
+        text = read(WORKFLOW_DIR / "agentops-watchdog.yml")
+        self.assertIn("headRepositoryOwner", text)
+        self.assertIn('"$origin" != "$REPO"', text)
+
+    # An unreadable-because-too-large verdict is permanent.
+
+    def test_an_overflowing_review_is_escalated_not_rerun(self) -> None:
+        """Rerunning cannot lower the count, and reruns dependencies, so it
+        would repost the mention and add still more reviews."""
+        text = read(WORKFLOW_DIR / "agentops-pr.yml")
+        self.assertIn("action=escalate", text)
+        triage = text.split("- name: Work out what failed", 1)[1]
+        escalate = triage.index("action=escalate")
+        rerun = triage.index("action=rerun-review")
+        self.assertLess(escalate, rerun, "overflow must be classified first")
+
+    def test_the_escalation_is_reported_as_blocked(self) -> None:
+        text = read(WORKFLOW_DIR / "agentops-pr.yml")
+        self.assertIn("more review threads than the merge gate can read", text)
 
 
 class TestTheLedgerNeverRidesAProductPullRequest(unittest.TestCase):
@@ -365,8 +556,18 @@ class TestStateBranchAgainstRealGit(unittest.TestCase):
         )
         self.assertTrue(statebranch.push(other, "theirs")["pushed"])
 
-        # This writer started from the older branch and changed a different
-        # file. Its push loses the race, re-applies, and both survive.
+        # This writer started from the older branch. Its first push loses the
+        # race and says so -- which is the point: a caller re-runs its own
+        # mutation against the branch that won, exactly as every workflow loop
+        # does, rather than having stale bytes re-applied underneath it.
+        (self.work / "ops" / "state" / "tasks.json").write_text(
+            '{"leases": {"15": {"task_id": 15}}}\n', encoding="utf-8"
+        )
+        first = statebranch.push(self.work, "mine")
+        self.assertFalse(first["pushed"], first)
+        self.assertIn("moved", str(first["detail"]))
+
+        statebranch.pull(self.work)
         (self.work / "ops" / "state" / "tasks.json").write_text(
             '{"leases": {"15": {"task_id": 15}}}\n', encoding="utf-8"
         )

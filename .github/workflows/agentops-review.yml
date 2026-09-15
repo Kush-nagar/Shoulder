@@ -193,6 +193,50 @@ jobs:
           version: '0.12.10'
           python-version: '3.11.16'
 
+      - name: Refuse an autonomous change to policy or governance
+        # Moving the real-use gate onto the protected branch did NOT by itself
+        # make it human-only. The required contexts are both automated, so an
+        # autonomous branch could edit `ops/policy.json` to set
+        # `real_use_gate: true` and the system would author, check and merge
+        # its own permission to start the phases AGENTS.md rule 5 forbids.
+        #
+        # This is a required context, so failing it blocks the merge. A person
+        # changing policy does so from their own branch, which is not an
+        # autonomous one and never reaches this step.
+        if: steps.scope.outputs.autonomous == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null \
+            || git fetch --no-tags origin
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true)"
+          guarded=''
+          for path in ops/policy.json .github/workflows CODEOWNERS AGENTS.md; do
+            if printf '%s\n' "$changed" | grep -qx -e "$path" \
+               || printf '%s\n' "$changed" | grep -q "^${path}/"; then
+              guarded="${guarded} ${path}"
+            fi
+          done
+          if [ -n "$guarded" ]; then
+            {
+              echo "## Refused: an autonomous branch changed governance"
+              echo
+              echo "Changed:${guarded}"
+              echo
+              echo 'These decide what this system is permitted to do -- routing,'
+              echo 'budgets, banned providers, the human gates, and the checks'
+              echo 'themselves. A branch this system wrote may not change them,'
+              echo 'because both required contexts are automated and it would be'
+              echo 'granting itself the permission.'
+              echo
+              echo 'A human makes this change from their own branch.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "refusing governance changes from an autonomous branch:${guarded}" >&2
+            exit 1
+          fi
+
       - name: Decide the verdict
         if: steps.scope.outputs.autonomous == 'true'
         run: |

@@ -152,9 +152,20 @@ jobs:
           readable="$(jq -r '.ok // false' verdict.json)"
           decision="$(jq -r '.verdict // "unknown"' verdict.json)"
 
+          reason_text="$(jq -r '.reason // ""' verdict.json)"
+
           if [ "$decision" = 'pending' ]; then
             echo 'the reviewer has not answered yet; leaving it to answer'
             echo 'action=none' >> "$GITHUB_OUTPUT"
+          elif [ "$decision" = 'unknown' ] && \
+               printf '%s' "$reason_text" | grep -q 'exceed the'; then
+            # The pull request has more threads or reviews than the gate can
+            # read, so it fails closed -- permanently. Rerunning cannot lower
+            # either count, and `gh run rerun --failed` reruns dependencies, so
+            # it would repost the mention, add yet another review, and produce
+            # the same failure forever. Stop and say so instead.
+            echo 'the review state is larger than the gate can evaluate'
+            echo 'action=escalate' >> "$GITHUB_OUTPUT"
           elif [ "$readable" = 'true' ] && [ "$blocking" -gt 0 ]; then
             echo 'reason=review' >> "$GITHUB_OUTPUT"
             echo 'action=repair' >> "$GITHUB_OUTPUT"
@@ -285,6 +296,9 @@ jobs:
             headline="Repairing ${BRANCH} after ${FAILED_WORKFLOW} failed"
           elif [ "${ACTION:-none}" = 'rerun-review' ]; then
             headline="Rerunning the reviewer on ${BRANCH}; it left no finding"
+          elif [ "${ACTION:-none}" = 'escalate' ]; then
+            kind=blocked
+            headline="${BRANCH} has more review threads than the merge gate can read"
           elif [ "${ACTION:-none}" = 'repair' ]; then
             kind=blocked
             headline="Repair ceiling reached on ${BRANCH}"

@@ -89,6 +89,17 @@ jobs:
     needs: guard
     if: needs.guard.outputs.allowed == 'true'
     runs-on: ubuntu-24.04
+    outputs:
+      # Read by the finalize job, which writes the ledger from trusted
+      # code. This job cannot do it itself: by the time these exist it has
+      # checked out the task branch and let a model edit it, so running
+      # services.agentops from here would hand a write token to unreviewed
+      # code that could replace the structurally-restricted state push with
+      # an arbitrary one.
+      cost: ${{ steps.cost.outputs.cost }}
+      pull_request: ${{ steps.pr.outputs.number }}
+      harness_failed: ${{ steps.harness.outputs.failed }}
+      gate: ${{ steps.gate.outcome }}
     timeout-minutes: 90
     permissions:
       contents: write
@@ -278,10 +289,11 @@ jobs:
           claude_args: --model ${{ inputs.model }} --max-turns 120
 
       - name: Record what the run cost
-        # Both lanes here bill differently -- the Claude lane against a
-        # subscription, OpenRouter against credits -- but both run the Claude
-        # Code harness, which reports usage in its execution file. Recording it
-        # is what makes the OpenRouter ceilings real.
+        # Both lanes bill differently -- the Claude lane against a
+        # subscription, OpenRouter against credits -- but both run the
+        # Claude Code harness, which reports usage in its execution file.
+        # Recording it is what makes the OpenRouter ceilings real.
+        id: cost
         if: always()
         continue-on-error: true
         env:
@@ -300,40 +312,20 @@ jobs:
             echo 'the harness reported no cost'
             exit 0
           fi
-          # Captured here, recorded later by the step that carries state back
-          # to the default branch, so the write happens once against fresh
-          # state rather than on this task branch where it would be lost.
-          echo "RECORDED_COST=$cost" >> "$GITHUB_ENV"
+          echo "cost=$cost" >> "$GITHUB_OUTPUT"
 
-      - name: Record a provider failure
-        # Only when the provider's own harness failed. `failure()` alone fires
-        # after any earlier step too, so a registry outage during dependency
-        # install or a bad brief would blame the provider and take a healthy
-        # lane out of the pool.
+      - name: Flag a provider failure
+        # Only when the provider's own harness failed. `failure()` alone
+        # fires after any earlier step too, so a registry outage during
+        # dependency install or a bad brief would blame the provider and
+        # take a healthy lane out of the pool.
+        #
+        # This only records the fact as an output. The ledger write happens
+        # in the finalize job, from the default branch, because this
+        # worktree is the task branch a model has just been editing.
+        id: harness
         if: failure() && (steps.claude.outcome == 'failure' || steps.openrouter.outcome == 'failure')
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          # DEGRADED keeps the lane out of the pool until something proves it
-          # works again, so the next coordinator run takes the fallback chain
-          # instead of choosing the lane that just failed.
-          #
-          # This job is already failing, so no later step will write anything.
-          # A failure recorded only in this runner is not recorded at all.
-          # Safe to repeat: marking health sets a value rather than
-          # accumulating one.
-          for attempt in 1 2 3 4 5; do
-            uv run --locked python -m services.agentops.cli state-pull
-            uv run --locked python -m services.agentops.cli health \
-              --lane "$LANE" --status DEGRADED \
-              --reason "worker run ${GITHUB_RUN_ID} failed"
-            uv run --locked python -m services.agentops.cli validate || break
-            if uv run --locked python -m services.agentops.cli state-push \
-                 --message "Record a provider failure from worker run ${GITHUB_RUN_ID}"; then
-              break
-            fi
-            sleep $((attempt * 5))
-          done
+        run: echo 'failed=true' >> "$GITHUB_OUTPUT"
 
       - name: Run the repository quality gate
         id: gate
@@ -342,6 +334,7 @@ jobs:
         run: ./scripts/check.ps1
 
       - name: Push the branch and open a pull request
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
           GATE: ${{ steps.gate.outcome }}
@@ -396,92 +389,115 @@ jobs:
           gh pr merge "$BRANCH" --auto --squash --delete-branch \
             || echo 'auto-merge could not be enabled; the pull request waits for review'
 
-      - name: Carry spend and the pull request back to the ledger
-        # Both were produced while this run worked on the task branch. A
-        # retry starts from a fresh checkout, so spend recorded only here
-        # would not count against the per-task ceiling, and a lease with no
-        # pull request looks finished to the watchdog the moment this ends.
-        if: always()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -uo pipefail
           number="$(gh pr list --repo "$REPO" --head "$BRANCH" --base main \
-            --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-          cost="${RECORDED_COST:-0}"
+            --state open --json number --jq '.[0].number // empty' || true)"
+          echo "ner and checks out the default branch.
 
-          # Spend is additive, so it carries a key that makes re-applying it
-          # a no-op; without that a retry would double-count the run against
-          # the per-task ceiling.
-          for attempt in 1 2 3 4 5; do
-            uv run --locked python -m services.agentops.cli state-pull
-            if [ -n "$number" ]; then
-              uv run --locked python -m services.agentops.cli attach \
-                --task "$TASK_ID" --pull-request "$number" || true
-            fi
-            if [ "$cost" != '0' ] && [ "$cost" != 'null' ]; then
-              uv run --locked python -m services.agentops.cli spend \
-                --lane "$LANE" --usd "$cost" --task "$TASK_ID" \
-                --once-key "run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}" || true
-            fi
-            uv run --locked python -m services.agentops.cli validate || break
-            if uv run --locked python -m services.agentops.cli state-push \
-                 --message "Record spend and the pull request for task ${TASK_ID}"; then
-              break
-            fi
-            sleep $((attempt * 5))
-          done
-
-      - name: Report to the activity feed
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GATE: ${{ steps.gate.outcome }}
-        run: |
-          set -uo pipefail
-          details="$(jq -nc \
-            --arg lane "$LANE" --arg model "$MODEL" --arg effort "$EFFORT" \
-            --arg branch "$BRANCH" --arg gate "$GATE" \
-            '{lane: $lane, model: $model, effort: $effort, branch: $branch, gate: $gate}')"
-          uv run --locked python -m services.agentops.cli notify verify \
-            "Task $TASK_ID worker finished" \
-            --details "$details" \
-            --repo "$GITHUB_REPOSITORY" || echo 'activity feed unavailable'
-
-      # The Control Center refresh used to live here. It was moved to its own
-      # job below: this worktree holds the agent-written task branch, so
-      # running `services.agentops` from it hands a repository token to code a
-      # branch may have edited and nobody has reviewed. A separate job gets a
-      # fresh runner and checks out the default branch.
-
-  report:
-    # Trusted code only. Nothing here touches the task branch.
+  finalize:
+    # Everything that has to happen after the harness, run from trusted code.
+    #
+    # These writes used to live in the work job. By then that worktree is the
+    # task branch a model has been editing, and the job holds `contents: write`
+    # plus a token: a change to `cli.py` or `statebranch.py` on that branch
+    # would execute here, with the credential, before anyone reviewed it -- and
+    # could replace the structurally-restricted state push with an arbitrary
+    # one. A separate job gets a clean runner and the default branch.
     needs: work
     if: always()
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      issues: write
+      contents: write # the agentops-state branch only
+      issues: write # activity feed and Control Center
     env:
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
+      TASK_ID: ${{ inputs.task_id }}
+      LANE: ${{ inputs.lane }}
+      COST: ${{ needs.work.outputs.cost }}
+      PR_NUMBER: ${{ needs.work.outputs.pull_request }}
+      HARNESS_FAILED: ${{ needs.work.outputs.harness_failed }}
+      WORK_RESULT: ${{ needs.work.result }}
+      GATE: ${{ needs.work.outputs.gate }}
+      MODEL: ${{ inputs.model }}
+      EFFORT: ${{ inputs.effort }}
+      BRANCH: ${{ inputs.branch }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # The default branch, where the ledger the worker just pushed lives.
+          # The default branch. Never the task branch, which is the point.
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
-          persist-credentials: false
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: '0.12.10'
           python-version: '3.11.16'
 
-      - name: Refresh the Control Center
+      - name: Record spend, the pull request, and any provider failure
         continue-on-error: true
         run: |
           set -uo pipefail
+          # Re-runs its mutations against freshly pulled state on each attempt.
+          # `state-push` reports a lost race rather than resolving it, because
+          # another writer may have changed the same file and re-applying this
+          # run's bytes would overwrite them.
+          #
+          # Every mutation here is safe to repeat: attaching sets a field,
+          # marking health sets a value, and spend carries a once-key so a
+          # retry cannot double-count against the per-task ceiling.
+          for attempt in 1 2 3 4 5; do
+            uv run --locked python -m services.agentops.cli state-pull
+
+            if [ -n "${PR_NUMBER:-}" ]; then
+              uv run --locked python -m services.agentops.cli attach \
+                --task "$TASK_ID" --pull-request "$PR_NUMBER" || true
+            fi
+            if [ -n "${COST:-}" ] && [ "$COST" != '0' ] && [ "$COST" != 'null' ]; then
+              uv run --locked python -m services.agentops.cli spend \
+                --lane "$LANE" --usd "$COST" --task "$TASK_ID" \
+                --once-key "run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}" || true
+            fi
+            if [ "${HARNESS_FAILED:-}" = 'true' ]; then
+              # DEGRADED keeps the lane out of the pool until something proves
+              # it works again, so the next coordinator run takes the fallback
+              # chain instead of choosing the lane that just failed.
+              uv run --locked python -m services.agentops.cli health \
+                --lane "$LANE" --status DEGRADED \
+                --reason "worker run ${GITHUB_RUN_ID} failed" || true
+            fi
+
+            uv run --locked python -m services.agentops.cli validate || break
+            if uv run --locked python -m services.agentops.cli state-push \
+                 --message "Record worker run ${GITHUB_RUN_ID} for task ${TASK_ID}"; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+
+      - name: Report to the activity feed
+        # Also moved off the task branch. `cli notify` is orchestrator code and
+        # this step carries a token, so running it from a worktree a model has
+        # been editing is the same hazard as the ledger write above.
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          details="$(jq -nc \
+            --arg lane "$LANE" --arg model "$MODEL" --arg effort "$EFFORT" \
+            --arg branch "$BRANCH" --arg gate "$GATE" --arg result "$WORK_RESULT" \
+            '{lane: $lane, model: $model, effort: $effort, branch: $branch,
+              gate: $gate, result: $result}')"
+          uv run --locked python -m services.agentops.cli notify verify \
+            "Task $TASK_ID worker finished" \
+            --details "$details" \
+            --repo "$REPO" || echo 'activity feed unavailable'
+
+      - name: Refresh the Control Center
+        # After the ledger write above, so the page shows what just happened
+        # rather than the state this task started from.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          uv run --locked python -m services.agentops.cli state-pull || true
           uv run --locked python -m services.agentops.cli control-center \
             --repo "$REPO" || echo 'control center unavailable'

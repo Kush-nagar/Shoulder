@@ -863,14 +863,19 @@ class TestSecondRoundReviewFindings(unittest.TestCase):
         """Checking out only the state files leaves services/agentops on the
         task branch, so a worker could edit it and run it with the token."""
         text = read("agentops-worker.yml")
-        report = text.split("\n  report:", 1)[1]
+        report = text.split("\n  finalize:", 1)[1]
         self.assertIn("ref: ${{ github.event.repository.default_branch }}", report)
-        self.assertIn("persist-credentials: false", report)
-        self.assertNotIn("contents: write", report)
+        # `contents: write` is unavoidable here -- this job pushes the state
+        # branch -- so what bounds it is that the code it runs comes from the
+        # default branch and never from the task branch, plus the absence of
+        # every other write scope.
+        self.assertNotIn("actions: write", report)
+        self.assertNotIn("pull-requests: write", report)
+        self.assertNotIn("id-token: write", report)
 
     def test_no_step_in_the_work_job_refreshes_the_control_center(self) -> None:
         text = read("agentops-worker.yml")
-        work = text.split("  work:", 1)[1].split("\n  report:", 1)[0]
+        work = text.split("  work:", 1)[1].split("\n  finalize:", 1)[0]
         self.assertNotIn("cli control-center", work)
 
     # Answering a thread is what unblocks the branch.

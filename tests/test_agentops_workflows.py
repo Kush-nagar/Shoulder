@@ -533,10 +533,14 @@ class TestLoopCompletion(unittest.TestCase):
         self.assertTrue(reconcile.branch_is_merged(REPO_ROOT, "HEAD", base="HEAD"))
 
     def test_the_worker_records_a_provider_failure(self) -> None:
-        """Failover states are useless if nothing ever enters them."""
+        """Failover states are useless if nothing ever enters them.
+
+        The work job flags it; the finalize job records it, from trusted code.
+        """
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        self.assertIn("Record a provider failure", text)
-        self.assertIn("--status DEGRADED", text)
+        self.assertIn("Flag a provider failure", text)
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("--status DEGRADED", finalize)
 
     def test_the_worker_job_receives_the_kill_switch(self) -> None:
         """Scoped to the guard job alone, every worker would refuse."""
@@ -651,10 +655,22 @@ class TestThirdReviewFindings(unittest.TestCase):
         self.assertIn("ref: ${{ github.event.repository.default_branch }}", text)
 
     def test_a_provider_failure_leaves_the_runner(self) -> None:
-        """The failing job runs no later step, so it must push for itself."""
+        """A failure recorded only in the runner is not recorded at all.
+
+        The write itself moved to the finalize job, which runs on a clean
+        runner from the default branch -- by the time the harness has failed,
+        this worktree is a task branch a model has been editing, and running
+        orchestrator code there with a write token is the hazard. The failing
+        job now only publishes the fact; finalize is what persists it.
+        """
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        failure = text.split("Record a provider failure", 1)[1]
-        self.assertIn("cli state-push", failure.split("- name:", 1)[0])
+        flag = text.split("- name: Flag a provider failure", 1)[1]
+        self.assertIn("failed=true", flag.split("- name:", 1)[0])
+
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("HARNESS_FAILED", finalize)
+        self.assertIn("--status DEGRADED", finalize)
+        self.assertIn("cli state-push", finalize)
 
     def test_the_hand_off_state_is_written(self) -> None:
         """Delegation attaches the Codex PR after the ledger commit runs."""
@@ -711,10 +727,17 @@ class TestFifthReviewFindings(unittest.TestCase):
         self.assertIn("steps.openrouter.outcome == 'failure'", text)
 
     def test_spend_and_the_pull_request_reach_the_ledger(self) -> None:
-        """Both were written on the task branch and never carried back."""
+        """Both were produced on the task branch and never carried back.
+
+        They are carried by the finalize job now, which runs on a clean runner
+        from the default branch: doing it in the work job would execute
+        orchestrator code a model had just been able to edit, holding a token.
+        """
         text = read(WORKFLOW_DIR / "agentops-worker.yml")
-        self.assertIn("Carry spend and the pull request back to the ledger", text)
-        self.assertIn("--pull-request", text)
+        finalize = text.split("\n  finalize:", 1)[1]
+        self.assertIn("Record spend, the pull request", finalize)
+        self.assertIn("--pull-request", finalize)
+        self.assertIn("cli spend", finalize)
 
     def test_an_ineligible_task_is_refused(self) -> None:
         """Eligibility was computed and then only reported."""

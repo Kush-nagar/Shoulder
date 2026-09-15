@@ -114,13 +114,17 @@ def pull(root: Path) -> dict[str, object]:
 
 
 def changed_files(root: Path) -> list[str]:
-    """State files this run has altered, so a lost race can re-apply them.
+    """State files this run altered *after* pulling, and nothing else.
 
-    Read from `git status` rather than a diff against the branch. A diff sees
-    only tracked modifications: a state file this run *created* would not
-    appear, and re-applying would then silently drop it. A diff also needs the
-    remote-tracking ref to exist locally, which it does not on the first push
-    of a run, and the error was swallowed into "nothing changed".
+    Compared against the index, not against HEAD. `pull` writes the branch's
+    ledger into both the worktree and the index, while HEAD stays on the
+    product branch carrying the seed copies. Diffing against HEAD therefore
+    reported every file that differs from the seed -- almost all of them --
+    so a lost race re-applied stale copies of files this run never touched and
+    erased the winner's changes with them.
+
+    Untracked files are listed separately: a diff cannot see a file this run
+    created, and dropping it would lose it on the same path.
     """
     if remote_ref(root) is None:
         # No branch yet, so everything present is this run's contribution.
@@ -128,36 +132,32 @@ def changed_files(root: Path) -> list[str]:
             str(p.relative_to(root)).replace("\\", "/")
             for p in (root / TRACKED).glob("*.json")
         )
-    listed = _git(root, "status", "--porcelain", "--untracked-files=all", "--", TRACKED)
-    names = []
-    for line in listed.splitlines():
-        if not line.strip():
-            continue
-        # "XY path", and a rename carries "old -> new"; the new name is ours.
-        # Sliced at two, not three: the separator is one space for a tracked
-        # change but the field is fixed-width, and taking three swallowed the
-        # first character of the path.
-        path = line[2:].strip().strip('"')
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-        names.append(path)
+    modified = _git(root, "diff", "--name-only", "--", TRACKED)
+    created = _git(root, "ls-files", "--others", "--exclude-standard", "--", TRACKED)
+    names = [
+        line.strip()
+        for line in (*modified.splitlines(), *created.splitlines())
+        if line.strip()
+    ]
     return sorted(set(names))
 
 
-def push(root: Path, message: str, *, retries: int = 4) -> dict[str, object]:
+def push(root: Path, message: str, *, retries: int = 0) -> dict[str, object]:
     """Commit `ops/state` onto the state branch and push it.
 
-    On a losing race this re-reads the branch, re-applies only the files this
-    run actually changed, and tries again. Files it did not touch keep the
-    other writer's version, which is what a successful rebase used to do.
+    Retries are **off by default**, and that default matters. Re-applying this
+    run's bytes resolves a race only when the two writers touched different
+    files; when they touched the same one it overwrites the winner. Retrying
+    here silently returned success to a caller whose whole loop existed to
+    re-run its mutation against the new state -- so the loop broke, the
+    mutation never re-ran, and the winning lease or repair count was lost by
+    the very mechanism meant to preserve it.
 
-    Two writers changing the *same* file is the case this cannot merge, and
-    there the last writer wins. That is why the callers whose mutation is cheap
-    to repeat -- the worker and the pull-request reaction, which each make one
-    small change -- re-run the mutation themselves against freshly pulled state
-    instead of relying on this. The coordinator cannot: acquiring a lease
-    increments an attempt counter, so re-running it would spend the task's
-    attempt budget on a push race.
+    So a conflict is reported to the caller, which re-runs its own mutation and
+    calls again. Only the coordinator passes `retries`: acquiring a lease
+    increments an attempt counter, so re-running it would spend a task's
+    attempt budget on a push race, and it holds the shared state lock that
+    keeps the other heavy writer away meanwhile.
     """
     mine = {
         name: (root / name).read_bytes()

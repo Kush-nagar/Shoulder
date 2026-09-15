@@ -99,14 +99,19 @@ REVIEW_WINDOW = 50
 def _is_reviewer(review: dict[str, Any], reviewer_login: str | None) -> bool:
     """Whether this review came from the reviewer that was asked.
 
-    Matched as a prefix because an app posts as `name` through GraphQL and
-    `name[bot]` through REST, and the configured value should not have to know
-    which surface produced the record.
+    An exact match against the two spellings GitHub actually uses for an app --
+    `name` through GraphQL and `name[bot]` through REST -- and nothing else.
+
+    It was a prefix test, which is a hole: on a public pull request an account
+    called `chatgpt-codex-connector-evil` could leave a passing `COMMENTED`
+    review, satisfy the wait before the real reviewer answered, and let the
+    required verdict go green with no independent review at all.
     """
     if not reviewer_login:
         return True
     author = str((review.get("author") or {}).get("login") or "").lower()
-    return author.startswith(reviewer_login.lower())
+    expected = reviewer_login.lower().removesuffix("[bot]")
+    return author in (expected, f"{expected}[bot]")
 
 
 def verdict(

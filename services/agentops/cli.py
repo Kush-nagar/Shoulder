@@ -944,7 +944,7 @@ def cmd_state_push(args: argparse.Namespace) -> int:
     here is written to be safe to repeat.
     """
     try:
-        result = statebranch.push(_root(args), args.message)
+        result = statebranch.push(_root(args), args.message, retries=args.retries)
     except statebranch.StateBranchError as failure:
         _emit({"pushed": False, "reason": str(failure)})
         return 1
@@ -1160,6 +1160,14 @@ def build_parser() -> argparse.ArgumentParser:
         "state-push", help="write the runtime ledger to the state branch"
     )
     state_push.add_argument("--message", required=True)
+    state_push.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        help="re-apply this run's files and try again on a lost race. Only for "
+        "a caller that cannot re-run its own mutation; re-applying overwrites "
+        "the winner when both writers touched the same file.",
+    )
     state_push.set_defaults(func=cmd_state_push)
 
     sub.add_parser(

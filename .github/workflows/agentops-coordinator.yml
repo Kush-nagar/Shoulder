@@ -140,7 +140,7 @@ jobs:
           # attempt counter, and re-running it would spend the task's attempt
           # budget on a push race.
           uv run --locked python -m services.agentops.cli state-push \
-            --message 'Update the agentops runtime ledger'
+            --retries 4 --message 'Update the agentops runtime ledger'
 
       - name: Hand the task to its lane
         if: steps.lease.outputs.acquired == 'true'
@@ -180,7 +180,7 @@ jobs:
           set -euo pipefail
           uv run --locked python -m services.agentops.cli validate
           uv run --locked python -m services.agentops.cli state-push \
-            --message 'Record the task hand-off'
+            --retries 4 --message 'Record the task hand-off'
 
       - name: Report to the activity feed
         # Runs even when planning failed, so it must not assume plan.json exists.

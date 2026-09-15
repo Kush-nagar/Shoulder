@@ -48,6 +48,12 @@ DISCIPLINE = """## Working rules
 - Use these domain words exactly: `observation`, `judgment`, `review_publication`,
   `player_reflection`, `development_goal`, `evidence_clip`.
 - Never commit secrets, `.env.remote`, or machine-specific artefacts.
+- Never change `ops/policy.json`, `.github/workflows/`, `AGENTS.md`, or
+  `CODEOWNERS`. Those decide what this system is allowed to do -- routing,
+  budgets, banned providers, the human gates, and the checks themselves. Both
+  required checks are automated, so a branch that edited them would be granting
+  itself the permission. The merge gate refuses such a branch outright; if the
+  task seems to need one, say so in the pull request and stop.
 - Never weaken, skip, or mark expected-failure any load-bearing test in `AGENTS.md`.
 - Run the named verification below, plus lint and type checks for what you touched.
 - Commit at coherent points. If you run out of room, leave the tree working.
