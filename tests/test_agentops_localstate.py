@@ -95,16 +95,27 @@ class TestLiveness(LocalStateCase):
         self.assertTrue(localstate.process_alive(os.getpid()))
 
     def test_an_absent_process_is_not_alive(self) -> None:
-        self.assertFalse(localstate.process_alive(4_000_000_000))
+        self.assertFalse(localstate.process_alive(999_999))
 
     def test_no_pid_is_not_alive(self) -> None:
         self.assertFalse(localstate.process_alive(None))
         self.assertFalse(localstate.process_alive(0))
 
+    @unittest.skipUnless(
+        sys.platform == "win32" or Path("/proc/self/comm").exists(),
+        "the platform does not expose a process name",
+    )
     def test_a_reused_pid_running_another_image_is_not_our_worker(self) -> None:
+        """An unrelated process that inherited the number is not the worker,
+        and calling it alive would leave a finished task leased forever."""
         self.assertFalse(
             localstate.process_alive(os.getpid(), image="definitely-not.exe")
         )
+
+    def test_a_pid_beyond_the_platform_limit_is_not_alive(self) -> None:
+        """Larger than pid_t is a number, not a process. It must answer the
+        question rather than raise inside the recovery sweep."""
+        self.assertFalse(localstate.process_alive(4_000_000_000))
 
     @unittest.skipUnless(sys.platform == "win32", "Windows liveness path")
     def test_windows_liveness_never_calls_os_kill(self) -> None:

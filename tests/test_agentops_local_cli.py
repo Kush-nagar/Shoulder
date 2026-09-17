@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agentops_fixtures import REPO_ROOT
+from agentops_fixtures import REPO_ROOT, installed_harnesses
 
 from services.agentops import cli, local, localstate
 
@@ -48,6 +48,7 @@ class CliCase(unittest.TestCase):
             json.dumps({"leases": {}}), encoding="utf-8"
         )
         self.paths = localstate.ensure(localstate.LocalPaths(self.root))
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
 
     def run_cli(self, *args: str) -> dict[str, Any]:
         out = io.StringIO()
@@ -92,7 +93,7 @@ class TestProviderSwitching(CliCase):
         self.assertNotIn("sk-or-cli", stored)
 
     def test_switching_back_to_claude_needs_no_key(self) -> None:
-        with mock.patch.dict(os.environ, {"PATH": os.environ.get("PATH", "")}):
+        with mock.patch.dict(os.environ, {}, clear=True):
             payload = self.run_cli("provider", "claude")
         self.assertEqual(payload["provider"], "claude")
         self.assertEqual(payload["harness"], "claude-cli")
@@ -109,7 +110,7 @@ class TestReadOnlyVerbs(CliCase):
         localstate.save_worker(
             self.paths,
             "15",
-            {"task_id": 15, "phase": "implementing", "pid": 4_000_000_000},
+            {"task_id": 15, "phase": "implementing", "pid": 999_999},
         )
         payload = self.run_cli("resume")
         self.assertEqual(payload["workers"][0]["state"], "interrupted")

@@ -392,7 +392,12 @@ def run(
     if isinstance(executor, OpenCodeExecutor):
         executor.write_config(run_dir, role)
 
-    ok, reason = executor.available()
+    # A caller that supplies its own launcher has supplied the harness, so
+    # there is nothing to probe for. Probing anyway made every injected run
+    # depend on what happens to be installed on the machine.
+    ok, reason = (
+        (True, "launcher supplied by the caller") if popen else executor.available()
+    )
     if not ok:
         localstate.append_event(
             paths, "worker_unavailable", run_id=run_id, harness=executor.name

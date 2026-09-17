@@ -263,7 +263,28 @@ def process_alive(pid: int | None, image: str | None = None) -> bool:
     except PermissionError:
         # Running, owned by somebody else.
         return True
-    return True
+    except (OverflowError, ValueError, OSError):
+        # A pid larger than the platform's pid_t is not a running process; it
+        # is a number. Treating the overflow as an error would crash the
+        # recovery sweep instead of answering its question.
+        return False
+    return _image_matches_posix(pid, image)
+
+
+def _image_matches_posix(pid: int, image: str | None) -> bool:
+    """Guard against pid reuse where the platform will tell us the name.
+
+    Linux exposes it; other unixes may not, and there the pid alone is the
+    best answer available rather than a reason to call a live worker dead.
+    """
+    if not image:
+        return True
+    comm = Path(f"/proc/{pid}/comm")
+    try:
+        name = comm.read_text(encoding="utf-8").strip()
+    except OSError:
+        return True
+    return name.lower() in image.lower() or image.lower() in name.lower()
 
 
 def _alive_windows(pid: int, image: str | None) -> bool:

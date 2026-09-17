@@ -214,21 +214,45 @@ class TestAvailability(ExecutorCase):
         self.assertEqual(report["opencode"]["status"], "AVAILABLE_LATER")
         self.assertIn("claude-cli", report)
 
-    def test_an_unavailable_harness_fails_the_run_without_spawning(self) -> None:
+    def test_an_unavailable_harness_fails_the_run_rather_than_starting_one(
+        self,
+    ) -> None:
+        """No launcher is injected here on purpose: this is the real path, and
+        it must refuse before it reaches a process."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.object(shutil, "which", return_value=None):
+                with mock.patch.object(executors.subprocess, "Popen") as spawn:
+                    result = executors.run(
+                        executors.OpenCodeExecutor(),
+                        self.paths,
+                        prompt="p",
+                        model="deepseek/deepseek-v3",
+                        role="implement",
+                        worktree=self.worktree,
+                        budget=BUDGET,
+                    )
+        spawn.assert_not_called()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["outcome"], "harness_unavailable")
+
+    def test_an_injected_launcher_is_the_harness_and_is_not_probed(self) -> None:
+        """A caller that supplies the launcher has supplied the harness, so
+        the run must not depend on what is installed on the machine."""
         with mock.patch.dict(os.environ, {}, clear=True):
             with mock.patch.object(shutil, "which", return_value=None):
                 result = executors.run(
-                    executors.OpenCodeExecutor(),
+                    executors.ClaudeCliExecutor(),
                     self.paths,
                     prompt="p",
-                    model="deepseek/deepseek-v3",
+                    model="claude-sonnet-5",
                     role="implement",
                     worktree=self.worktree,
                     budget=BUDGET,
-                    popen=lambda *a, **k: self.fail("must not spawn"),
+                    popen=lambda *a, **k: FakeProcess(
+                        [json.dumps({"type": "result", "subtype": "success"})]
+                    ),
                 )
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["outcome"], "harness_unavailable")
+        self.assertTrue(result["ok"])
 
 
 class FakeProcess:
@@ -380,7 +404,7 @@ class TestRecoveryAcrossHarnesses(ExecutorCase):
     def test_an_interrupted_opencode_worker_is_recognised_as_gone(self) -> None:
         self.assertFalse(
             localstate.process_alive(
-                4_000_000_000, executors.worker_image(executors.OpenCodeExecutor())
+                999_999, executors.worker_image(executors.OpenCodeExecutor())
             )
         )
 

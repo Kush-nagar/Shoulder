@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agentops_fixtures import REPO_ROOT
+from agentops_fixtures import REPO_ROOT, installed_harnesses
 
 from services.agentops import dashboard, governance, local, localstate, state
 
@@ -49,6 +49,7 @@ class AuthorizationCase(unittest.TestCase):
         self.policy_path = self.root / "ops" / "policy.json"
         self.policy_before = self.policy_path.read_text(encoding="utf-8")
         self.paths = localstate.ensure(localstate.LocalPaths(self.root))
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
 
     def policy(self) -> dict[str, Any]:
         loaded: dict[str, Any] = json.loads(

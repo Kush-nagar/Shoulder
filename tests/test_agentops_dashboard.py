@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agentops_fixtures import REPO_ROOT
+from agentops_fixtures import REPO_ROOT, installed_harnesses
 
 from services.agentops import dashboard, localstate
 
@@ -48,6 +48,7 @@ class DashboardCase(unittest.TestCase):
             json.dumps({"leases": {}}), encoding="utf-8"
         )
         self.paths = localstate.ensure(localstate.LocalPaths(self.root))
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
         localstate.save_worker(
             self.paths,
             "15",

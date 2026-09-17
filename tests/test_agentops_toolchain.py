@@ -31,7 +31,8 @@ class ToolchainCase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
         self.paths = localstate.ensure(localstate.LocalPaths(self.root))
-        self.binary = self.root / "tools" / "uv.exe"
+        self.uv_name = toolchain._binary_names()[0]
+        self.binary = self.root / "tools" / self.uv_name
         self.binary.parent.mkdir(parents=True, exist_ok=True)
         self.binary.write_text("", encoding="utf-8")
         self.env = mock.patch.dict(os.environ, {}, clear=False)
@@ -72,7 +73,7 @@ class TestResolvingUv(ToolchainCase):
         )
 
     def test_the_environment_override_is_tried_before_anything_else(self) -> None:
-        repo_tools = self.root / ".tools" / "uv.exe"
+        repo_tools = self.root / ".tools" / self.uv_name
         repo_tools.parent.mkdir(parents=True, exist_ok=True)
         repo_tools.write_text("", encoding="utf-8")
         os.environ[toolchain.UV_ENV_OVERRIDE] = str(self.binary)
@@ -80,7 +81,7 @@ class TestResolvingUv(ToolchainCase):
         self.assertEqual(order[0], f"${toolchain.UV_ENV_OVERRIDE}")
 
     def test_configuration_is_tried_before_the_repository_copy(self) -> None:
-        repo_tools = self.root / ".tools" / "uv.exe"
+        repo_tools = self.root / ".tools" / self.uv_name
         repo_tools.parent.mkdir(parents=True, exist_ok=True)
         repo_tools.write_text("", encoding="utf-8")
         sources = [
@@ -98,7 +99,7 @@ class TestResolvingUv(ToolchainCase):
         while the checkout next door does."""
         sibling = self.root.parent / (self.root.name + "-sibling")
         (sibling / ".tools").mkdir(parents=True, exist_ok=True)
-        (sibling / ".tools" / "uv.exe").write_text("", encoding="utf-8")
+        (sibling / ".tools" / self.uv_name).write_text("", encoding="utf-8")
         self.addCleanup(
             lambda: __import__("shutil").rmtree(sibling, ignore_errors=True)
         )
@@ -111,7 +112,7 @@ class TestResolvingUv(ToolchainCase):
         self.assertIn(f"worktree {sibling.name}", sources)
 
     def test_a_missing_candidate_is_skipped_not_fatal(self) -> None:
-        os.environ[toolchain.UV_ENV_OVERRIDE] = str(self.root / "nope" / "uv.exe")
+        os.environ[toolchain.UV_ENV_OVERRIDE] = str(self.root / "nope" / self.uv_name)
         with self.assertRaises(toolchain.UvUnavailable) as raised:
             toolchain.resolve_uv(self.root, self.paths, probe=lambda p: "uv 0.11.28")
         self.assertIn("missing", str(raised.exception))
@@ -142,7 +143,7 @@ class TestTheInfrastructureLock(ToolchainCase):
             json.dumps(
                 {
                     "owner": "crashed",
-                    "pid": 4_000_000_000,
+                    "pid": 999_999,
                     "started_at": localstate.now(),
                 }
             ),
@@ -170,7 +171,7 @@ class TestTheInfrastructureLock(ToolchainCase):
     def test_recovering_a_lock_is_recorded_as_an_event(self) -> None:
         self.paths.locks.mkdir(parents=True, exist_ok=True)
         (self.paths.locks / toolchain.LOCK_NAME).write_text(
-            json.dumps({"owner": "crashed", "pid": 4_000_000_000}), encoding="utf-8"
+            json.dumps({"owner": "crashed", "pid": 999_999}), encoding="utf-8"
         )
         with toolchain.infra_lock(self.paths, owner="b"):
             pass

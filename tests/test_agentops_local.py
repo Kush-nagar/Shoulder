@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agentops_fixtures import REPO_ROOT
+from agentops_fixtures import REPO_ROOT, installed_harnesses
 
 from services.agentops import local, localstate
 
@@ -47,6 +47,7 @@ class LocalCase(unittest.TestCase):
         self.config["worktree_root"] = str(Path(self.tmp.name) / "agents")
         self.worktree = Path(self.tmp.name) / "agents" / "wt"
         self.worktree.mkdir(parents=True)
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
 
 
 class TestTheExecutorCommandLine(LocalCase):
@@ -122,14 +123,14 @@ class TestProviderSelection(LocalCase):
     def test_openrouter_needs_its_harness_installed_as_well_as_a_key(self) -> None:
         """A key with no OpenCode on PATH is still not something that can run."""
         with mock.patch.dict(os.environ, {local.OPENROUTER_KEY_ENV: "sk-or-live"}):
-            with mock.patch.object(shutil, "which", return_value=None):
+            with installed_harnesses(claude=True, opencode=False):
                 status = local.provider_status({"provider": "openrouter"})
         self.assertEqual(status["status"], "AVAILABLE_LATER")
         self.assertIn("opencode-ai", status["reason"])
 
     def test_openrouter_is_available_with_both_the_key_and_the_harness(self) -> None:
         with mock.patch.dict(os.environ, {local.OPENROUTER_KEY_ENV: "sk-or-live"}):
-            with mock.patch.object(shutil, "which", return_value="C:/bin/opencode.cmd"):
+            with installed_harnesses(claude=True, opencode=True):
                 status = local.provider_status({"provider": "openrouter"})
         self.assertEqual(status["status"], "AVAILABLE")
 
@@ -444,6 +445,7 @@ class TestTheWriterCap(LoopCase):
         """max_parallel_writers is 1 in the shipped policy. A second writer is
         refused by the existing lease module, not by a local reimplementation."""
         local.enable_local(self.paths, by="test")
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
         localstate.write(
             self.paths.leases,
             {
@@ -678,7 +680,7 @@ class TestRecovery(LoopCase):
     def test_a_worker_whose_process_is_gone_mid_phase_is_interrupted(self) -> None:
         wt = Path(self.tmp.name) / "agents" / "block-15"
         wt.mkdir(parents=True)
-        self.worker(pid=4_000_000_000, phase="implementing", worktree=str(wt))
+        self.worker(pid=999_999, phase="implementing", worktree=str(wt))
         report = local.recover(self.root, self.paths)
         self.assertEqual(report["workers"][0]["state"], "interrupted")
 
@@ -688,12 +690,12 @@ class TestRecovery(LoopCase):
         wt = Path(self.tmp.name) / "agents" / "block-15"
         wt.mkdir(parents=True)
         (wt / "partial.py").write_text("half\n", encoding="utf-8")
-        self.worker(pid=4_000_000_000, phase="implementing", worktree=str(wt))
+        self.worker(pid=999_999, phase="implementing", worktree=str(wt))
         local.recover(self.root, self.paths)
         self.assertTrue((wt / "partial.py").exists())
 
     def test_a_finished_worker_is_not_reported_as_interrupted(self) -> None:
-        self.worker(pid=4_000_000_000, phase="completed", finished_at=localstate.now())
+        self.worker(pid=999_999, phase="completed", finished_at=localstate.now())
         report = local.recover(self.root, self.paths)
         self.assertEqual(report["workers"][0]["state"], "finished")
 
@@ -704,7 +706,7 @@ class TestRecovery(LoopCase):
         self.assertEqual(report["workers"][0]["state"], "running")
 
     def test_recovery_records_what_it_found(self) -> None:
-        self.worker(pid=4_000_000_000, phase="implementing")
+        self.worker(pid=999_999, phase="implementing")
         local.recover(self.root, self.paths)
         self.assertIn("recovery", [e["kind"] for e in localstate.events(self.paths)])
 

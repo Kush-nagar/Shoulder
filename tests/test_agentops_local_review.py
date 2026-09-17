@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agentops_fixtures import REPO_ROOT
+from agentops_fixtures import REPO_ROOT, installed_harnesses
 
 from services.agentops import local, localstate
 
@@ -89,6 +89,10 @@ class ReviewLoopCase(unittest.TestCase):
         config["worktree_root"] = str(Path(self.tmp.name) / "agents")
         localstate.save_config(self.paths, config)
         local.enable_local(self.paths, by="test")
+        # Routing excludes a lane whose harness is absent, and CI has
+        # neither installed. Say what is installed rather than depending
+        # on the runner.
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
 
     def run_loop(
         self,

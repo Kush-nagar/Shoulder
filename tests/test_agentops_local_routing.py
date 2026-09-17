@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agentops_fixtures import REPO_ROOT
+from agentops_fixtures import REPO_ROOT, installed_harnesses
 
 from services.agentops import approvals, cli, coordinator, local, localstate
 
@@ -73,13 +73,14 @@ class RoutingCase(unittest.TestCase):
         self.ctx.tasks = local.load_leases(self.root, self.paths)
         self.candidate = coordinator.next_eligible(self.ctx)
         self.store = approvals.load(self.paths)
+        self.enterContext(installed_harnesses(claude=True, opencode=False))
 
 
 class TestHarnessAvailabilityShapesTheChoice(RoutingCase):
     def test_a_lane_whose_harness_is_missing_is_excluded(self) -> None:
         """Choosing a lane that cannot start wastes an attempt on discovering
         the harness is not installed."""
-        with mock.patch.object(shutil, "which", return_value=None):
+        with installed_harnesses(claude=False, opencode=False):
             unusable = local.unavailable_lanes(self.ctx.policy)
         self.assertIn("openrouter", unusable)
         self.assertIn("claude_subscription", unusable)
@@ -89,7 +90,7 @@ class TestHarnessAvailabilityShapesTheChoice(RoutingCase):
         self.assertIn("codex_cloud", unusable)
         self.assertIn("cloud", unusable["codex_cloud"])
 
-    def test_native_claude_is_usable_on_this_machine(self) -> None:
+    def test_an_installed_harness_leaves_its_lane_usable(self) -> None:
         unusable = local.unavailable_lanes(self.ctx.policy)
         self.assertNotIn("claude_subscription", unusable)
 

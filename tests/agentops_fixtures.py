@@ -6,9 +6,13 @@ behaviour, not whatever the live catalogue happens to contain today.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import shutil
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from services.agentops import backlog, catalog
 
@@ -152,3 +156,29 @@ def make_stale(lease: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any
     lease["heartbeat_at"] = past.isoformat(timespec="seconds")
     lease["acquired_at"] = past.isoformat(timespec="seconds")
     return lease
+
+
+@contextlib.contextmanager
+def installed_harnesses(
+    *, claude: bool = True, opencode: bool = False
+) -> Iterator[None]:
+    """Pin which coding harnesses look installed.
+
+    Local routing excludes a lane whose harness is not on this machine, which
+    is right in production and wrong in a test: the answer would then depend on
+    whether the runner happens to have Claude Code or OpenCode installed. CI
+    has neither. Tests that care about routing say what is installed.
+    """
+    real = shutil.which
+
+    def which(name: str, *args: Any, **kwargs: Any) -> str | None:
+        base = Path(str(name)).name.lower()
+        if base.startswith("claude"):
+            return "/usr/bin/claude" if claude else None
+        if base.startswith("opencode"):
+            return "/usr/bin/opencode" if opencode else None
+        found: str | None = real(name, *args, **kwargs)
+        return found
+
+    with mock.patch.object(shutil, "which", side_effect=which):
+        yield
