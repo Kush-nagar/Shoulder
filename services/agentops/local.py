@@ -1092,12 +1092,17 @@ def run_once(
     # is already finished and waiting for a pull request.
     settled = settled_locally(ctx.tasks, candidate.task.id)
     if settled:
+        waiting = (
+            "it is waiting for its pull request"
+            if settled == "ready_for_pr"
+            else "it verified without review and is not eligible for a pull request"
+        )
         return {
             "dispatched": False,
             "task_id": candidate.task.id,
             "reason": (
                 f"task {candidate.task.id} is {settled} locally; "
-                "it is waiting for its pull request, not for another worker"
+                f"{waiting}, not for another worker"
             ),
         }
 
