@@ -65,11 +65,15 @@ class TestSecretsNeverReachDisk(LocalStateCase):
 class TestDurability(LocalStateCase):
     def test_a_truncated_document_reads_as_the_default(self) -> None:
         self.paths.workers.write_text("{not json", encoding="utf-8")
-        self.assertEqual(localstate.read(self.paths.workers, {"workers": {}}), {"workers": {}})
+        self.assertEqual(
+            localstate.read(self.paths.workers, {"workers": {}}), {"workers": {}}
+        )
 
     def test_writing_leaves_no_temporary_file_behind(self) -> None:
         localstate.write(self.paths.workers, {"workers": {}})
-        leftovers = [p.name for p in self.paths.dir.iterdir() if p.name.endswith(".tmp")]
+        leftovers = [
+            p.name for p in self.paths.dir.iterdir() if p.name.endswith(".tmp")
+        ]
         self.assertEqual(leftovers, [])
 
     def test_configuration_defaults_survive_a_partial_file(self) -> None:
@@ -98,7 +102,9 @@ class TestLiveness(LocalStateCase):
         self.assertFalse(localstate.process_alive(0))
 
     def test_a_reused_pid_running_another_image_is_not_our_worker(self) -> None:
-        self.assertFalse(localstate.process_alive(os.getpid(), image="definitely-not.exe"))
+        self.assertFalse(
+            localstate.process_alive(os.getpid(), image="definitely-not.exe")
+        )
 
     @unittest.skipUnless(sys.platform == "win32", "Windows liveness path")
     def test_windows_liveness_never_calls_os_kill(self) -> None:
@@ -109,8 +115,8 @@ class TestLiveness(LocalStateCase):
         killed.assert_not_called()
 
     def test_windows_liveness_reads_tasklist(self) -> None:
-        with mock.patch.object(localstate.sys, "platform", "win32"):
-            with mock.patch.object(localstate.subprocess, "run") as run:
+        with mock.patch.object(sys, "platform", "win32"):
+            with mock.patch.object(subprocess, "run") as run:
                 run.return_value = mock.Mock(stdout='"python.exe","4242"')
                 self.assertTrue(localstate.process_alive(4242, image="python.exe"))
         self.assertEqual(run.call_args.args[0][0], "tasklist")

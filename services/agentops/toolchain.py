@@ -202,12 +202,10 @@ def needs_infra_lock(command: list[str]) -> bool:
 
 
 def _lock_is_stale(holder: dict[str, Any], ttl_seconds: int) -> tuple[bool, str]:
-    pid = holder.get("pid")
-    if not localstate.process_alive(
-        int(pid) if isinstance(pid, int) or str(pid).isdigit() else None,
-        holder.get("image"),
-    ):
-        return True, f"owner pid {pid} is gone"
+    raw = str(holder.get("pid") or "")
+    pid = int(raw) if raw.isdigit() else None
+    if not localstate.process_alive(pid, holder.get("image")):
+        return True, f"owner pid {raw} is gone"
     started = holder.get("started_at")
     try:
         began = datetime.fromisoformat(str(started))
@@ -269,9 +267,7 @@ def infra_lock(
         }
         lock_path.unlink(missing_ok=True)
         claim()
-        localstate.append_event(
-            paths, "infra_lock_recovered", owner=owner, reason=why
-        )
+        localstate.append_event(paths, "infra_lock_recovered", owner=owner, reason=why)
 
     try:
         yield payload

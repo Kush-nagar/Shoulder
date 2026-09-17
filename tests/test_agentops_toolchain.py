@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,7 +63,9 @@ class TestResolvingUv(ToolchainCase):
 
     def test_a_matching_binary_is_accepted_and_cached(self) -> None:
         os.environ[toolchain.UV_ENV_OVERRIDE] = str(self.binary)
-        found = toolchain.resolve_uv(self.root, self.paths, probe=lambda p: "uv 0.12.10")
+        found = toolchain.resolve_uv(
+            self.root, self.paths, probe=lambda p: "uv 0.12.10"
+        )
         self.assertEqual(found, self.binary)
         self.assertEqual(
             localstate.load_config(self.paths)["uv_path"], str(self.binary)
@@ -96,9 +99,11 @@ class TestResolvingUv(ToolchainCase):
         sibling = self.root.parent / (self.root.name + "-sibling")
         (sibling / ".tools").mkdir(parents=True, exist_ok=True)
         (sibling / ".tools" / "uv.exe").write_text("", encoding="utf-8")
-        self.addCleanup(lambda: __import__("shutil").rmtree(sibling, ignore_errors=True))
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(sibling, ignore_errors=True)
+        )
         listing = f"worktree {self.root}\n\nworktree {sibling}\n"
-        with mock.patch.object(toolchain.subprocess, "run") as run:
+        with mock.patch.object(subprocess, "run") as run:
             run.return_value = mock.Mock(stdout=listing, returncode=0)
             sources = dict(
                 (source, path) for source, path in toolchain.candidates(self.root, {})
@@ -135,7 +140,11 @@ class TestTheInfrastructureLock(ToolchainCase):
         self.paths.locks.mkdir(parents=True, exist_ok=True)
         (self.paths.locks / toolchain.LOCK_NAME).write_text(
             json.dumps(
-                {"owner": "crashed", "pid": 4_000_000_000, "started_at": localstate.now()}
+                {
+                    "owner": "crashed",
+                    "pid": 4_000_000_000,
+                    "started_at": localstate.now(),
+                }
             ),
             encoding="utf-8",
         )
@@ -180,7 +189,9 @@ class TestWhatTheLockCovers(unittest.TestCase):
 
     def test_lightweight_checks_run_unlocked(self) -> None:
         """Serialising these would make two workers sequential for no reason."""
-        self.assertFalse(toolchain.needs_infra_lock(["uv", "run", "ruff", "check", "."]))
+        self.assertFalse(
+            toolchain.needs_infra_lock(["uv", "run", "ruff", "check", "."])
+        )
         self.assertFalse(
             toolchain.needs_infra_lock(["uv", "run", "python", "-m", "unittest"])
         )
@@ -194,9 +205,7 @@ class TestRunningChecks(ToolchainCase):
             calls.append(command)
             return mock.Mock(returncode=1, stdout="boom", stderr="")
 
-        result = toolchain.run_commands(
-            self.root, [["a"], ["b"]], runner=runner
-        )
+        result = toolchain.run_commands(self.root, [["a"], ["b"]], runner=runner)
         self.assertFalse(result["ok"])
         self.assertEqual(result["failed"], ["a"])
         self.assertEqual(calls, [["a"]])

@@ -190,7 +190,8 @@ def load_config(paths: LocalPaths) -> dict[str, Any]:
     config.update({k: v for k, v in stored.items() if k != "roles"})
     for role, budget in (stored.get("roles") or {}).items():
         config["roles"][role] = {**config["roles"].get(role, {}), **budget}
-    return config
+    merged: dict[str, Any] = config
+    return merged
 
 
 def save_config(paths: LocalPaths, config: dict[str, Any]) -> None:
@@ -198,10 +199,14 @@ def save_config(paths: LocalPaths, config: dict[str, Any]) -> None:
     write(paths.config, config)
 
 
-def append_event(paths: LocalPaths, kind: str, **fields: Any) -> dict[str, Any]:
-    """Append one structured event to the stream and return it."""
+def append_event(paths: LocalPaths, kind: str, /, **fields: Any) -> dict[str, Any]:
+    """Append one structured event to the stream and return it.
+
+    `kind` is positional-only so a caller may record a field of its own
+    called `kind` without colliding with this parameter.
+    """
     ensure(paths)
-    event = redact({"at": now(), "kind": kind, **fields})
+    event: dict[str, Any] = redact({"at": now(), "kind": kind, **fields})
     with paths.events.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(json.dumps(event, sort_keys=True) + "\n")
     return event
@@ -268,7 +273,8 @@ def _alive_windows(pid: int, image: str | None) -> bool:
 
 
 def worker_records(paths: LocalPaths) -> dict[str, Any]:
-    return read(paths.workers, {"workers": {}}).get("workers", {})
+    records: dict[str, Any] = read(paths.workers, {"workers": {}}).get("workers", {})
+    return records
 
 
 def save_worker(paths: LocalPaths, key: str, record: dict[str, Any]) -> None:
