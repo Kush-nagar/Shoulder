@@ -11,7 +11,7 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet('start', 'stop', 'status', 'resume', 'dashboard', 'doctor',
-                 'dry-run', 'models', 'evaluate')]
+                 'dry-run', 'models', 'evaluate', 'project')]
     [string]$Command = 'status',
 
     [switch]$Once,
@@ -19,7 +19,9 @@ param(
     [string[]]$Models,
     [ValidateSet('fast', 'gated')]
     [string]$Verification = 'fast',
-    [int]$Port
+    [int]$Port,
+    [string]$Repo,
+    [int]$MaxTasks
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,6 +54,16 @@ switch ($Command) {
         $arguments = @('run', '--enable', '--iterations', "$Iterations",
                        '--verification', $Verification)
         if ($Once) { $arguments += '--once' }
+        Invoke-AgentOps $arguments
+    }
+    'project' {
+        # Works the canonical backlog end to end: implement, review, verify,
+        # pull request, required CI, required review, repair, merge, reconcile,
+        # next task. It stops on a named blocker rather than improvising, and
+        # never force-merges, resets, stashes or discards anything.
+        $arguments = @('project', '--verification', $Verification)
+        if ($Repo) { $arguments += @('--repo', $Repo) }
+        if ($MaxTasks) { $arguments += @('--max-tasks', "$MaxTasks") }
         Invoke-AgentOps $arguments
     }
     'stop' { Invoke-AgentOps @('stop') }

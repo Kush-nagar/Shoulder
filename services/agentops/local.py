@@ -56,16 +56,35 @@ OPENCODE_BINARY = executors.OPENCODE_BINARY
 OPENROUTER_BASE_URL = executors.OPENROUTER_BASE_URL
 OPENROUTER_KEY_ENV = executors.OPENROUTER_KEY_ENV
 
-PROVIDERS = ("claude", "openrouter", "auto")
+PROVIDERS = ("claude", "openrouter", "auto", "claude-first")
 
 # What the operator's provider choice means for lane selection. Without this
 # the setting only changed a status line: routing still walked every policy
 # lane in priority order, so choosing `openrouter` kept running Claude.
+#
+# `claude-first` permits the same two lanes as `auto`. The difference is not
+# which lanes may run but what happens when the subscription allowance runs
+# out mid-task: see `failover_on_exhaustion`.
 PROVIDER_LANES: dict[str, tuple[str, ...]] = {
     "claude": ("claude_subscription",),
     "openrouter": ("openrouter",),
     "auto": ("claude_subscription", "openrouter"),
+    "claude-first": ("claude_subscription", "openrouter"),
 }
+
+CLAUDE_LANE = "claude_subscription"
+
+# The subscription's rolling allowance window, used when the harness does not
+# print an explicit reset instant. Five hours is what Claude meters against and
+# what policy already records for the other subscription lane; coming back too
+# late costs one delay, coming back too early costs one wasted attempt.
+DEFAULT_USAGE_WINDOW_SECONDS = 18000
+
+# How many times one task may change lane because a provider ran out. It is not
+# a retry budget -- no attempt is spent -- but an unbounded loop between two
+# exhausted lanes would still spin, so it is bounded by the number of lanes
+# there are to move between.
+MAX_PROVIDER_FAILOVERS = 3
 
 # Which installed capability a worker is pointed at, by role. This is a note in
 # the brief, not a framework: the skills already exist, and naming every one of
@@ -221,6 +240,98 @@ def lanes_excluded_by_provider(
     }
 
 
+def failover_on_exhaustion(config: Mapping[str, Any]) -> bool:
+    """Whether a lane that runs out of allowance may hand the task to another.
+
+    Expressed as "the operator permitted more than one lane" rather than as a
+    test for one mode name, so `auto` gets the same behaviour it would obviously
+    want and a future mode does not have to be added here as well.
+    """
+    return len(provider_lanes(config)) > 1
+
+
+def local_provider_health(paths: localstate.LocalPaths) -> dict[str, str]:
+    """Lane health as this machine observed it, cooldowns already expired.
+
+    The tracked ledger under `ops/state` belongs to the cloud loop and is never
+    written here, so an exhaustion seen locally is recorded locally. The shape
+    is identical, which is why `state.provider_health` reads it unchanged --
+    including the rule that a cooldown whose reset has passed is available
+    again, which is what makes Claude preferred once more.
+    """
+    return state.provider_health(localstate.read(paths.providers, {"lanes": {}}))
+
+
+def merge_local_health(paths: localstate.LocalPaths, ctx: Any) -> dict[str, str]:
+    """Fold locally observed health into the context the router will read.
+
+    A merge rather than a replacement: the tracked record also carries the
+    privacy confirmation and the lane qualification, and dropping those to
+    record a cooldown would make the lane ineligible for the wrong reason.
+    """
+    observed = localstate.read(paths.providers, {"lanes": {}}).get("lanes", {})
+    lanes = ctx.providers.setdefault("lanes", {})
+    for lane, record in observed.items():
+        lanes.setdefault(lane, {}).update(record)
+    return state.provider_health(ctx.providers)
+
+
+def mark_lane_exhausted(
+    paths: localstate.LocalPaths,
+    lane: str,
+    *,
+    policy: Mapping[str, Any] | None = None,
+    reset_at: str = "",
+    reason: str = "",
+) -> dict[str, Any]:
+    """Put one lane into cooldown locally because its allowance ran out.
+
+    This is the existing cooldown mechanism, written to the local ledger: the
+    same `COOLDOWN` status, the same `reset_at`, and therefore the same
+    automatic return to the pool when the window passes. Nothing about the task
+    -- its lease, its branch, its worktree, its base commit or its repair
+    budget -- is touched, because none of that went wrong.
+    """
+    lanes = (policy or {}).get("lanes") or {}
+    window = int(
+        (lanes.get(lane) or {}).get(
+            "usage_window_seconds", DEFAULT_USAGE_WINDOW_SECONDS
+        )
+    )
+    if not reset_at:
+        reset_at = (datetime.now(UTC) + timedelta(seconds=window)).isoformat(
+            timespec="seconds"
+        )
+    providers = localstate.read(paths.providers, {"lanes": {}})
+    state.mark_provider(
+        providers,
+        lane,
+        "COOLDOWN",
+        reason=reason or "provider allowance appears exhausted",
+        reset_at=reset_at,
+    )
+    localstate.write(paths.providers, providers)
+    localstate.append_event(
+        paths,
+        "provider_exhausted",
+        lane=lane,
+        reset_at=reset_at,
+        reason=reason,
+    )
+    return {"lane": lane, "reset_at": reset_at, "reason": reason}
+
+
+def provider_cooldowns(paths: localstate.LocalPaths) -> dict[str, str]:
+    """Each lane still cooling down, and when it comes back."""
+    stored = localstate.read(paths.providers, {"lanes": {}}).get("lanes", {})
+    health = local_provider_health(paths)
+    return {
+        lane: str(stored.get(lane, {}).get("reset_at") or "")
+        for lane, status in health.items()
+        if status == "COOLDOWN"
+    }
+
+
 def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
     """Whether the configured provider can actually run right now.
 
@@ -237,16 +348,19 @@ def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
             "harness": "",
             "reason": f"unknown provider; expected one of {', '.join(PROVIDERS)}",
         }
-    if provider == "auto":
+    if provider in ("auto", "claude-first"):
         report = executors.availability()
         usable = [name for name, row in report.items() if row["available"]]
+        preference = (
+            "Claude while its allowance lasts, then an approved OpenRouter model"
+            if provider == "claude-first"
+            else "either lane may run"
+        )
         return {
-            "provider": "auto",
+            "provider": provider,
             "harness": ", ".join(usable) or "none",
             "status": "AVAILABLE" if usable else "AVAILABLE_LATER",
-            "reason": (
-                f"either lane may run; installed: {', '.join(usable) or 'none'}"
-            ),
+            "reason": f"{preference}; installed: {', '.join(usable) or 'none'}",
             "lanes": list(provider_lanes(config)),
         }
     executor = executors.for_lane(
@@ -952,7 +1066,7 @@ def _record(paths: localstate.LocalPaths, task_id: int, /, **fields: Any) -> Non
     localstate.save_worker(paths, str(task_id), fields)
 
 
-def _implement(
+def implement_once(
     root: Path,
     paths: localstate.LocalPaths,
     *,
@@ -1003,6 +1117,112 @@ def _implement(
         last_action=run.get("last_action"),
     )
     return run
+
+
+def implement_with_failover(
+    root: Path,
+    paths: localstate.LocalPaths,
+    *,
+    task_id: int,
+    assignment: Any,
+    worktree: Path,
+    config: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    prompt: str,
+    role: str,
+    popen: Callable[..., Any] | None,
+    tasks: dict[str, Any] | None,
+    replan: Callable[[frozenset[str]], Any | None],
+) -> dict[str, Any]:
+    """Run the writer, changing lane if the provider's allowance runs out.
+
+    Exhaustion is not implementation failure and is deliberately not returned
+    as one: it never reaches `classify_outcome`, so it spends no implementation
+    attempt and no repair cycle. The task keeps its lease, its branch, its
+    worktree, its uncommitted edits and its recorded base commit, because none
+    of those is what went wrong -- only the account that was paying.
+
+    The lane that ran out is put into cooldown first, so the re-plan that
+    follows is made by the existing router against the existing health rules
+    rather than by a second selection path invented here.
+    """
+    failovers: list[dict[str, Any]] = []
+    excluded: set[str] = set()
+    while True:
+        run = implement_once(
+            root,
+            paths,
+            task_id=task_id,
+            assignment=assignment,
+            worktree=worktree,
+            config=config,
+            prompt=prompt,
+            role=role,
+            popen=popen,
+            tasks=tasks,
+        )
+        spent = executors.exhaustion(run)
+        if spent is None:
+            return {
+                "run": run,
+                "assignment": assignment,
+                "failovers": failovers,
+                "blocked": "",
+            }
+
+        cooldown = mark_lane_exhausted(
+            paths,
+            assignment.lane,
+            policy=policy,
+            reset_at=str(spent.get("reset_at") or ""),
+            reason=f"the harness reported: {spent['marker']}",
+        )
+        excluded.add(assignment.lane)
+        _record(paths, task_id, provider_cooldown=cooldown)
+
+        blocked = ""
+        replacement = None
+        if not failover_on_exhaustion(config):
+            blocked = (
+                f"BLOCKED_WAITING_PROVIDER: {assignment.lane} is out of allowance "
+                f"until {cooldown['reset_at']} and the provider setting permits "
+                "no other lane"
+            )
+        elif len(failovers) >= MAX_PROVIDER_FAILOVERS:
+            blocked = (
+                "BLOCKED_WAITING_PROVIDER: every permitted lane ran out of "
+                f"allowance; {assignment.lane} returns at {cooldown['reset_at']}"
+            )
+        else:
+            replacement = replan(frozenset(excluded))
+            if replacement is None:
+                blocked = (
+                    f"BLOCKED_WAITING_PROVIDER: {assignment.lane} is out of "
+                    f"allowance until {cooldown['reset_at']} and no approved "
+                    "fallback lane can take this task"
+                )
+        if blocked or replacement is None:
+            return {
+                "run": run,
+                "assignment": assignment,
+                "failovers": failovers,
+                "blocked": blocked,
+            }
+
+        transition = {
+            "at": localstate.now(),
+            "task_id": task_id,
+            "reason": "provider_exhausted",
+            "previous_lane": assignment.lane,
+            "previous_model": assignment.harness_model,
+            "reset_at": cooldown["reset_at"],
+            "next_lane": replacement.lane,
+            "next_model": replacement.harness_model,
+            "harness": executors.for_lane(replacement.lane).name,
+        }
+        failovers.append(transition)
+        localstate.append_event(paths, "provider_failover", **transition)
+        assignment = replacement
 
 
 def reclaim_abandoned(
@@ -1079,6 +1299,10 @@ def run_once(
 
     ctx = coordinator.load_context(root)
     ctx.tasks = load_leases(root, paths)
+    # A lane this machine saw run out of allowance is in cooldown here even
+    # though the tracked ledger knows nothing about it, so the router sees the
+    # cooldown and prefers whatever is still available.
+    merge_local_health(paths, ctx)
     reclaim_abandoned(paths, ctx.tasks, ctx.policy)
     store = approvals.load(paths)
     owner = owner or f"local-{os.getpid()}"
@@ -1185,6 +1409,7 @@ def run_once(
 
     phases: list[dict[str, Any]] = []
     escalations: list[dict[str, Any]] = []
+    failovers: list[dict[str, Any]] = []
     writer = plan.writer
     ceilings = ctx.policy["escalation"]
     max_implementation = int(ceilings["max_implementation_attempts"])
@@ -1203,6 +1428,7 @@ def run_once(
             verification=None if verification is None else verification["ok"],
             review=verdict,
             escalations=escalations,
+            provider_failovers=failovers,
             finished_at=localstate.now(),
         )
         localstate.append_event(
@@ -1218,6 +1444,7 @@ def run_once(
             "reviewer_independent": plan.reviewer_independent,
             "phases": phases,
             "escalations": escalations,
+            "provider_failovers": failovers,
             "run": run,
             "review": verdict,
             "verification": verification,
@@ -1225,6 +1452,35 @@ def run_once(
             "detail": detail,
             **result,
         }
+
+    def replan(exclude: frozenset[str]) -> Any | None:
+        """A writer for this same task, avoiding the lanes that ran out.
+
+        The cooldown is already recorded when this is called, so the answer
+        comes from the existing router reading the existing health rules; the
+        explicit exclusion only makes the intent legible in the rejections.
+        """
+        merge_local_health(paths, ctx)
+        replacement = local_plan(
+            ctx, candidate, store, exclude_lanes=exclude, config=config
+        )
+        return replacement.writer
+
+    def implement(prompt_text: str) -> dict[str, Any]:
+        return implement_with_failover(
+            root,
+            paths,
+            task_id=task_id,
+            assignment=writer,
+            worktree=worktree,
+            config=config,
+            policy=ctx.policy,
+            prompt=prompt_text,
+            role="implement",
+            popen=popen,
+            tasks=ctx.tasks,
+            replan=replan,
+        )
 
     # ---------------------------------------------------- implement + verify
     for attempt in range(max_implementation):
@@ -1275,19 +1531,16 @@ def run_once(
             )
         else:
             prompt = build_prompt(root, task_id, "implement", repair="a failing check")
-        run = _implement(
-            root,
-            paths,
-            task_id=task_id,
-            assignment=writer,
-            worktree=worktree,
-            config=config,
-            prompt=prompt,
-            role="implement",
-            popen=popen,
-            tasks=ctx.tasks,
-        )
+        attempted = implement(prompt)
+        run = attempted["run"]
+        writer = attempted["assignment"]
+        failovers.extend(attempted["failovers"])
         phases.append({"phase": "implementing", "outcome": run["outcome"]})
+        if attempted["blocked"]:
+            # The work is intact in the worktree and the lease still names this
+            # task. Nothing is retried, because a retry cannot make an
+            # allowance refill sooner.
+            return finish("blocked", attempted["blocked"])
 
         changed = changed_paths(root, worktree, base=base_sha, runner=runner)
         violations = governance.violations(changed)
@@ -1386,19 +1639,13 @@ def run_once(
                 return finish("blocked", str(exhausted))
 
             _record(paths, task_id, phase="repairing")
-            run = _implement(
-                root,
-                paths,
-                task_id=task_id,
-                assignment=writer,
-                worktree=worktree,
-                config=config,
-                prompt=repair_prompt(root, task_id, must_fix),
-                role="implement",
-                popen=popen,
-                tasks=ctx.tasks,
-            )
+            repaired = implement(repair_prompt(root, task_id, must_fix))
+            run = repaired["run"]
+            writer = repaired["assignment"]
+            failovers.extend(repaired["failovers"])
             phases.append({"phase": "repairing", "outcome": run["outcome"]})
+            if repaired["blocked"]:
+                return finish("blocked", repaired["blocked"])
 
             changed = changed_paths(root, worktree, base=base_sha, runner=runner)
             violations = governance.violations(changed)
@@ -1642,6 +1889,7 @@ def dry_run_lifecycle(
 
 
 __all__ = [
+    "CLAUDE_LANE",
     "CLAUDE_BINARY",
     "OPENROUTER_BASE_URL",
     "OPENROUTER_KEY_ENV",
@@ -1655,6 +1903,13 @@ __all__ = [
     "create_worktree",
     "dry_run_lifecycle",
     "executor_argv",
+    "failover_on_exhaustion",
+    "implement_once",
+    "implement_with_failover",
+    "local_provider_health",
+    "mark_lane_exhausted",
+    "merge_local_health",
+    "provider_cooldowns",
     "load_leases",
     "read_leases",
     "reclaim_abandoned",

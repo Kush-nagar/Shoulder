@@ -44,6 +44,7 @@ from . import (
     local,
     localstate,
     notify,
+    project,
     qualify,
     reconcile,
     review,
@@ -1122,9 +1123,42 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_project(args: argparse.Namespace) -> int:
+    """Work the canonical backlog to the end, or until a person is needed.
+
+    Exit 1 means it stopped on a blocker. The blocker's name is in the payload
+    and the work it stopped on is intact: nothing here discards a branch, a
+    worktree or an edit to make a stop look tidier.
+    """
+    result = project.run_project(
+        _root(args),
+        _local_paths(args),
+        repo=args.repo,
+        verification=args.verification,
+        max_tasks=args.max_tasks,
+        poll_seconds=args.poll_seconds,
+        gate_timeout_seconds=args.gate_timeout,
+    )
+    _emit(result)
+    return 0 if result["status"] in (project.COMPLETE, project.RUNNING) else 1
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
-    """Say what the last run left behind, without destroying any of it."""
-    return _emit(local.recover(_root(args), _local_paths(args)))
+    """Say what the last run left behind, without destroying any of it.
+
+    Including the project loop's own position: which task, branch, worktree and
+    pull request it was on, and which provider is cooling down. Restarting
+    `project` from that point continues rather than redoing, because every
+    phase is re-derived from Git, GitHub and the lease ledger.
+    """
+    root = _root(args)
+    paths = _local_paths(args)
+    return _emit(
+        {
+            **local.recover(root, paths),
+            "project": project.status(root, paths),
+        }
+    )
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -1173,6 +1207,9 @@ def cmd_provider(args: argparse.Namespace) -> int:
         config["provider"] = args.choice
         localstate.save_config(paths, config)
     status = local.provider_status(config)
+    # A lane parked because its allowance ran out is not a failure and not a
+    # setting; it is a clock. Saying when it comes back is the whole point.
+    status["cooldowns"] = local.provider_cooldowns(paths)
     if status["status"] == "AVAILABLE_LATER":
         status["how_to_enable"] = (
             f"set {local.OPENROUTER_KEY_ENV} in the shell that starts the runtime, "
@@ -1553,6 +1590,24 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
     serve.set_defaults(func=cmd_serve)
+
+    project_cmd = sub.add_parser(
+        "project", help="work the canonical backlog to the end"
+    )
+    project_cmd.add_argument("--repo", help="owner/name; discovered from gh if omitted")
+    project_cmd.add_argument(
+        "--verification", choices=["fast", "gated"], default="gated"
+    )
+    project_cmd.add_argument(
+        "--max-tasks", type=int, help="stop after this many merges"
+    )
+    project_cmd.add_argument(
+        "--poll-seconds", type=int, default=project.DEFAULT_POLL_SECONDS
+    )
+    project_cmd.add_argument(
+        "--gate-timeout", type=int, default=project.DEFAULT_GATE_TIMEOUT_SECONDS
+    )
+    project_cmd.set_defaults(func=cmd_project)
 
     sub.add_parser(
         "resume", help="classify what the last local run left behind"

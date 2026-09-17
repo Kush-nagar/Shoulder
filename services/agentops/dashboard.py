@@ -25,6 +25,7 @@ from services.agentops import (
     coordinator,
     local,
     localstate,
+    project,
     state,
 )
 
@@ -97,11 +98,13 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
             )
         ),
         "approval": approvals.summary(approvals.load(paths)),
+        "project": project.status(root, paths),
     }
 
     try:
         ctx = coordinator.load_context(root)
         ctx.tasks = local.read_leases(root, paths)
+        local.merge_local_health(paths, ctx)
         eligible = coordinator.next_eligible(ctx)
         data["coordinator"] = {
             "cloud_autonomy_enabled": state.autonomy_enabled(ctx.policy),
@@ -424,12 +427,40 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
             ("error", co.get("error")),
         ]
     )
+    cooling = (data.get("project") or {}).get("provider_cooldowns") or {}
     provider_rows = _rows(
         [
             ("provider", provider.get("provider")),
             ("status", provider.get("status")),
             ("reason", provider.get("reason")),
+            (
+                "cooldown",
+                ", ".join(f"{lane} until {at}" for lane, at in cooling.items())
+                or "none",
+            ),
             ("worktree root", data.get("worktree_root")),
+        ]
+    )
+    run = data.get("project") or {}
+    project_state = str(run.get("status") or "not started")
+    project_tone = {
+        project.COMPLETE: "ok",
+        project.RUNNING: "busy",
+    }.get(project_state, "bad" if project_state.startswith("BLOCKED") else "")
+    project_tag = (
+        f'<span class="tag {project_tone}">{html.escape(project_state)}</span>'
+    )
+    project_rows = _rows(
+        [
+            ("task", run.get("task_id")),
+            ("phase", run.get("phase")),
+            ("model", (workers[-1].get("model") if workers else "") or "-"),
+            ("pull request", run.get("pull_request")),
+            ("ci", run.get("ci")),
+            ("review", run.get("review")),
+            ("completed tasks", run.get("completed_tasks")),
+            ("remaining tasks", run.get("remaining_tasks")),
+            ("detail", str(run.get("detail") or "")[:200]),
         ]
     )
     usage_rows = _rows(
@@ -455,6 +486,7 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
 
 <h2>Coordinator</h2>
 <div class="grid">
+  <div class="card"><h3>Project {project_tag}</h3>{project_rows}</div>
   <div class="card"><h3>Decision</h3>{decision_rows}</div>
   <div class="card"><h3>Provider</h3>{provider_rows}</div>
   <div class="card"><h3>Reported usage</h3>{usage_rows}</div>

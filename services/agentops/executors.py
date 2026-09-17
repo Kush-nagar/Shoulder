@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -125,6 +126,73 @@ def _cost_of(event: Mapping[str, Any]) -> float:
         if isinstance(value, (int, float)):
             return float(value)
     return 0.0
+
+
+# What a harness says when the account's allowance, not the code, is what
+# stopped it. Deliberately narrow: these are allowance sentences, not the word
+# "limit", so a failing test that happens to print "rate limit" in application
+# output is still an implementation failure and still spends a repair attempt.
+EXHAUSTION_MARKERS = (
+    "session limit",
+    "usage limit",
+    "weekly limit",
+    "5-hour limit",
+    "five-hour limit",
+    "allowance has been exhausted",
+    "allowance is exhausted",
+    "quota exceeded",
+    "insufficient credits",
+    "insufficient_quota",
+)
+
+# An explicit reset instant, when the harness prints one. Only a machine
+# readable timestamp is trusted: "resets at 3pm" has no date and no zone, and
+# guessing one would put a lane back in the pool at the wrong hour. Without it
+# the caller falls back to the lane's declared usage window, which is what the
+# cloud path already does for Codex.
+RESET_PATTERN = re.compile(
+    r"reset(?:s|s at|ting at|_at)?[\s:\"']+"
+    r"(\d{4}-\d{2}-\d{2}[T ][\d:]{5,8}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)",
+    re.IGNORECASE,
+)
+
+
+def _exhaustion_text(run: Mapping[str, Any]) -> str:
+    """Everything a run said, in one lowercase blob to match against."""
+    parts = [str(run.get(key) or "") for key in ("last_action", "stderr", "reason")]
+    parts.append(str(run.get("stop_reason") or ""))
+    events = run.get("events")
+    if events:
+        try:
+            parts.append(json.dumps(events))
+        except (TypeError, ValueError):
+            pass
+    return " ".join(parts).lower()
+
+
+def exhaustion(run: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Whether this run stopped because the provider allowance ran out.
+
+    This is a different fact from "the work failed", and conflating them is
+    expensive in both directions: charging a task's repair budget for an empty
+    subscription burns attempts on a task that was never wrong, while treating
+    a genuine failure as exhaustion would park a healthy lane and never fix the
+    code. So the answer is None unless the harness actually said so.
+    """
+    if run.get("ok"):
+        return None
+    text = _exhaustion_text(run)
+    marker = next((m for m in EXHAUSTION_MARKERS if m in text), None)
+    if marker is None:
+        return None
+    found = RESET_PATTERN.search(text)
+    return {
+        "exhausted": True,
+        "marker": marker,
+        "reset_at": found.group(1).upper() if found else "",
+        "harness": run.get("harness", ""),
+        "provider": run.get("provider", ""),
+    }
 
 
 class Executor(Protocol):
@@ -579,6 +647,10 @@ def run(
         "cost_usd": cost,
         "cost_known": cost_known,
         "last_action": last_action,
+        # Kept on the record, not only in the log file: a provider that refuses
+        # for allowance reasons says so here and nowhere else, and the caller
+        # has to be able to tell that apart from a failing test.
+        "stderr": stderr[-4000:] if stderr else "",
         "stream": str(stream_path),
         "events": events[-5:],
     }

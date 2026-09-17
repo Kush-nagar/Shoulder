@@ -97,8 +97,22 @@ def ensure_branch(root: Path, branch: str, base: str = "main") -> tuple[bool, st
 
 
 def ensure_pull_request(
-    root: Path, task_id: int, title: str, branch: str, body: str, *, repo: str | None
+    root: Path,
+    task_id: int,
+    title: str,
+    branch: str,
+    body: str,
+    *,
+    repo: str | None,
+    draft: bool = True,
 ) -> tuple[int | None, str]:
+    """Open the task's pull request, or return the one already open.
+
+    A Codex delegation opens a draft: the work has not been done yet and a
+    draft says so. The local project loop has already implemented, verified and
+    reviewed the branch before it gets here, and a draft cannot be merged, so
+    it asks for a ready one instead. Same call, one flag.
+    """
     existing = _gh(
         ["pr", "list", "--head", branch, "--state", "open", "--json", "number"],
         repo=repo,
@@ -108,22 +122,21 @@ def ensure_pull_request(
         if found:
             return int(found[0]["number"]), "pull request already open"
 
-    created = _gh(
-        [
-            "pr",
-            "create",
-            "--base",
-            "main",
-            "--head",
-            branch,
-            "--title",
-            f"Task {task_id}: {title}",
-            "--body",
-            body,
-            "--draft",
-        ],
-        repo=repo,
-    )
+    create = [
+        "pr",
+        "create",
+        "--base",
+        "main",
+        "--head",
+        branch,
+        "--title",
+        f"Task {task_id}: {title}",
+        "--body",
+        body,
+    ]
+    if draft:
+        create.append("--draft")
+    created = _gh(create, repo=repo)
     if created.returncode != 0:
         return None, f"pr create failed: {created.stderr.strip()[:200]}"
     match = re.search(r"/pull/(\d+)", created.stdout)

@@ -193,6 +193,51 @@ class TestNothingPersistentKeepsASecret(SecretBoundaryCase):
         self.assertNotIn(SECRETS["GH_TOKEN"], written)
 
 
+class TestStandardErrorIsInsideTheBoundary(SecretBoundaryCase):
+    """The run record now carries stderr, so stderr is a persisted copy too.
+
+    It is there because a provider that refuses for allowance reasons says so
+    on stderr and nowhere else, and the failover path has to be able to read
+    it. That makes it one more place a harness could echo a credential.
+    """
+
+    def run_with_stderr(self, stderr: str) -> dict[str, Any]:
+        class Noisy(FakeProcess):
+            def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+                return "", stderr
+
+        with mock.patch.object(shutil, "which", return_value="/bin/claude"):
+            return executors.run(
+                executors.ClaudeCliExecutor(),
+                self.paths,
+                prompt="do the thing",
+                model="claude-sonnet-5",
+                role="implement",
+                worktree=self.worktree,
+                budget={"max_turns": 5, "timeout_seconds": 60},
+                popen=lambda *a, **k: Noisy(
+                    [json.dumps({"type": "result", "subtype": "success"})]
+                ),
+            )
+
+    def test_a_credential_echoed_on_stderr_reaches_neither_disk_nor_caller(
+        self,
+    ) -> None:
+        with mock.patch.dict(os.environ, SECRETS):
+            run = self.run_with_stderr(
+                f"error: ANTHROPIC_AUTH_TOKEN={SECRETS['ANTHROPIC_AUTH_TOKEN']}"
+            )
+            written = self.everything_written()
+        self.assertNotIn(SECRETS["ANTHROPIC_AUTH_TOKEN"], json.dumps(run))
+        self.assertNotIn(SECRETS["ANTHROPIC_AUTH_TOKEN"], written)
+        self.assertIn(localstate.REDACTED, run["stderr"])
+
+    def test_an_allowance_message_on_stderr_survives_redaction(self) -> None:
+        """Redaction must not eat the sentence the failover path reads."""
+        run = self.run_with_stderr("Error: you have hit your session limit")
+        self.assertIsNotNone(executors.exhaustion({**run, "ok": False}))
+
+
 class TestTheWorkerStillGetsWhatItNeeds(SecretBoundaryCase):
     def test_the_prompt_the_worker_receives_is_not_redacted(self) -> None:
         """Redacting the live prompt would break the work; only the stored
