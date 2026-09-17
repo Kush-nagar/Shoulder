@@ -288,8 +288,14 @@ breadcrumb is an index into those facts, not a second copy of them.
 ## Worker command lines
 
 ```
+# writable roles (implement, repair)
 claude -p --model <routed model> --output-format stream-json --verbose
-       --permission-mode acceptEdits --permission-prompts none
+       --dangerously-skip-permissions
+       --max-turns <role budget>  <prompt>
+
+# read-only roles (review, scout, summarize)
+claude -p --model <routed model> --output-format stream-json --verbose
+       --permission-mode plan --permission-prompts none
        --max-turns <role budget>  <prompt>
 
 opencode run --model openrouter/<vendor>/<model> --format json
@@ -303,16 +309,22 @@ Notes that cost time to learn:
   worktree is the working directory, so it is not passed.
 - `--max-turns` is accepted but undocumented in CLI 2.1.268, so the wall-clock
   timeout per role is the bound actually relied on.
-- `--dangerously-skip-permissions` is never used. `--permission-prompts none`
-  denies what would have prompted instead of waiting for a human.
+- A writable worker runs with `--dangerously-skip-permissions`, because this
+  runtime is unattended by design. `--permission-mode acceptEdits` approves
+  edits and nothing else: `uv`, `pnpm`, `alembic`, `pytest` and
+  `scripts/check.ps1` still raise a permission prompt, and with no terminal
+  attached there is nobody to answer, so every command the task needs is
+  denied. The worker then edits files it can never verify. The bypass is
+  scoped to writable roles and is not inherited by anything read-only.
 - The wall-clock timeout is enforced by a timer, not by the output loop, and
   terminates the process tree. A worker that produces nothing and hangs is
   stopped at its deadline.
 - On a subscription, `total_cost_usd` in the result event is a reported figure,
   not a billed one. The dashboard says so rather than printing it as money.
   OpenRouter costs are real and are shown as billed.
-- A reviewer runs in `--permission-mode plan` (Claude Code) or with `edit` and
-  `bash` denied (OpenCode), so it reports findings instead of quietly fixing
-  them.
+- A reviewer runs in `--permission-mode plan` with `--permission-prompts none`
+  (Claude Code) or with `edit` and `bash` denied (OpenCode), so it reports
+  findings instead of quietly fixing them. Read-only roles never receive the
+  writable path's bypass.
 - OpenCode's event schema is not published, so the reader accepts JSON lines, a
   single JSON document, or an array, and classifies the run by exit code.

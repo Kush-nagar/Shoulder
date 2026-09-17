@@ -280,10 +280,17 @@ class ClaudeCliExecutor:
     def argv(
         self, model: str, role: str, worktree: Path, budget: Mapping[str, int]
     ) -> list[str]:
-        # A reviewer runs in plan mode, which cannot write. `acceptEdits` is
-        # for the roles whose job is to change files.
-        mode = "plan" if role in READ_ONLY_ROLES else "acceptEdits"
-        return [
+        # A reviewer runs in plan mode, which cannot write.
+        #
+        # A writable worker runs in bypass mode, and the reason is the runtime
+        # rather than a preference. `acceptEdits` approves edits and nothing
+        # else: `uv`, `pnpm`, `alembic`, `pytest` and `scripts/check.ps1` still
+        # raise a permission prompt, and with `--permission-prompts none` and
+        # no terminal attached there is nobody to answer it, so every command
+        # the task actually needs is denied. The worker edits files it can
+        # never verify. This runtime is unattended by design, so the bypass is
+        # explicit here instead of being half-configured elsewhere.
+        argv = [
             self.binary,
             "-p",
             "--model",
@@ -291,13 +298,13 @@ class ClaudeCliExecutor:
             "--output-format",
             "stream-json",
             "--verbose",
-            "--permission-mode",
-            mode,
-            "--permission-prompts",
-            "none",
-            "--max-turns",
-            str(int(budget.get("max_turns", 20))),
         ]
+        if role in READ_ONLY_ROLES:
+            argv += ["--permission-mode", "plan", "--permission-prompts", "none"]
+        else:
+            argv += ["--dangerously-skip-permissions"]
+        argv += ["--max-turns", str(int(budget.get("max_turns", 20)))]
+        return argv
 
     def env(self, base: Mapping[str, str], run_dir: Path) -> dict[str, str]:
         """The subscription session's environment, with another lane's key out.

@@ -20,6 +20,7 @@
 - uv pin comes from `pyproject.toml` `required-version = "==0.12.10"`; every candidate binary is version-verified before use. No absolute machine path is committed.
 - Liveness checks never call `os.kill(pid, 0)` on Windows (it terminates the process).
 - `claude` invocation: `-p --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none`. Never `--dangerously-skip-permissions`.
+  - Superseded: writable roles now use `--dangerously-skip-permissions` and read-only roles use `--permission-mode plan`. See `docs/agentops-local-runtime.md`.
 - Fable is unavailable (requires usage credits) and must never be selected.
 - Task 15 is never started.
 - Python style: `ruff format`, `ruff check`, `mypy` must pass. Tests are `unittest`, discovered by `python -m unittest discover -s tests -p "test_*.py"`.

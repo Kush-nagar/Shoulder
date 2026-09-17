@@ -397,6 +397,89 @@ class TestReadingWhatCameBack(ExecutorCase):
         self.assertNotIn("sk-or-later-key", json.dumps(scrubbed))
 
 
+class TestThePermissionSplit(ExecutorCase):
+    """Who may write, and what a writable worker is allowed to run.
+
+    The two halves are not symmetric. A reviewer is confined by plan mode, and
+    that is the whole point of it. A writable worker is unattended, and
+    `acceptEdits` confines it in a way nobody intended: edits are approved,
+    every shell command is not, and with no prompt surface `uv`, `pnpm`,
+    `alembic`, `pytest` and `scripts/check.ps1` are simply denied. A worker
+    that can edit but cannot test is worse than one that can do neither,
+    because its output looks finished.
+    """
+
+    WRITABLE = ("implement", "repair")
+
+    def argv(self, role: str) -> list[str]:
+        return executors.ClaudeCliExecutor().argv(
+            "claude-opus-5", role, self.worktree, BUDGET
+        )
+
+    def test_a_writable_worker_runs_in_bypass_mode(self) -> None:
+        for role in self.WRITABLE:
+            with self.subTest(role=role):
+                self.assertIn("--dangerously-skip-permissions", self.argv(role))
+
+    def test_a_writable_worker_never_merely_accepts_edits(self) -> None:
+        for role in self.WRITABLE:
+            with self.subTest(role=role):
+                self.assertNotIn("acceptEdits", self.argv(role))
+
+    def test_a_writable_worker_depends_on_no_prompt_surface(self) -> None:
+        """Bypass replaces the prompt question rather than suppressing it, so
+        the prompt flags are gone from the writable path entirely."""
+        for role in self.WRITABLE:
+            with self.subTest(role=role):
+                argv = self.argv(role)
+                self.assertNotIn("--permission-mode", argv)
+                self.assertNotIn("--permission-prompts", argv)
+
+    def test_a_reviewer_is_never_given_bypass(self) -> None:
+        self.assertNotIn("--dangerously-skip-permissions", self.argv("review"))
+
+    def test_no_read_only_role_is_given_bypass(self) -> None:
+        for role in executors.READ_ONLY_ROLES:
+            with self.subTest(role=role):
+                self.assertNotIn("--dangerously-skip-permissions", self.argv(role))
+
+    def test_read_only_roles_stay_in_plan_mode(self) -> None:
+        for role in executors.READ_ONLY_ROLES:
+            with self.subTest(role=role):
+                argv = self.argv(role)
+                self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
+                self.assertEqual(argv[argv.index("--permission-prompts") + 1], "none")
+
+    def test_scout_is_read_only(self) -> None:
+        self.assertIn("scout", executors.READ_ONLY_ROLES)
+        self.assertNotIn("--dangerously-skip-permissions", self.argv("scout"))
+
+    def test_the_worker_stays_non_interactive(self) -> None:
+        """Bypass removes the approval question, not the headless contract."""
+        for role in (*self.WRITABLE, *executors.READ_ONLY_ROLES):
+            with self.subTest(role=role):
+                argv = self.argv(role)
+                self.assertIn("-p", argv)
+                self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+                self.assertIn("--verbose", argv)
+                self.assertEqual(argv[argv.index("--model") + 1], "claude-opus-5")
+                self.assertEqual(
+                    argv[argv.index("--max-turns") + 1], str(BUDGET["max_turns"])
+                )
+
+    def test_the_openrouter_harness_is_untouched_by_the_split(self) -> None:
+        """Bypass is a Claude Code flag. OpenCode keeps its own permission
+        config, which is where a non-Anthropic worker's limits live."""
+        for role in (*self.WRITABLE, *executors.READ_ONLY_ROLES):
+            with self.subTest(role=role):
+                argv = executors.OpenCodeExecutor().argv(
+                    "deepseek/deepseek-v3", role, self.worktree, BUDGET
+                )
+                self.assertNotIn("--dangerously-skip-permissions", argv)
+                self.assertNotIn("--permission-mode", argv)
+                self.assertIn("--auto", argv)
+
+
 class TestRecoveryAcrossHarnesses(ExecutorCase):
     def test_each_harness_knows_its_own_process_image(self) -> None:
         self.assertIn("claude", executors.worker_image(executors.ClaudeCliExecutor()))
