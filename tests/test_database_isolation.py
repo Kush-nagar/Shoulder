@@ -96,6 +96,35 @@ EXPECTED_POLICIES = {
     ("observation", "observation_owner_maintenance", "ALL", "{shoulder_migration}"),
     ("observation", "observation_coach_select", "SELECT", "{shoulder_api}"),
     ("observation", "observation_coach_insert", "INSERT", "{shoulder_api}"),
+    # 0008: coach judgments and their immutable revisions. Both tables are
+    # SELECT-only for the runtime role -- every write goes through
+    # `private.write_judgment_revision`, so no INSERT, UPDATE or DELETE policy
+    # exists to be widened later by accident. The player policies are the
+    # published-only path: a player sees a judgment when it is published and
+    # the goal is theirs, and a revision only when it is the exact revision
+    # that judgment publishes. Neither can match until Task 17, which is what
+    # writes a publication.
+    ("judgment", "judgment_owner_maintenance", "ALL", "{shoulder_migration}"),
+    ("judgment", "judgment_coach_select", "SELECT", "{shoulder_api}"),
+    ("judgment", "judgment_player_select", "SELECT", "{shoulder_api}"),
+    (
+        "judgment_revision",
+        "judgment_revision_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "judgment_revision",
+        "judgment_revision_coach_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "judgment_revision",
+        "judgment_revision_player_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -109,6 +138,13 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "is_game_coach",
     "is_video_coach",
     "valid_manual_observation",
+    # 0008. The four helpers the judgment policies are written in terms of,
+    # and the one write path the runtime role may execute.
+    "is_goal_coach",
+    "is_goal_player_self",
+    "is_judgment_coach",
+    "is_published_revision_for_player",
+    "write_judgment_revision",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.

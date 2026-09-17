@@ -33,6 +33,14 @@ WRITE_SQL = """
 class JudgmentIsolationTests(IsolationHarness):
     def setUp(self) -> None:
         super().setUp()
+        # `docs/03-schema.md` requires `judgment.observation_id` to be
+        # ON DELETE RESTRICT, and the shared cleanup removes the team, which
+        # cascades to the player, its goals and its observations. A judgment
+        # left behind blocks that cascade, so this suite removes its own rows
+        # first. Registered after the base cleanup and therefore run before
+        # it, cleanups being last-in-first-out. Deleting real judgments is
+        # Task 22's retention work, not something to widen this schema for.
+        self.addCleanup(self.delete_judgments)
         self.game_a = self.admin_insert_game(self.world.a.id, self.world.a.coach)
         self.game_b = self.admin_insert_game(self.world.b.id, self.world.b.coach)
         self.video_a = self.admin_insert_video(self.game_a, self.world.a.coach)
@@ -45,6 +53,11 @@ class JudgmentIsolationTests(IsolationHarness):
         )
         self.goal_a = self.admin_insert_goal(self.world.a.rows[0], self.world.a.coach)
         self.goal_b = self.admin_insert_goal(self.world.b.rows[0], self.world.b.coach)
+
+    def delete_judgments(self) -> None:
+        """Remove every judgment this test created, revisions cascading."""
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(text("DELETE FROM app.judgment"))
 
     def admin_insert_game(self, team_id: UUID, coach_id: UUID) -> UUID:
         with self.admin.connect() as connection, connection.begin():
@@ -180,7 +193,7 @@ class JudgmentIsolationTests(IsolationHarness):
                         text("""
                             SELECT relrowsecurity, relforcerowsecurity,
                                    relowner::regrole::text AS owner
-                            FROM pg_class WHERE oid = :table::regclass
+                            FROM pg_class WHERE oid = CAST(:table AS regclass)
                         """),
                         {"table": table},
                     ).one()

@@ -8,9 +8,11 @@ from sqlalchemy.exc import DBAPIError
 
 from services.api.auth import authenticated_identity
 from services.api.db import user_transaction
+from services.api.judgment_service import StaleJudgment
 from services.api.judgment_service import create_judgment as create_judgment_service
 from services.api.judgment_service import edit_judgment as edit_judgment_service
 from services.api.judgment_service import list_revisions as list_revisions_service
+from services.api.judgment_service import load_judgment as load_judgment_service
 from services.api.problems import Problem
 from services.api.routes import PRIVATE, unavailable
 from services.api.schemas import (
@@ -25,6 +27,27 @@ router = APIRouter(prefix="/v1")
 
 def _etag(response: Response, version: int) -> None:
     response.headers["ETag"] = str(version)
+
+
+def _conflict(user_id: str, judgment_id: UUID) -> Problem:
+    """The 409 for a lost version race, carrying what it lost to.
+
+    `docs/04-api.md` requires the latest coach-authored snapshot so the client
+    can recover its draft instead of discarding the coach's words. The write
+    transaction is already aborted by the time this runs, so the snapshot is
+    read fresh, under the same row-level security as any other read: a caller
+    who may no longer read this judgment is told only that it conflicted.
+    """
+    detail = "This judgment changed since it was loaded."
+    try:
+        with user_transaction(user_id) as connection:
+            current = load_judgment_service(connection, judgment_id)
+    except DBAPIError:
+        current = None
+    extensions = (
+        {"current": Judgment(**current).model_dump(mode="json")} if current else None
+    )
+    return Problem(409, detail, "judgment-version-conflict", extensions=extensions)
 
 
 @router.post(
@@ -92,6 +115,8 @@ def edit_judgment(
                 request.clip_start_ms,
                 request.clip_end_ms,
             )
+    except StaleJudgment:
+        raise _conflict(user_id, judgment_id) from None
     except DBAPIError:
         raise unavailable() from None
     _etag(response, result["version"])

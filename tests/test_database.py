@@ -884,8 +884,10 @@ class ZMigrationTests(unittest.TestCase):
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), len(TABLES))
                 # 0001 six, three `0004` roster/goal helpers, two `0005`
-                # media membership helpers, and the `0007` bounds helper.
-                self.assertEqual(self.function_count(connection), 12)
+                # media membership helpers, the `0007` bounds helper, and
+                # `0008`'s four judgment visibility helpers plus its single
+                # write function.
+                self.assertEqual(self.function_count(connection), 17)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")

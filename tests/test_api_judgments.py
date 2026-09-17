@@ -21,6 +21,10 @@ class JudgmentApiTests(DatabaseTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.addCleanup(app.dependency_overrides.clear)
+        # See the note in test_database_judgment: `observation_id` is
+        # ON DELETE RESTRICT by specification, so a judgment left behind
+        # blocks the shared cleanup's team cascade.
+        self.addCleanup(self.delete_judgments)
         self.coach = self.create_auth_user("judge.coach@example.test", "Coach A")
         self.other_coach = self.create_auth_user(
             "judge.coach.b@example.test", "Coach B"
@@ -56,6 +60,11 @@ class JudgmentApiTests(DatabaseTestCase):
                 """),
                 {"team": team_id, "user": user_id, "role": role},
             )
+
+    def delete_judgments(self) -> None:
+        """Remove every judgment this test created, revisions cascading."""
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(text("DELETE FROM app.judgment"))
 
     def admin_insert_game(self, team_id: UUID, coach_id: UUID) -> UUID:
         with self.admin.connect() as connection, connection.begin():
@@ -266,6 +275,67 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(
             response.json()["type"].rsplit("/", 1)[-1], "judgment-version-conflict"
         )
+
+    def test_a_conflict_returns_the_latest_coach_authored_snapshot(self) -> None:
+        """`docs/04-api.md`: the 409 carries the snapshot it lost to.
+
+        Without it the coach's rejected draft has nothing to be reconciled
+        against, and Task 16 has to recover a draft it cannot compare.
+        """
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        ).json()
+        winner = client.patch(
+            f"/v1/judgments/{created['id']}",
+            headers={"If-Match": "1"},
+            json={
+                "verdict": "opportunity",
+                "comment_text": "The edit that won.",
+                "clip_start_ms": 1200,
+                "clip_end_ms": 2400,
+            },
+        )
+        self.assertEqual(winner.status_code, 200, winner.text)
+
+        response = client.patch(
+            f"/v1/judgments/{created['id']}",
+            headers={"If-Match": "1"},
+            json={
+                "verdict": "not_relevant",
+                "comment_text": "The edit that lost.",
+                "clip_start_ms": 1000,
+                "clip_end_ms": 2000,
+            },
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        current = response.json()["current"]
+        self.assertEqual(current["version"], 2)
+        self.assertEqual(current["verdict"], "opportunity")
+        self.assertEqual(current["comment_text"], "The edit that won.")
+        self.assertEqual(current["clip_start_ms"], 1200)
+        self.assertEqual(current["clip_end_ms"], 2400)
+        self.assertEqual(current["id"], created["id"])
+
+    def test_a_conflict_snapshot_is_not_served_to_another_team(self) -> None:
+        """The recovery payload is still a read, decided by row-level security."""
+        created = (
+            self.client_for(self.coach)
+            .post(f"/v1/observations/{self.observation}/judgments", json=self.payload())
+            .json()
+        )
+        response = self.client_for(self.other_coach).patch(
+            f"/v1/judgments/{created['id']}",
+            headers={"If-Match": "1"},
+            json={
+                "verdict": "applied",
+                "comment_text": "Not mine to touch.",
+                "clip_start_ms": 1000,
+                "clip_end_ms": 2000,
+            },
+        )
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertNotIn("current", response.json())
 
     def test_only_the_original_author_may_edit(self) -> None:
         created = (

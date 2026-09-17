@@ -383,11 +383,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # The order is forced from both ends, and neither end is obvious.
+    #
+    # `write_judgment_revision` is declared `RETURNS app.judgment`, so it
+    # depends on that table's row type and the table cannot be dropped while
+    # it exists. The four helpers are the other way round: the row-level
+    # security policies are defined in terms of them, so they cannot be
+    # dropped until the tables -- and with them their policies -- are gone.
+    #
+    # Write function, then tables, then helpers. Anything else fails with
+    # DependentObjectsStillExist part-way through, which is a downgrade that
+    # stops in the middle. Neither DROP ... CASCADE is used: cascading here
+    # would drop whatever else came to depend on these, unseen.
+    op.execute(f"DROP FUNCTION IF EXISTS {WRITE_FUNCTION}")
     # `judgment.current_revision_id` and `judgment_revision.judgment_id` form a
     # circular FK; drop the forward-declared column first.
     op.execute("ALTER TABLE app.judgment DROP COLUMN IF EXISTS current_revision_id")
     op.execute("DROP TABLE IF EXISTS app.judgment_revision")
     op.execute("DROP TABLE IF EXISTS app.judgment")
-    op.execute(f"DROP FUNCTION IF EXISTS {WRITE_FUNCTION}")
     for function in reversed(HELPER_FUNCTIONS):
         op.execute(f"DROP FUNCTION IF EXISTS {function}")

@@ -30,6 +30,14 @@ JUDGMENT_COLUMNS = """
 """
 
 
+class StaleJudgment(Exception):
+    """An edit lost a version race.
+
+    Raised rather than answered here because the failing statement aborted the
+    transaction that would have to read the winning snapshot.
+    """
+
+
 def sqlstate(error: DBAPIError) -> str | None:
     code: Any = getattr(error.orig, "sqlstate", None)
     return code if isinstance(code, str) else None
@@ -111,11 +119,10 @@ def _write(
                 "judgment-not-original-author",
             ) from None
         if code == STALE_VERSION:
-            raise Problem(
-                409,
-                "This judgment changed since it was loaded.",
-                "judgment-version-conflict",
-            ) from None
+            # The caller has to be told what it lost to, and this transaction
+            # is already aborted, so the snapshot cannot be read here. The
+            # route reads it in a fresh transaction and answers.
+            raise StaleJudgment from None
         if code == JUDGMENT_ALREADY_EXISTS:
             raise Problem(
                 409,
@@ -169,6 +176,22 @@ def edit_judgment(
         clip_start_ms=clip_start_ms,
         clip_end_ms=clip_end_ms,
     )
+
+
+def load_judgment(connection: Connection, judgment_id: UUID) -> dict[str, Any] | None:
+    """The judgment as it stands now, with its latest revision's content.
+
+    Read in its own transaction after a lost version race, which is why it
+    does not reuse the write path's row. RLS decides visibility, so a caller
+    who may not read this judgment gets nothing rather than a denial.
+    """
+    row = connection.execute(
+        text(f"SELECT {JUDGMENT_COLUMNS} FROM app.judgment j WHERE j.id = :id"),
+        {"id": str(judgment_id)},
+    ).one_or_none()
+    if row is None:
+        return None
+    return judgment_model(row, _revision_snapshot(connection, row.id, row.version))
 
 
 def list_revisions(connection: Connection, judgment_id: UUID) -> Sequence[Any]:
