@@ -87,11 +87,16 @@ class TestTheExecutorCommandLine(LocalCase):
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
         self.assertEqual(argv[argv.index("--permission-prompts") + 1], "none")
 
-    def test_the_worker_is_confined_to_its_own_worktree(self) -> None:
+    def test_the_prompt_is_never_placed_after_a_variadic_flag(self) -> None:
+        """`--add-dir` takes a list, so a prompt after it is read as another
+        directory: the worker then starts with no instructions and exits
+        having done nothing, which reads as a bad model rather than a bad
+        command line. The worktree is already the working directory."""
         argv = local.executor_argv(
             "claude-opus-5", "implement", self.worktree, self.config
         )
-        self.assertEqual(argv[argv.index("--add-dir") + 1], str(self.worktree))
+        self.assertNotIn("--add-dir", argv)
+        self.assertEqual(argv[-2], "--max-turns")
 
 
 class TestProviderSelection(LocalCase):

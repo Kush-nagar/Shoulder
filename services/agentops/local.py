@@ -228,6 +228,12 @@ def executor_argv(
     `--permission-prompts none` denies anything that would have asked a human
     instead of waiting for one, which is what makes an unattended run safe
     without reaching for `--dangerously-skip-permissions`.
+
+    There is deliberately no `--add-dir`. It takes a variadic list, so it ate
+    the prompt that follows it and the worker started with no instructions at
+    all -- it exited having done nothing, which read as a failed model rather
+    than a malformed command line. The worktree is the working directory, so
+    naming it again bought nothing to begin with.
     """
     budget = role_budget(config, role)
     return [
@@ -244,8 +250,6 @@ def executor_argv(
         "none",
         "--max-turns",
         str(budget["max_turns"]),
-        "--add-dir",
-        str(worktree),
     ]
 
 
