@@ -29,8 +29,10 @@ whose problem it is:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -747,6 +749,27 @@ def _outstanding(ctx: coordinator.Context) -> list[int]:
     return [task_id for task_id in ctx.backlog.task_ids() if task_id not in done]
 
 
+def _mark_runtime(
+    paths: localstate.LocalPaths, root: Path, phase: str, **fields: Any
+) -> None:
+    """Record this coordinator process, in the shape `cli stop` reads.
+
+    The pid is written with the image name beside it so a stale record cannot
+    be mistaken for a live run after the number is reused; nothing here decides
+    liveness, `localstate.process_alive` does.
+    """
+    record: dict[str, Any] = {
+        "pid": os.getpid(),
+        "image": Path(sys.executable).name,
+        "state": phase,
+        "root": str(root),
+        **fields,
+    }
+    if phase != "running":
+        record["stopped_at"] = localstate.now()
+    localstate.write(paths.runtime, record)
+
+
 def run_project(
     root: Path,
     paths: localstate.LocalPaths,
@@ -767,6 +790,11 @@ def run_project(
     started = datetime.now(UTC)
     merged: list[dict[str, Any]] = []
     save(paths, status=RUNNING, started_at=localstate.now(), phase="starting")
+    # The same record `cli run` writes, for the same two reasons: `cli stop`
+    # signals whatever pid is in it, and the dashboard shows the coordinator as
+    # running rather than showing workers with nothing above them. Without it a
+    # project run was unstoppable and invisible.
+    _mark_runtime(paths, root, "running", started_at=localstate.now())
 
     try:
         # Cheapest and most local question first: an unauthorised machine is
@@ -790,6 +818,7 @@ def run_project(
                 # A bounded run that did what it was asked is not a completed
                 # project, and saying so would mark the backlog finished.
                 save(paths, status=RUNNING, phase="paused", detail="task limit reached")
+                _mark_runtime(paths, root, "stopped")
                 return {
                     "status": RUNNING,
                     "detail": f"stopped after {max_tasks} task(s) as asked",
@@ -864,6 +893,7 @@ def run_project(
         localstate.append_event(
             paths, "project_stopped", status=stop.status, detail=stop.detail
         )
+        _mark_runtime(paths, root, "stopped", detail=stop.detail)
         return {
             "status": stop.status,
             "detail": stop.detail,
@@ -874,6 +904,7 @@ def run_project(
 
     save(paths, status=COMPLETE, phase="complete", detail="")
     localstate.append_event(paths, "project_complete", merged=len(merged))
+    _mark_runtime(paths, root, "stopped")
     return {
         "status": COMPLETE,
         "detail": "every canonical task is complete",

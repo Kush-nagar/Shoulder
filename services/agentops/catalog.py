@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -130,10 +130,28 @@ def _harness_model(model_id: str, family: str, lanes: dict[str, str]) -> str:
     API both take a bare slug, because the provider is implied. The OpenRouter
     lane routes by namespaced id, so stripping the namespace there would leave
     a model name that identifies nothing.
+
+    Anthropic needs one more step, and until 2026-09-17 not taking it meant no
+    local worker could start at all. The catalogue spells a version with a dot
+    (`anthropic/claude-haiku-4.5`); Claude Code spells it with a dash. Handed
+    the dotted slug the CLI exits immediately with
+
+        [claude-code:unrecognized_model] {"model":"claude-haiku-4.5"}
+
+    which the runtime recorded as an implementation failure, escalated twice
+    on, and then dead-ended as BLOCKED_PROVIDER -- twice, on Tasks 15 and 16.
+    Probed against the installed CLI: every dotted slug is rejected and every
+    dashed one (`claude-haiku-4-5`, `claude-sonnet-4-5`, `claude-opus-4-5`,
+    `claude-fable-5-1`) is accepted, as are the already-undotted `claude-*-5`.
+    Translating is therefore the whole fix, and an alias like `haiku` is not:
+    it would silently run a different tier than the router chose and recorded.
     """
-    if family in lanes:
-        return model_id.split("/", 1)[-1]
-    return model_id
+    if family not in lanes:
+        return model_id
+    slug = model_id.split("/", 1)[-1]
+    if family == "anthropic":
+        return slug.replace(".", "-")
+    return slug
 
 
 def normalise(
@@ -263,13 +281,28 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 
 def models_from_state(state: dict[str, Any]) -> list[Model]:
-    """Rebuild Model objects from stored state, skipping absent entries."""
+    """Rebuild Model objects from stored state, skipping absent entries.
+
+    The harness slug is recomputed rather than read back. It is derived from
+    the id, and a ledger written before the derivation was correct still holds
+    the old value -- which is exactly how every local worker kept being
+    spawned with a model name Claude Code rejects, long after the translation
+    itself was fixed. Deriving it here means a stale or hand-edited state file
+    cannot reintroduce that, the same reason routing re-enforces family bans
+    instead of trusting what the catalogue recorded.
+    """
     fields = Model.__dataclass_fields__
     models = []
     for record in state.get("models", {}).values():
         if record.get("absent"):
             continue
-        models.append(Model(**{k: record[k] for k in fields if k in record}))
+        model = Model(**{k: record[k] for k in fields if k in record})
+        models.append(
+            replace(
+                model,
+                harness_model=_harness_model(model.id, model.family, NAMESPACE_LANE),
+            )
+        )
     return models
 
 

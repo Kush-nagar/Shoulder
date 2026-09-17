@@ -1195,6 +1195,18 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return _emit({"stopped": True, "pid": pid, "local_enabled": False})
 
 
+def cmd_enable_local(args: argparse.Namespace) -> int:
+    """Authorise local execution on this machine, and nothing else.
+
+    `run --enable` already does this, but only as a side effect of starting
+    iterations, so the project loop and the launcher had no way to ask for the
+    authorisation without also asking for work. Cloud autonomy lives in
+    ops/policy.json, stays off, and is not read or written here.
+    """
+    paths = _local_paths(args)
+    return _emit(local.enable_local(paths))
+
+
 def cmd_provider(args: argparse.Namespace) -> int:
     """Show or switch the provider a local worker runs against.
 
@@ -1616,6 +1628,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("stop", help="stop a running local coordinator").set_defaults(
         func=cmd_stop
     )
+
+    sub.add_parser(
+        "enable-local", help="authorise local execution on this machine"
+    ).set_defaults(func=cmd_enable_local)
 
     sub.add_parser(
         "local-status", help="what the local runtime is doing, as JSON"

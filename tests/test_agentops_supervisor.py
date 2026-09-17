@@ -144,6 +144,34 @@ class TestLeaseFreeReconciliation(unittest.TestCase):
         source = Path(reconcile.__file__).read_text(encoding="utf-8")
         self.assertIn("completed += _reconcile_unleased(ctx, root, repo=repo)", source)
 
+    def test_an_empty_branch_is_not_a_merge(self) -> None:
+        """The defect this guards: on 2026-09-17 Task 15 was recorded complete
+        while its implementation sat uncommitted in its own worktree.
+
+        The coordinator pre-creates a task branch at main. Until the worker
+        commits, that branch is an ancestor of main with no commits of its own
+        -- the same shape a fast-forward-merged branch has -- so reading
+        ancestry as proof of a merge completes work that was never written.
+        Ancestry is left real here; only the pull request is mocked, because
+        the branch genuinely is an ancestor and must still not count.
+        """
+        branch = "block-04-t15-coach-judgments"
+        if not reconcile.branch_is_merged(REPO_ROOT, branch):
+            self.skipTest(f"{branch} is not present as an ancestor of main here")
+
+        with mock.patch.object(reconcile, "pull_request_merged", return_value=False):
+            ctx = coordinator.load_context(REPO_ROOT)
+            ctx.tasks = {"leases": {"15": a_lease(branch=branch)}}
+            ctx.progress = {
+                "completed_tasks": sorted(
+                    set(state.completed_tasks(ctx.progress)) - {15}
+                ),
+                "gates": {"real_use_gate": False},
+            }
+            reconcile._reconcile_unleased(ctx, REPO_ROOT, repo="o/r")
+
+        self.assertNotIn(15, state.completed_tasks(ctx.progress))
+
 
 class TestRepairBudget(unittest.TestCase):
     """Ordinary engineering failures must be repaired, and must stop somewhere."""

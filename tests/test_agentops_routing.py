@@ -669,6 +669,45 @@ class TestReviewFindings(unittest.TestCase):
             assert normalised is not None
             self.assertEqual(normalised.harness_model, expected)
 
+    def test_a_dotted_anthropic_version_becomes_a_slug_claude_code_accepts(
+        self,
+    ) -> None:
+        """The defect that stopped every local worker on 2026-09-17.
+
+        The catalogue spells the version with a dot and Claude Code spells it
+        with a dash. Handed the dotted slug the CLI exits on
+        `unrecognized_model` before doing anything, which the runtime recorded
+        as an implementation failure and escalated on until the task
+        dead-ended as BLOCKED_PROVIDER. Probed against the installed CLI:
+        dotted rejected, dashed accepted.
+        """
+        for model_id, expected in (
+            ("anthropic/claude-haiku-4.5", "claude-haiku-4-5"),
+            ("anthropic/claude-sonnet-4.5", "claude-sonnet-4-5"),
+            ("anthropic/claude-opus-4.5", "claude-opus-4-5"),
+            ("anthropic/claude-fable-5.1", "claude-fable-5-1"),
+        ):
+            normalised = catalog.normalise({"id": model_id})
+            assert normalised is not None
+            self.assertEqual(normalised.harness_model, expected)
+            self.assertNotIn(".", normalised.harness_model)
+
+    def test_a_stale_ledger_cannot_reintroduce_a_rejected_slug(self) -> None:
+        """Fixing the translation was not enough on its own.
+
+        `ops/state/models.json` had already stored the dotted slug, and the
+        router read it back verbatim, so workers kept being spawned with a
+        name the CLI rejects. The slug is derived from the id, so it is
+        recomputed on the way out rather than trusted.
+        """
+        record = model("anthropic/claude-haiku-4.5", "claude_subscription").as_dict()
+        # What the ledger on disk actually held, written before the
+        # translation existed.
+        record["harness_model"] = "claude-haiku-4.5"
+        stored = {"models": {record["id"]: record}}
+        rebuilt = catalog.models_from_state(stored)
+        self.assertEqual([m.harness_model for m in rebuilt], ["claude-haiku-4-5"])
+
     def test_a_lane_without_a_privacy_declaration_is_ineligible(self) -> None:
         """Privacy is a filter, not a preference, and it fails closed."""
         settings = configured_policy()
