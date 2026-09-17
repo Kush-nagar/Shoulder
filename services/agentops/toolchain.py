@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -202,20 +203,73 @@ def needs_infra_lock(command: list[str]) -> bool:
 
 
 def _lock_is_stale(holder: dict[str, Any], ttl_seconds: int) -> tuple[bool, str]:
+    """Whether the recorded holder has provably stopped or overrun its ceiling.
+
+    Unreadable metadata fails closed. A live holder whose record is missing or
+    malformed used to be classified stale, which let a second verification
+    start on the same ports while the first was still running.
+    """
     raw = str(holder.get("pid") or "")
-    pid = int(raw) if raw.isdigit() else None
+    if not raw.isdigit():
+        return False, "holder record is unreadable; refusing to take the lock"
+    pid = int(raw)
     if not localstate.process_alive(pid, holder.get("image")):
         return True, f"owner pid {raw} is gone"
     started = holder.get("started_at")
     try:
         began = datetime.fromisoformat(str(started))
     except (TypeError, ValueError):
-        return True, "owner recorded no start time"
+        return False, "owner is alive but recorded no usable start time"
     if began.tzinfo is None:
         began = began.replace(tzinfo=UTC)
     if datetime.now(UTC) - began > timedelta(seconds=ttl_seconds):
         return True, f"owner held the lock past {ttl_seconds}s"
     return False, ""
+
+
+def _publish(lock_path: Path, payload: dict[str, Any]) -> bool:
+    """Make the lock appear complete or not at all.
+
+    Creating the file and then writing it leaves a window where another
+    process reads `{}`, decides the holder is dead, and takes the lock. The
+    payload is written to a private file first and linked into place, so the
+    name only ever appears with its contents already there.
+    """
+    staging = lock_path.with_name(f"{lock_path.name}.{uuid.uuid4().hex}.staging")
+    staging.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        os.link(staging, lock_path)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        # A filesystem without hard links: fall back to exclusive create, which
+        # is still atomic for the name even though the content lands after.
+        try:
+            handle = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(payload, indent=2, sort_keys=True))
+        return True
+    finally:
+        staging.unlink(missing_ok=True)
+
+
+def _take_from_stale(lock_path: Path, token: str) -> bool:
+    """Claim the right to replace a stale lock, atomically.
+
+    Two processes can both decide a lock is stale. Whoever renames it away
+    wins; the loser finds nothing to rename and retries against whatever is
+    there now. Without this both would unlink and both would claim.
+    """
+    reserved = lock_path.with_name(f"{lock_path.name}.stale.{token}")
+    try:
+        os.rename(lock_path, reserved)
+    except OSError:
+        return False
+    reserved.unlink(missing_ok=True)
+    return True
 
 
 @contextmanager
@@ -227,15 +281,18 @@ def infra_lock(
 ) -> Iterator[dict[str, Any]]:
     """Hold the one lock that shared-port verification runs under.
 
-    A crashed holder must not block the machine forever, so the lock is taken
-    from an owner that has provably stopped, or from one that has held it past
-    the ceiling. The takeover is recorded in the new holder rather than being a
-    silent delete, so an unexpected one is visible afterwards.
+    At most one process owns it at a time. A crashed holder must not block the
+    machine forever, so a lock whose owner has provably stopped -- or which has
+    been held past the ceiling -- can be taken; the takeover is recorded rather
+    than silent. Release only removes a lock that is still ours, so a process
+    that overran its TTL cannot delete its successor's lock on the way out.
     """
     localstate.ensure(paths)
     lock_path = paths.locks / LOCK_NAME
+    token = uuid.uuid4().hex
     payload: dict[str, Any] = {
         "owner": owner,
+        "token": token,
         "pid": os.getpid(),
         "image": Path(sys.executable).name,
         "host": os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "",
@@ -243,21 +300,17 @@ def infra_lock(
         "recovered": False,
     }
 
-    def claim() -> None:
-        handle = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, indent=2, sort_keys=True))
-
-    try:
-        claim()
-    except FileExistsError:
+    if not _publish(lock_path, payload):
         holder = localstate.read(lock_path, {})
         stale, why = _lock_is_stale(holder, ttl_seconds)
         if not stale:
             raise LockBusy(
                 f"infrastructure verification is held by {holder.get('owner')} "
+                f"(pid {holder.get('pid')}, since {holder.get('started_at')}): {why}"
+                if why
+                else f"infrastructure verification is held by {holder.get('owner')} "
                 f"(pid {holder.get('pid')}, since {holder.get('started_at')})"
-            ) from None
+            )
         payload["recovered"] = True
         payload["recovered_from"] = {
             "owner": holder.get("owner"),
@@ -265,14 +318,22 @@ def infra_lock(
             "started_at": holder.get("started_at"),
             "reason": why,
         }
-        lock_path.unlink(missing_ok=True)
-        claim()
+        if not _take_from_stale(lock_path, token) or not _publish(lock_path, payload):
+            raise LockBusy(
+                "another process claimed the infrastructure lock while this one "
+                "was recovering it"
+            )
         localstate.append_event(paths, "infra_lock_recovered", owner=owner, reason=why)
 
     try:
         yield payload
     finally:
-        lock_path.unlink(missing_ok=True)
+        # Only ever release our own lock. An overrunning holder that deleted
+        # whatever it found would remove its successor's claim and let a third
+        # verification start alongside the second.
+        current = localstate.read(lock_path, {})
+        if str(current.get("token") or "") == token:
+            lock_path.unlink(missing_ok=True)
 
 
 def fast_check_commands(uv: Path) -> list[list[str]]:

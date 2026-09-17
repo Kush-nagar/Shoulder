@@ -14,7 +14,9 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -205,6 +207,38 @@ class FakeProcess:
         return "", ""
 
 
+class SilentProcess:
+    """A worker that says nothing and would run far past its deadline.
+
+    The old read loop only checked the clock when a line arrived, so this is
+    exactly the process that never timed out: it blocks in the iterator.
+    """
+
+    def __init__(self, seconds: float = 30) -> None:
+        self.seconds = seconds
+        self.returncode: int | None = None
+        self.stderr = None
+        self.pid = 4242
+        self._killed = threading.Event()
+        self.stdout = self._blocking_stream()
+
+    def _blocking_stream(self) -> Iterator[str]:
+        # Blocks until something kills us, like a real silent child.
+        self._killed.wait(self.seconds)
+        return
+        yield ""  # pragma: no cover - never reached
+
+    def kill(self) -> None:
+        self._killed.set()
+        self.returncode = -9
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        self._killed.set()
+        if self.returncode is None:
+            self.returncode = -9
+        return "", ""
+
+
 RESULT_LINE = (
     '{"type":"result","subtype":"success","stop_reason":"end_turn",'
     '"session_id":"abc","total_cost_usd":0.5,'
@@ -273,7 +307,7 @@ class TestRunningAWorker(LocalCase):
     def test_the_wall_clock_stops_a_worker_that_will_not_stop(self) -> None:
         """--max-turns is undocumented in the installed CLI, so the timeout is
         the bound that is actually relied on."""
-        self.config["roles"]["implement"]["timeout_seconds"] = 0
+        self.config["roles"]["implement"]["timeout_seconds"] = 1
         run = local.run_worker(
             self.root,
             self.paths,
@@ -282,7 +316,7 @@ class TestRunningAWorker(LocalCase):
             role="implement",
             worktree=self.worktree,
             config=self.config,
-            popen=self.spawn([ASSISTANT_LINE, ASSISTANT_LINE, RESULT_LINE]),
+            popen=lambda *a, **k: SilentProcess(seconds=30),
         )
         self.assertEqual(run["outcome"], "timeout")
         self.assertFalse(run["ok"])

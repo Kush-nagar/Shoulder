@@ -11,12 +11,40 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from agentops_fixtures import REPO_ROOT
+
 from services.agentops import localstate, toolchain
+
+# Run in a separate interpreter so the lock is contended across processes,
+# which is the only way to prove a file lock does its job.
+CHILD_TRY = """
+import sys
+sys.path.insert(0, r"{repo}")
+from pathlib import Path
+from services.agentops import localstate, toolchain
+paths = localstate.LocalPaths(Path(r"{root}"))
+try:
+    with toolchain.infra_lock(paths, owner="other-process"):
+        print("TOOK")
+except toolchain.LockBusy:
+    print("REFUSED")
+"""
+
+CHILD_TAKE = """
+import sys
+sys.path.insert(0, r"{repo}")
+from pathlib import Path
+from services.agentops import localstate, toolchain
+paths = localstate.LocalPaths(Path(r"{root}"))
+with toolchain.infra_lock(paths, owner="other-process"):
+    print("TOOK")
+"""
 
 PYPROJECT = """
 [tool.uv]
@@ -218,6 +246,119 @@ class TestRunningChecks(ToolchainCase):
         self.assertTrue(any("mypy" in c for c in flat))
         self.assertTrue(any("unittest" in c for c in flat))
         self.assertFalse(any(toolchain.needs_infra_lock(c) for c in commands))
+
+
+class TestTheLockUnderContention(ToolchainCase):
+    """The three windows a review found, each closed by construction.
+
+    A lock that can be held twice is worse than no lock: the failure it
+    produces is a port collision inside somebody else's test output.
+    """
+
+    def holder(self, **fields: object) -> None:
+        self.paths.locks.mkdir(parents=True, exist_ok=True)
+        (self.paths.locks / toolchain.LOCK_NAME).write_text(
+            json.dumps(fields), encoding="utf-8"
+        )
+
+    def test_a_live_holder_with_an_unreadable_record_keeps_the_lock(self) -> None:
+        """An empty or partial record used to read as a dead owner, so a
+        second verification could start while the first was running."""
+        self.holder()
+        with self.assertRaises(toolchain.LockBusy):
+            with toolchain.infra_lock(self.paths, owner="b"):
+                pass
+
+    def test_a_live_holder_with_no_start_time_keeps_the_lock(self) -> None:
+        self.holder(owner="alive", pid=os.getpid())
+        with self.assertRaises(toolchain.LockBusy):
+            with toolchain.infra_lock(self.paths, owner="b"):
+                pass
+
+    def test_a_holder_with_a_malformed_start_time_keeps_the_lock(self) -> None:
+        self.holder(owner="alive", pid=os.getpid(), started_at="not a timestamp")
+        with self.assertRaises(toolchain.LockBusy):
+            with toolchain.infra_lock(self.paths, owner="b"):
+                pass
+
+    def test_the_lock_file_never_appears_without_its_contents(self) -> None:
+        """The publish is atomic, so a concurrent reader cannot see `{}` and
+        conclude the holder is dead."""
+        with toolchain.infra_lock(self.paths, owner="a"):
+            holder = localstate.read(self.paths.locks / toolchain.LOCK_NAME, {})
+        self.assertEqual(holder["owner"], "a")
+        self.assertTrue(str(holder.get("pid") or "").isdigit())
+        self.assertTrue(holder.get("token"))
+
+    def test_an_overrunning_holder_does_not_delete_its_successor(self) -> None:
+        """Releasing whatever is there would remove the next holder's claim
+        and let a third verification start alongside it."""
+        lock_path = self.paths.locks / toolchain.LOCK_NAME
+        with toolchain.infra_lock(self.paths, owner="first"):
+            # The successor takes the lock while the first is still inside.
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "owner": "second",
+                        "token": "other-token",
+                        "pid": os.getpid(),
+                        "started_at": localstate.now(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+        self.assertTrue(lock_path.exists(), "the successor's lock was deleted")
+        self.assertEqual(localstate.read(lock_path, {})["owner"], "second")
+
+    def test_only_one_of_two_contenders_can_take_a_stale_lock(self) -> None:
+        """Both may classify it as stale; only one may end up owning it."""
+        self.holder(owner="crashed", pid=999_999, started_at=localstate.now())
+        taken: list[str] = []
+
+        first = toolchain.infra_lock(self.paths, owner="a")
+        first.__enter__()
+        taken.append("a")
+        try:
+            with self.assertRaises(toolchain.LockBusy):
+                with toolchain.infra_lock(self.paths, owner="b"):
+                    taken.append("b")
+        finally:
+            first.__exit__(None, None, None)
+        self.assertEqual(taken, ["a"])
+
+    def test_the_lock_is_free_again_after_the_owner_leaves(self) -> None:
+        with toolchain.infra_lock(self.paths, owner="a"):
+            pass
+        with toolchain.infra_lock(self.paths, owner="b") as second:
+            self.assertFalse(second["recovered"])
+
+    def test_a_real_second_process_is_refused_while_the_lock_is_held(self) -> None:
+        """The cross-process case the file lock exists for."""
+        script = CHILD_TRY.format(repo=str(REPO_ROOT), root=str(self.root))
+        with toolchain.infra_lock(self.paths, owner="holder"):
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(REPO_ROOT),
+                timeout=120,
+            )
+        self.assertIn("REFUSED", result.stdout, result.stdout + result.stderr)
+
+    def test_a_second_process_may_take_it_once_it_is_released(self) -> None:
+        script = CHILD_TAKE.format(repo=str(REPO_ROOT), root=str(self.root))
+        with toolchain.infra_lock(self.paths, owner="holder"):
+            pass
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(REPO_ROOT),
+            timeout=120,
+        )
+        self.assertIn("TOOK", result.stdout, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

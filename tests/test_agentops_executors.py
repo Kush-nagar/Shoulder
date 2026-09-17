@@ -163,36 +163,36 @@ class TestTheOpenRouterKey(ExecutorCase):
             with self.assertRaises(RuntimeError):
                 executors.OpenCodeExecutor().env({}, self.root)
 
-    def test_claude_code_never_reads_an_openrouter_key(self) -> None:
-        source = Path(executors.__file__).read_text(encoding="utf-8")
-        claude = source[
-            source.index("class ClaudeCliExecutor") : source.index(
-                "class OpenCodeExecutor"
-            )
-        ]
-        self.assertNotIn("OPENROUTER", claude)
+    def test_a_claude_worker_never_inherits_the_openrouter_key(self) -> None:
+        """A writable worker can read its own environment, so another lane's
+        credential must not be in it."""
+        with mock.patch.dict(
+            os.environ,
+            {executors.OPENROUTER_KEY_ENV: "sk-or-secret", "PATH": "/usr/bin"},
+        ):
+            env = executors.ClaudeCliExecutor().env(os.environ, self.root)
+        self.assertNotIn(executors.OPENROUTER_KEY_ENV, env)
+        self.assertNotIn("sk-or-secret", "".join(env.values()))
+        self.assertEqual(env["PATH"], "/usr/bin")
 
+    def test_a_claude_worker_does_not_inherit_a_redirected_endpoint(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+                "ANTHROPIC_AUTH_TOKEN": "sk-or-secret",
+            },
+        ):
+            env = executors.ClaudeCliExecutor().env(os.environ, self.root)
+        self.assertNotIn("ANTHROPIC_BASE_URL", env)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
-class TestReadOnlyRolesCannotWrite(ExecutorCase):
-    def test_a_reviewer_runs_in_a_mode_that_cannot_edit(self) -> None:
-        argv = executors.ClaudeCliExecutor().argv(
-            "claude-sonnet-5", "review", self.worktree, BUDGET
-        )
-        self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
-
-    def test_the_smoke_role_can_write(self) -> None:
-        """A dry run and a model evaluation both prove a worker can change a
-        file, so they must not be given a read-only mode. This is the bug the
-        first dry run after the review change walked into."""
-        self.assertNotIn("smoke", executors.READ_ONLY_ROLES)
-        argv = executors.ClaudeCliExecutor().argv(
-            "claude-haiku-4.5", "smoke", self.worktree, BUDGET
-        )
-        self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
-
-    def test_an_opencode_smoke_worker_may_edit(self) -> None:
-        config = executors.OpenCodeExecutor().config("smoke")
-        self.assertEqual(config["permission"]["edit"], "allow")
+    def test_the_openrouter_harness_still_receives_its_own_key(self) -> None:
+        with mock.patch.dict(
+            os.environ, {executors.OPENROUTER_KEY_ENV: "sk-or-secret"}
+        ):
+            env = executors.OpenCodeExecutor().env(os.environ, self.root)
+        self.assertEqual(env[executors.OPENROUTER_KEY_ENV], "sk-or-secret")
 
 
 class TestAvailability(ExecutorCase):

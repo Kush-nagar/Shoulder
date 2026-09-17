@@ -33,6 +33,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -86,6 +87,31 @@ def _text_of(event: Mapping[str, Any]) -> str:
         if isinstance(event.get(key), str) and event[key].strip():
             return str(event[key]).strip()[:400]
     return ""
+
+
+def terminate_tree(process: Any) -> None:
+    """Stop the worker and anything it started.
+
+    Killing only the harness leaves its children -- a shell, a test runner, a
+    language server -- editing the worktree after the coordinator has already
+    declared the task timed out. On Windows the job is done by `taskkill /T`,
+    since there is no process group to signal.
+    """
+    pid = getattr(process, "pid", None)
+    if sys.platform == "win32" and pid:
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        process.kill()
+    except Exception:  # noqa: BLE001 - it may already be gone
+        pass
 
 
 def _usage_of(event: Mapping[str, Any]) -> dict[str, Any]:
@@ -171,7 +197,16 @@ class ClaudeCliExecutor:
         ]
 
     def env(self, base: Mapping[str, str], run_dir: Path) -> dict[str, str]:
-        return dict(base)
+        """The subscription session's environment, with another lane's key out.
+
+        A writable worker can read its own environment. There is no reason for
+        a Claude worker to be able to read the OpenRouter credential, so it is
+        removed rather than inherited.
+        """
+        env = dict(base)
+        for name in (OPENROUTER_KEY_ENV, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
+            env.pop(name, None)
+        return env
 
     def command(
         self,
@@ -387,7 +422,10 @@ def run(
     run_id = run_id or uuid.uuid4().hex[:12]
     run_dir = paths.run_dir(run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "brief.md").write_text(prompt, encoding="utf-8")
+    # The worker gets the prompt as written; the copy kept for observability
+    # does not. A diff quoted into a review prompt can carry whatever a worker
+    # wrote into a file, and that copy outlives the run.
+    (run_dir / "brief.md").write_text(str(localstate.redact(prompt)), encoding="utf-8")
 
     if isinstance(executor, OpenCodeExecutor):
         executor.write_config(run_dir, role)
@@ -456,27 +494,39 @@ def run(
     lines: list[str] = []
     last_action = ""
     turns = 0
-    timed_out = False
     stream_path = run_dir / "stdout.jsonl"
 
-    with stream_path.open("a", encoding="utf-8", newline="\n") as stream:
-        for line in process.stdout or []:
-            line = line.rstrip("\n")
-            if not line.strip():
-                continue
-            lines.append(line)
-            stream.write(str(localstate.redact(line)) + "\n")
-            stream.flush()
-            if time.monotonic() - started >= timeout:
-                timed_out = True
-                process.kill()
-                break
+    # The deadline is enforced by a timer, not by the read loop. Checking the
+    # clock while iterating stdout only works for a worker that keeps talking:
+    # a silent or hung one blocks in the iterator and never reaches the check,
+    # so the documented hard stop did not stop anything.
+    timed_out = threading.Event()
+
+    def enforce_deadline() -> None:
+        timed_out.set()
+        terminate_tree(process)
+
+    alarm = threading.Timer(max(1, timeout), enforce_deadline)
+    alarm.daemon = True
+    alarm.start()
+
+    try:
+        with stream_path.open("a", encoding="utf-8", newline="\n") as stream:
+            for line in process.stdout or []:
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                lines.append(line)
+                stream.write(str(localstate.redact(line)) + "\n")
+                stream.flush()
+    finally:
+        alarm.cancel()
 
     stderr = ""
     try:
         _, stderr = process.communicate(timeout=60)
     except Exception:  # noqa: BLE001 - a hung child must not hang the runtime
-        process.kill()
+        terminate_tree(process)
     if stderr:
         (run_dir / "stderr.log").write_text(
             str(localstate.redact(stderr)), encoding="utf-8"
@@ -499,11 +549,11 @@ def run(
     returncode = process.returncode if process.returncode is not None else -1
     subtype = str(result_event.get("subtype") or result_event.get("status") or "")
     ok_run = (
-        (not timed_out)
+        (not timed_out.is_set())
         and returncode == 0
         and subtype in ("", "success", "completed", "ok")
     )
-    outcome = "timeout" if timed_out else ("completed" if ok_run else "failed")
+    outcome = "timeout" if timed_out.is_set() else ("completed" if ok_run else "failed")
 
     # A subscription reports a notional figure rather than a billed one, so the
     # runtime records whether the number means money before recording the
@@ -532,6 +582,10 @@ def run(
         "stream": str(stream_path),
         "events": events[-5:],
     }
+    # Redacted before it is written and before it is returned: the caller
+    # serialises this record to the console, so redacting only on the way to
+    # disk still printed a key that a model happened to echo.
+    run_record = dict(localstate.redact(run_record))
     localstate.write(run_dir / "result.json", run_record)
     localstate.append_event(
         paths,

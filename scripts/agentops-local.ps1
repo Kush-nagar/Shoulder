@@ -35,7 +35,12 @@ $uv = if ($env:SHOULDER_UV_PATH) { $env:SHOULDER_UV_PATH }
       else { 'uv' }
 
 function Invoke-AgentOps([string[]]$CliArgs) {
-    & $uv @('run', '--locked', 'python', '-m', 'services.agentops.cli') + $CliArgs
+    # Build the whole argument array first, then splat it. Writing
+    # `& $uv @(...) + $CliArgs` puts the `+` in argument mode, where it is not
+    # an operator: uv received a literal "+" and every wrapper command was
+    # malformed.
+    $all = @('run', '--locked', 'python', '-m', 'services.agentops.cli') + $CliArgs
+    & $uv @all
     if ($LASTEXITCODE) { throw "agentops $($CliArgs -join ' ') failed with $LASTEXITCODE" }
 }
 
@@ -56,8 +61,12 @@ switch ($Command) {
     'dry-run' { Invoke-AgentOps @('dry-run') }
     'models' { Invoke-AgentOps @('models') }
     'evaluate' {
-        if (-not $Models) { throw 'evaluate needs -Models <id> [<id>...]' }
-        Invoke-AgentOps (@('evaluate') + $Models)
+        # A comma-separated list arrives as one token when the script is run
+        # with -File rather than from an interactive prompt, so split it here
+        # and accept both spellings.
+        $ids = @($Models | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+        if (-not $ids) { throw 'evaluate needs -Models <id>[,<id>...]' }
+        Invoke-AgentOps (@('evaluate') + $ids)
     }
     'dashboard' {
         $arguments = @('serve')

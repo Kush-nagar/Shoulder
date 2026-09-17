@@ -75,6 +75,9 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
     dashboard that goes blank because `gh` was slow is worse than one that says
     it could not read that part.
     """
+    # Nothing in here may write. `load_config` fills defaults in memory and
+    # `read` returns a default for a missing file, so every read below is
+    # non-persisting by construction.
     config = localstate.load_config(paths)
     data: dict[str, Any] = {
         "generated_at": localstate.now(),
@@ -98,7 +101,7 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
 
     try:
         ctx = coordinator.load_context(root)
-        ctx.tasks = local.load_leases(root, paths)
+        ctx.tasks = local.read_leases(root, paths)
         eligible = coordinator.next_eligible(ctx)
         data["coordinator"] = {
             "cloud_autonomy_enabled": state.autonomy_enabled(ctx.policy),

@@ -35,5 +35,6 @@ $uv = if ($env:SHOULDER_UV_PATH) { $env:SHOULDER_UV_PATH }
       elseif (Test-Path "$repo/.tools/uv") { "$repo/.tools/uv" }
       else { 'uv' }
 
-& $uv @('run', '--locked', 'python', '-m', 'services.agentops.cli', 'provider', $Choice)
+$all = @('run', '--locked', 'python', '-m', 'services.agentops.cli', 'provider', $Choice)
+& $uv @all
 if ($LASTEXITCODE) { throw "provider $Choice failed with $LASTEXITCODE" }

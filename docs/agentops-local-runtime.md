@@ -63,8 +63,18 @@ reads the cloud switch and still refuses.
 10. Full verification runs, governance is rechecked, and only then does the task
     reach `ready_for_pr`.
 
-Outcomes: `ready_for_pr`, `verification_failed`, `implementation_failed`,
-`timeout`, `governance_refused`, `blocked`. Repairs are bounded by the existing
+Every judgement about what a task changed is a range from the commit the
+worktree was on before the worker started, recorded once and never moved. That
+survives the worker committing, a repair committing on top, a restart and a
+dashboard read, so a committed change to a guarded path cannot hide from the
+governance check and a reviewer cannot be handed an empty diff.
+
+Outcomes: `ready_for_pr`, `verification_complete_unreviewed`,
+`verification_failed`, `implementation_failed`, `timeout`,
+`governance_refused`, `blocked`. `--no-review` is a diagnostic: it can reach
+`verification_complete_unreviewed` and never `ready_for_pr`. A task in either
+of those states is finished as far as this runtime is concerned and is not
+handed to another worker. Repairs are bounded by the existing
 `max_review_repair_cycles` and `max_implementation_attempts` ceilings; when a
 budget runs out the task is `blocked` with the unresolved findings named.
 
@@ -93,10 +103,18 @@ worker's branch is never dirtied by runtime bookkeeping.
 
 - `fast` — ruff format, ruff check, mypy, the Python suite. Binds nothing, so
   two workers can run it at once.
-- `gated` — `scripts/check.ps1` and the `check-*.ps1` infrastructure scripts.
-  These start a web server, Supabase and MinIO on fixed ports, so exactly one
-  runs at a time behind `.agentops/local/locks/infra.lock`. A crashed holder
-  loses the lock; the takeover is recorded.
+- `gated` — the worktree's own `scripts/check.ps1`. It starts a web server,
+  Supabase and MinIO on fixed ports, so exactly one runs at a time behind
+  `.agentops/local/locks/infra.lock`. Both kinds run with the task worktree as
+  the working directory, so what is verified is the branch and never the
+  coordinator's checkout.
+
+The lock is held by at most one process. Its record is published atomically, so
+a concurrent reader never sees a half-written holder; a holder that has provably
+stopped -- or has run past the ceiling -- can be taken by exactly one
+contender; an unreadable record from a live holder fails closed; and release
+only removes a lock that is still ours, so an overrunning holder cannot delete
+its successor's claim.
 
 ## uv
 
@@ -121,6 +139,12 @@ Routing chooses the model. The lane it chose decides which harness runs it.
 |---|---|---|
 | `claude_subscription` | Claude Code (`claude -p`) | Anthropic, on the subscription |
 | `openrouter` | OpenCode (`opencode run`) | DeepSeek, GLM, Kimi, Qwen and other OpenRouter models |
+
+The provider setting constrains which lanes routing may choose:
+`claude` permits only the subscription lane, `openrouter` only the OpenRouter
+lane, and `auto` lets both compete on the existing policy priority. A selected
+provider that cannot run blocks the task rather than quietly falling back to
+the other one.
 
 Non-Anthropic models are **not** pushed through Claude Code's Anthropic
 compatibility endpoint. That harness is tuned for one family's tool protocol,
@@ -213,6 +237,9 @@ Notes that cost time to learn:
   timeout per role is the bound actually relied on.
 - `--dangerously-skip-permissions` is never used. `--permission-prompts none`
   denies what would have prompted instead of waiting for a human.
+- The wall-clock timeout is enforced by a timer, not by the output loop, and
+  terminates the process tree. A worker that produces nothing and hangs is
+  stopped at its deadline.
 - On a subscription, `total_cost_usd` in the result event is a reported figure,
   not a billed one. The dashboard says so rather than printing it as money.
   OpenRouter costs are real and are shown as billed.

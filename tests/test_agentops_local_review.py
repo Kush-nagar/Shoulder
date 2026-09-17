@@ -199,7 +199,9 @@ class TestReviewCannotBeSkipped(ReviewLoopCase):
                 result = local.run_once(self.root, self.paths, review=False)
         roles = [call.kwargs["role"] for call in worker.call_args_list]
         self.assertNotIn("review", roles)
-        self.assertEqual(result["outcome"], "ready_for_pr")
+        self.assertNotEqual(result["outcome"], "ready_for_pr")
+        self.assertEqual(result["outcome"], local.UNREVIEWED)
+        self.assertEqual(result["lease_state"], local.UNREVIEWED)
         self.assertEqual(result["review"], {})
 
     def test_an_unreadable_verdict_is_never_treated_as_a_pass(self) -> None:

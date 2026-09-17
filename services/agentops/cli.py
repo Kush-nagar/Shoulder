@@ -1073,6 +1073,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         paths.runtime,
         {
             "pid": os.getpid(),
+            "image": Path(sys.executable).name,
             "started_at": localstate.now(),
             "state": "running",
             "root": str(root),
@@ -1097,6 +1098,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             paths.runtime,
             {
                 "pid": os.getpid(),
+                "image": Path(sys.executable).name,
                 "stopped_at": localstate.now(),
                 "state": "stopped",
                 "root": str(root),
@@ -1139,7 +1141,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
     runtime = localstate.read(paths.runtime, {})
     raw = str(runtime.get("pid") or "")
     pid = int(raw) if raw.isdigit() else None
-    if pid is None or not localstate.process_alive(pid):
+    # With the image as well as the number: after the coordinator exits, its
+    # pid can be reused, and an unconditional SIGTERM would then kill whatever
+    # inherited it.
+    image = str(runtime.get("image") or "")
+    if pid is None or not localstate.process_alive(pid, image or None):
         return _emit(
             {
                 "stopped": False,
@@ -1215,8 +1221,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     report["worktree_root"] = str(local.worktree_root(root, config))
     report["claude_binary"] = shutil.which(local.CLAUDE_BINARY) or "not on PATH"
     report["local_state"] = str(paths.dir)
+    # `ok` means "the configured run can start". Reporting success while the
+    # selected provider is AVAILABLE_LATER said the opposite of what it meant.
     report["ok"] = (
-        bool(report["uv"].get("ok")) and report["claude_binary"] != "not on PATH"
+        bool(report["uv"].get("ok")) and report["provider"].get("status") == "AVAILABLE"
     )
     return _emit(report)
 
@@ -1276,8 +1284,15 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     paths = _local_paths(args)
     store = approvals.load(paths)
     results = []
+    models_state = state.read_json(state.Paths(root).models, {"models": {}})
+    known = {model.id: model.lane for model in catalog.models_from_state(models_state)}
     for model_id in args.models:
-        lane = "claude_subscription" if "/" not in model_id else "openrouter"
+        # From the catalogue. Inferring it from a slash sent
+        # `anthropic/claude-sonnet-5` to OpenCode, because namespaced ids are
+        # not an OpenRouter-only shape.
+        lane = known.get(model_id) or (
+            "openrouter" if "/" in model_id else "claude_subscription"
+        )
         allowed, reason = approvals.may_take(
             store,
             model_id,

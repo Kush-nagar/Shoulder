@@ -22,6 +22,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +56,16 @@ OPENCODE_BINARY = executors.OPENCODE_BINARY
 OPENROUTER_BASE_URL = executors.OPENROUTER_BASE_URL
 OPENROUTER_KEY_ENV = executors.OPENROUTER_KEY_ENV
 
-PROVIDERS = ("claude", "openrouter")
+PROVIDERS = ("claude", "openrouter", "auto")
+
+# What the operator's provider choice means for lane selection. Without this
+# the setting only changed a status line: routing still walked every policy
+# lane in priority order, so choosing `openrouter` kept running Claude.
+PROVIDER_LANES: dict[str, tuple[str, ...]] = {
+    "claude": ("claude_subscription",),
+    "openrouter": ("openrouter",),
+    "auto": ("claude_subscription", "openrouter"),
+}
 
 # Which installed capability a worker is pointed at, by role. This is a note in
 # the brief, not a framework: the skills already exist, and naming every one of
@@ -85,11 +95,27 @@ DEBUG_SKILLS = ("superpowers:systematic-debugging",)
 
 
 def worktree_root(root: Path, config: Mapping[str, Any]) -> Path:
-    """Where worker checkouts live: beside the repository, never inside it."""
+    """Where worker checkouts live: beside the repository, never inside it.
+
+    A mistyped or stale configured path that lands inside the checkout would
+    undo the isolation the worktree exists for and let an unattended worker
+    edit the coordinator's own tree, so it is refused rather than used.
+    """
     configured = str(config.get("worktree_root") or "").strip()
-    if configured:
-        return Path(configured)
-    return root.parent / f"{root.name.split('-')[0]}-agents"
+    if not configured:
+        return root.parent / f"{root.name.split('-')[0]}-agents"
+    path = Path(configured).expanduser()
+    try:
+        resolved = path.resolve()
+        inside = resolved == root.resolve() or root.resolve() in resolved.parents
+    except OSError:
+        inside = False
+    if inside:
+        raise ValueError(
+            f"worktree_root {resolved} is inside the repository at {root}; "
+            "worker checkouts must live outside it"
+        )
+    return path
 
 
 def worktree_path(root: Path, config: Mapping[str, Any], branch: str) -> Path:
@@ -111,6 +137,12 @@ def _git(
     )
 
 
+def head_sha(path: Path, *, runner: Runner | None = None) -> str:
+    """The commit a checkout is currently on."""
+    result = _git(path, ["rev-parse", "HEAD"], runner=runner)
+    return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+
 def create_worktree(
     root: Path,
     branch: str,
@@ -127,7 +159,12 @@ def create_worktree(
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        return {"created": False, "path": str(path), "branch": branch}
+        return {
+            "created": False,
+            "path": str(path),
+            "branch": branch,
+            "base_sha": head_sha(path, runner=runner),
+        }
 
     existing = _git(root, ["rev-parse", "--verify", branch], runner=runner)
     args = (
@@ -141,7 +178,12 @@ def create_worktree(
             f"could not create a worktree for {branch}: "
             f"{(result.stderr or result.stdout or '').strip()[:300]}"
         )
-    return {"created": True, "path": str(path), "branch": branch}
+    return {
+        "created": True,
+        "path": str(path),
+        "branch": branch,
+        "base_sha": head_sha(path, runner=runner),
+    }
 
 
 def remove_worktree(
@@ -153,6 +195,30 @@ def remove_worktree(
         shutil.rmtree(path, ignore_errors=True)
         _git(root, ["worktree", "prune"], runner=runner)
     return {"removed": not path.exists(), "path": str(path)}
+
+
+def provider_lanes(config: Mapping[str, Any]) -> tuple[str, ...]:
+    """The lanes the operator's provider choice permits."""
+    provider = str(config.get("provider") or "claude")
+    return PROVIDER_LANES.get(provider, PROVIDER_LANES["claude"])
+
+
+def lanes_excluded_by_provider(
+    policy: Mapping[str, Any], config: Mapping[str, Any]
+) -> dict[str, str]:
+    """Lanes the provider selection rules out, with the reason.
+
+    Expressed as exclusions handed to the existing router rather than as a
+    second selection step, so priority, fallbacks and rejection messages keep
+    working exactly as they did.
+    """
+    allowed = provider_lanes(config)
+    provider = str(config.get("provider") or "claude")
+    return {
+        name: f"{name}: provider is set to {provider}"
+        for name in (policy.get("lanes") or {})
+        if name not in allowed
+    }
 
 
 def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -171,6 +237,18 @@ def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
             "harness": "",
             "reason": f"unknown provider; expected one of {', '.join(PROVIDERS)}",
         }
+    if provider == "auto":
+        report = executors.availability()
+        usable = [name for name, row in report.items() if row["available"]]
+        return {
+            "provider": "auto",
+            "harness": ", ".join(usable) or "none",
+            "status": "AVAILABLE" if usable else "AVAILABLE_LATER",
+            "reason": (
+                f"either lane may run; installed: {', '.join(usable) or 'none'}"
+            ),
+            "lanes": list(provider_lanes(config)),
+        }
     executor = executors.for_lane(
         "openrouter" if provider == "openrouter" else "claude_subscription"
     )
@@ -180,6 +258,7 @@ def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
         "harness": executor.name,
         "status": "AVAILABLE" if ok else "AVAILABLE_LATER",
         "reason": reason,
+        "lanes": list(provider_lanes(config)),
     }
 
 
@@ -422,6 +501,7 @@ def local_plan(
     escalations: int = 0,
     exclude_lanes: frozenset[str] = frozenset(),
     purpose: str = "task",
+    config: Mapping[str, Any] | None = None,
 ) -> LocalPlan:
     """The existing router, asked the question with local constraints attached.
 
@@ -438,7 +518,9 @@ def local_plan(
         inputs, store, capability_class=class_name, purpose=purpose
     )
 
-    unusable = unavailable_lanes(inputs.policy)
+    unusable = dict(unavailable_lanes(inputs.policy))
+    if config is not None:
+        unusable.update(lanes_excluded_by_provider(inputs.policy, config))
     excluded = frozenset(exclude_lanes) | frozenset(unusable)
     plan = LocalPlan(
         candidate=candidate,
@@ -536,8 +618,17 @@ def parse_findings(text: str) -> dict[str, Any]:
         if not isinstance(parsed, dict):
             continue
         findings = parsed.get("findings")
+        # Anything outside the two documented verdicts is unreadable, not a
+        # pass. `{}` and a typo both used to sail through as clean reviews.
+        verdict = str(parsed.get("verdict") or "").strip().lower()
+        if verdict not in ("pass", "changes_requested"):
+            return {
+                "verdict": "unreadable",
+                "summary": f"unrecognised verdict: {verdict or 'missing'}",
+                "findings": [f for f in (findings or []) if isinstance(f, dict)],
+            }
         return {
-            "verdict": str(parsed.get("verdict") or "changes_requested"),
+            "verdict": verdict,
             "summary": str(parsed.get("summary") or "")[:400],
             "findings": [f for f in (findings or []) if isinstance(f, dict)],
         }
@@ -596,13 +687,20 @@ def repair_prompt(root: Path, task_id: int, findings: list[dict[str, Any]]) -> s
     )
 
 
-def diff_of(root: Path, worktree: Path, *, runner: Runner | None = None) -> str:
-    """The change under review, committed or not."""
+def diff_of(
+    root: Path, worktree: Path, *, base: str, runner: Runner | None = None
+) -> str:
+    """The whole task delta a reviewer must see: every commit plus the rest.
+
+    Reviewing `git diff HEAD` showed nothing once the worker committed, so a
+    reviewer could approve an implementation it had never seen.
+    """
+    committed = _git(worktree, ["diff", f"{base}..HEAD"], runner=runner)
     tracked = _git(worktree, ["diff", "HEAD"], runner=runner)
     untracked = _git(
         worktree, ["ls-files", "--others", "--exclude-standard"], runner=runner
     )
-    parts = [tracked.stdout or ""]
+    parts = [committed.stdout or "", tracked.stdout or ""]
     for name in (untracked.stdout or "").splitlines():
         name = name.strip()
         if not name:
@@ -619,6 +717,43 @@ def diff_of(root: Path, worktree: Path, *, runner: Runner | None = None) -> str:
 # --------------------------------------------------------------------------
 # Leases, verification, verdicts and recovery
 # --------------------------------------------------------------------------
+
+
+def task_baseline(
+    paths: localstate.LocalPaths,
+    task_id: int,
+    *,
+    worktree: Path,
+    runner: Runner | None = None,
+) -> str:
+    """The commit this task started from, recorded once and never moved.
+
+    Every judgement about what a task changed is a range starting here, so it
+    has to survive the worker committing, a repair committing on top, a
+    restart, and a dashboard read. It is therefore written on first use and
+    only ever read afterwards: a baseline that drifts forward is a governance
+    check that sees less each time it runs.
+    """
+    record = localstate.worker_records(paths).get(str(task_id)) or {}
+    recorded = str(record.get("base_sha") or "")
+    if recorded:
+        return recorded
+    base = head_sha(worktree, runner=runner)
+    localstate.save_worker(paths, str(task_id), {"base_sha": base})
+    return base
+
+
+def read_leases(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
+    """The lease ledger as it stands, writing nothing.
+
+    `load_leases` seeds the local copy on first use, which is right for a run
+    and wrong for a page view: rendering the dashboard created runtime state
+    and made a documented read-only endpoint mutate the disk.
+    """
+    if paths.leases.exists():
+        return localstate.read(paths.leases, {"leases": {}})
+    tracked = state.read_json(state.Paths(root).tasks, {"leases": {}})
+    return {"leases": tracked.get("leases", {})}
 
 
 def load_leases(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
@@ -668,7 +803,7 @@ def changed_paths(
             continue
         # A rename reads as "old -> new"; the new path is the one that matters.
         seen.add(entry.split(" -> ")[-1].strip('"'))
-    committed = _git(worktree, ["diff", "--name-only", f"{base}...HEAD"], runner=runner)
+    committed = _git(worktree, ["diff", "--name-only", f"{base}..HEAD"], runner=runner)
     if committed.returncode == 0:
         seen.update(
             path.strip()
@@ -698,8 +833,12 @@ def verify(
     if kind == "fast":
         commands = toolchain.fast_check_commands(binary)
     elif kind == "gated":
+        # The worktree's own copy of the script, not the main checkout's.
+        # `check.ps1` moves to the parent of its own location, so running the
+        # repository copy verified the coordinator's tree instead of the
+        # branch under test -- and could write to it.
         commands = [
-            ["pwsh", "-NoProfile", "-File", str(root / "scripts" / "check.ps1")]
+            ["pwsh", "-NoProfile", "-File", str(worktree / "scripts" / "check.ps1")]
         ]
     else:
         raise ValueError(f"unknown verification kind: {kind}")
@@ -743,6 +882,16 @@ def classify_outcome(
 
 REPAIRABLE = ("implementation_failed", "verification_failed", "timeout")
 
+# Work that verified but was never reviewed. It is deliberately not
+# `ready_for_pr`: skipping review is a diagnostic, and a diagnostic must not
+# produce something that looks like reviewed production work.
+UNREVIEWED = "verification_complete_unreviewed"
+
+# A task nobody may pick up again locally. `ready_for_pr` is finished as far as
+# this runtime is concerned and waits for a pull request to be merged; the
+# unreviewed state is a diagnostic result, not work to redo blindly.
+NON_DISPATCHABLE_STATES = ("ready_for_pr", UNREVIEWED)
+
 
 def _finish(
     paths: localstate.LocalPaths,
@@ -760,11 +909,14 @@ def _finish(
     branch that is not this one.
     """
     lease = tasks.get("leases", {}).get(str(task_id), {})
-    if outcome in ("completed", "ready_for_pr"):
-        lease["state"] = "ready_for_pr"
+    if outcome in ("completed", "ready_for_pr", UNREVIEWED):
+        # The lease records what actually happened. An unreviewed run parks in
+        # its own state so nothing downstream can mistake it for reviewed work.
+        state_name = "ready_for_pr" if outcome != UNREVIEWED else UNREVIEWED
+        lease["state"] = state_name
         lease["heartbeat_at"] = localstate.now()
         save_leases(paths, tasks)
-        return {"lease_state": "ready_for_pr", "escalated": False}
+        return {"lease_state": state_name, "escalated": False}
 
     if outcome in ("governance_refused", "blocked"):
         leases.release(tasks, task_id, "blocked")
@@ -811,7 +963,21 @@ def _implement(
     prompt: str,
     role: str,
     popen: Callable[..., Any] | None,
+    tasks: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    def on_spawn(pid: int, lane: str) -> None:
+        image = worker_image(lane)
+        _record(paths, task_id, pid=pid, image=image)
+        # The lease needs it too: the stale-lease check asks whether the
+        # previous owner is still running, and a lease with no pid answers
+        # "gone" for a worker that is very much alive.
+        if tasks is not None:
+            lease = (tasks.get("leases") or {}).get(str(task_id))
+            if lease is not None:
+                lease["pid"] = pid
+                lease["image"] = image
+                save_leases(paths, tasks)
+
     run = run_worker(
         root,
         paths,
@@ -822,9 +988,7 @@ def _implement(
         config=config,
         lane=assignment.lane,
         popen=popen,
-        on_spawn=lambda pid: _record(
-            paths, task_id, pid=pid, image=worker_image(assignment.lane)
-        ),
+        on_spawn=lambda pid: on_spawn(pid, assignment.lane),
     )
     _record(
         paths,
@@ -839,6 +1003,51 @@ def _implement(
         last_action=run.get("last_action"),
     )
     return run
+
+
+def reclaim_abandoned(
+    paths: localstate.LocalPaths, tasks: dict[str, Any], policy: Mapping[str, Any]
+) -> list[int]:
+    """Stop an active lease from pretending its dead owner is still working.
+
+    A run that ends mid-repair leaves the lease `repairing`, which is active,
+    so the coordinator skips the task until the lease finally goes stale --
+    fifteen minutes of a task nobody is working on and nobody may pick up. If
+    the recorded owner is provably gone, its last heartbeat is backdated so the
+    existing staleness path reclaims it on this run rather than the next hour's.
+    """
+    reclaimed: list[int] = []
+    for key, lease in (tasks.get("leases") or {}).items():
+        if lease.get("state") not in leases.ACTIVE_STATES:
+            continue
+        if leases.is_stale(lease, dict(policy)):
+            continue
+        pid = lease.get("pid")
+        if pid is None or localstate.process_alive(int(pid), lease.get("image")):
+            continue
+        missed = int(policy["lease"]["stale_after_missed_heartbeats"]) + 1
+        gap = missed * int(policy["lease"]["heartbeat_seconds"])
+        lease["heartbeat_at"] = (datetime.now(UTC) - timedelta(seconds=gap)).isoformat(
+            timespec="seconds"
+        )
+        lease["reclaimed_from"] = {"pid": pid, "at": localstate.now()}
+        reclaimed.append(int(key))
+    if reclaimed:
+        save_leases(paths, tasks)
+        localstate.append_event(paths, "leases_reclaimed", tasks=reclaimed)
+    return reclaimed
+
+
+def settled_locally(tasks: Mapping[str, Any], task_id: int) -> str:
+    """The non-dispatchable state this task is already in, if any.
+
+    Read from the local ledger rather than by changing the shared lease states,
+    because the cloud loop's notion of active and terminal is not this
+    runtime's to redefine.
+    """
+    lease = (tasks.get("leases") or {}).get(str(task_id)) or {}
+    state_name = str(lease.get("state") or "")
+    return state_name if state_name in NON_DISPATCHABLE_STATES else ""
 
 
 def run_once(
@@ -870,6 +1079,7 @@ def run_once(
 
     ctx = coordinator.load_context(root)
     ctx.tasks = load_leases(root, paths)
+    reclaim_abandoned(paths, ctx.tasks, ctx.policy)
     store = approvals.load(paths)
     owner = owner or f"local-{os.getpid()}"
 
@@ -877,7 +1087,21 @@ def run_once(
     if candidate is None:
         return {"dispatched": False, "reason": "no eligible task"}
 
-    plan = local_plan(ctx, candidate, store)
+    # `ready_for_pr` is neither an active lease nor a terminal one, so the
+    # coordinator offers the task again and a second worker starts on work that
+    # is already finished and waiting for a pull request.
+    settled = settled_locally(ctx.tasks, candidate.task.id)
+    if settled:
+        return {
+            "dispatched": False,
+            "task_id": candidate.task.id,
+            "reason": (
+                f"task {candidate.task.id} is {settled} locally; "
+                "it is waiting for its pull request, not for another worker"
+            ),
+        }
+
+    plan = local_plan(ctx, candidate, store, config=config)
     if plan.writer is None or plan.blocked_reason:
         return {
             "dispatched": False,
@@ -912,11 +1136,17 @@ def run_once(
 
     task_id = candidate.task.id
     worktree = worktree_path(root, config, plan.branch)
-    create_worktree(root, plan.branch, worktree, runner=runner)
+    created = create_worktree(root, plan.branch, worktree, runner=runner)
+    # Captured before the worker touches anything, and reused on every later
+    # pass over this task.
+    base_sha = task_baseline(paths, task_id, worktree=worktree, runner=runner) or str(
+        created.get("base_sha") or ""
+    )
     _record(
         paths,
         task_id,
         task_id=task_id,
+        base_sha=base_sha,
         task_title=candidate.task.title,
         role="implement",
         branch=plan.branch,
@@ -985,7 +1215,15 @@ def run_once(
                 store,
                 escalations=attempt,
                 exclude_lanes=skip,
+                config=config,
             )
+            if escalated.writer is None:
+                # Rerunning the assignment that just failed, or one from the
+                # lane being excluded, is not an escalation.
+                return finish(
+                    "blocked",
+                    escalated.blocked_reason or "no lane left to escalate to",
+                )
             if escalated.writer is not None:
                 writer = escalated.writer
                 escalations.append(
@@ -1023,10 +1261,11 @@ def run_once(
             prompt=prompt,
             role="implement",
             popen=popen,
+            tasks=ctx.tasks,
         )
         phases.append({"phase": "implementing", "outcome": run["outcome"]})
 
-        changed = changed_paths(root, worktree, runner=runner)
+        changed = changed_paths(root, worktree, base=base_sha, runner=runner)
         violations = governance.violations(changed)
         if violations:
             outcome = "governance_refused"
@@ -1057,7 +1296,7 @@ def run_once(
     if review and plan.reviewer is not None:
         for cycle in range(max_review_cycles + 1):
             _record(paths, task_id, phase="review")
-            diff = diff_of(root, worktree, runner=runner)
+            diff = diff_of(root, worktree, base=base_sha, runner=runner)
             review_run = run_worker(
                 root,
                 paths,
@@ -1069,6 +1308,14 @@ def run_once(
                 lane=plan.reviewer.lane,
                 popen=popen,
             )
+            if not review_run.get("ok"):
+                # A reviewer that exited non-zero may still have printed
+                # something pass-shaped. Reading it as a verdict would let a
+                # crashed review mark the task ready.
+                return finish(
+                    "blocked",
+                    f"the reviewer did not complete: {review_run.get('outcome')}",
+                )
             verdict = parse_findings(review_run.get("last_action", ""))
             verdict["reviewer"] = plan.reviewer.harness_model
             verdict["independent"] = plan.reviewer_independent
@@ -1125,10 +1372,11 @@ def run_once(
                 prompt=repair_prompt(root, task_id, must_fix),
                 role="implement",
                 popen=popen,
+                tasks=ctx.tasks,
             )
             phases.append({"phase": "repairing", "outcome": run["outcome"]})
 
-            changed = changed_paths(root, worktree, runner=runner)
+            changed = changed_paths(root, worktree, base=base_sha, runner=runner)
             violations = governance.violations(changed)
             if violations:
                 return finish("governance_refused", ", ".join(violations))
@@ -1158,12 +1406,19 @@ def run_once(
     if not verification["ok"]:
         return finish("verification_failed", "full verification failed")
 
-    changed = changed_paths(root, worktree, runner=runner)
+    changed = changed_paths(root, worktree, base=base_sha, runner=runner)
     violations = governance.violations(changed)
     if violations:
         return finish("governance_refused", ", ".join(violations))
 
     _record(paths, task_id, changed_files=changed)
+    if not review or plan.reviewer is None:
+        # Verified, but nobody looked at it. Saying `ready_for_pr` here would
+        # make a diagnostic run indistinguishable from reviewed work.
+        return finish(
+            UNREVIEWED,
+            "review was skipped; this is not eligible for a pull request",
+        )
     return finish("ready_for_pr")
 
 
@@ -1198,7 +1453,8 @@ def evaluate_model(
     config = localstate.load_config(paths)
     branch = f"agentops/eval-{uuid.uuid4().hex[:8]}"
     worktree = worktree_path(root, config, branch.replace("/", "-"))
-    create_worktree(root, branch, worktree, runner=runner)
+    created = create_worktree(root, branch, worktree, runner=runner)
+    base_sha = str(created.get("base_sha") or "")
     started = time.monotonic()
 
     run = run_worker(
@@ -1213,7 +1469,7 @@ def evaluate_model(
         popen=popen,
     )
     marker = worktree / "EVAL.md"
-    changed = changed_paths(root, worktree, runner=runner)
+    changed = changed_paths(root, worktree, base=base_sha, runner=runner)
     violations = governance.violations(changed)
     verification = verify(
         root, paths, worktree, kind="fast", owner="evaluation", runner=runner
@@ -1280,6 +1536,7 @@ def recover(
                 "branch": record.get("branch"),
                 "worktree": str(worktree),
                 "worktree_present": worktree.exists(),
+                "base_sha": record.get("base_sha", ""),
             }
         )
         if worker_state != "running":
@@ -1318,6 +1575,7 @@ def dry_run_lifecycle(
     branch = branch or f"agentops/local-dryrun-{uuid.uuid4().hex[:8]}"
     worktree = worktree_path(root, config, branch.replace("/", "-"))
     created = create_worktree(root, branch, worktree, runner=runner)
+    base_sha = str(created.get("base_sha") or "")
 
     run = run_worker(
         root,
@@ -1330,7 +1588,7 @@ def dry_run_lifecycle(
         popen=popen,
     )
     marker = worktree / "DRYRUN.md"
-    changed = changed_paths(root, worktree, runner=runner)
+    changed = changed_paths(root, worktree, base=base_sha, runner=runner)
     violations = governance.violations(changed)
     verification = verify(
         root, paths, worktree, kind="fast", owner="dry-run", runner=runner
@@ -1366,17 +1624,24 @@ __all__ = [
     "PROVIDERS",
     "build_prompt",
     "changed_paths",
+    "diff_of",
+    "head_sha",
     "child_env",
     "classify_outcome",
     "create_worktree",
     "dry_run_lifecycle",
     "executor_argv",
     "load_leases",
+    "read_leases",
+    "reclaim_abandoned",
+    "provider_lanes",
     "provider_status",
     "recover",
     "remove_worktree",
     "role_budget",
     "run_once",
+    "settled_locally",
+    "task_baseline",
     "run_worker",
     "save_leases",
     "skill_line",
