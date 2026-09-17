@@ -61,6 +61,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "implement": {"max_turns": 120, "timeout_seconds": 5400},
         "review": {"max_turns": 40, "timeout_seconds": 1800},
         "scout": {"max_turns": 12, "timeout_seconds": 600},
+        # A tiny writing role for smoke checks and model evaluations. It
+        # is not read-only: those tasks prove a worker can change a file.
+        "smoke": {"max_turns": 10, "timeout_seconds": 900},
         "summarize": {"max_turns": 6, "timeout_seconds": 300},
     },
 }

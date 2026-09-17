@@ -74,6 +74,7 @@ ROLE_SKILLS: dict[str, tuple[str, ...]] = {
     ),
     "scout": ("caveman:cavecrew-investigator",),
     "summarize": ("caveman (ultra)",),
+    "smoke": ("caveman (ultra)",),
 }
 
 PLAN_SKILLS = (
@@ -1205,7 +1206,7 @@ def evaluate_model(
         paths,
         prompt=EVAL_PROMPT,
         model=model,
-        role="scout",
+        role="smoke",
         worktree=worktree,
         config=config,
         lane=lane,
@@ -1323,7 +1324,7 @@ def dry_run_lifecycle(
         paths,
         prompt=DRY_RUN_PROMPT,
         model="haiku",
-        role="summarize",
+        role="smoke",
         worktree=worktree,
         config=config,
         popen=popen,

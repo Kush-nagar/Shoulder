@@ -71,6 +71,15 @@ class TestTheExecutorCommandLine(LocalCase):
         )
         self.assertEqual(argv[argv.index("--max-turns") + 1], "7")
 
+    def test_the_throwaway_roles_are_not_read_only(self) -> None:
+        """A dry run writes a marker file; a read-only mode makes it fail in a
+        way that reads as a bad model rather than a bad role."""
+        source = (REPO_ROOT / "services" / "agentops" / "local.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('role="smoke"', source)
+        self.assertNotIn('role="summarize"', source)
+
     def test_roles_do_not_share_one_budget(self) -> None:
         implement = local.role_budget(self.config, "implement")
         scout = local.role_budget(self.config, "scout")

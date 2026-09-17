@@ -172,6 +172,28 @@ class TestTheOpenRouterKey(ExecutorCase):
         self.assertNotIn("OPENROUTER", claude)
 
 
+class TestReadOnlyRolesCannotWrite(ExecutorCase):
+    def test_a_reviewer_runs_in_a_mode_that_cannot_edit(self) -> None:
+        argv = executors.ClaudeCliExecutor().argv(
+            "claude-sonnet-5", "review", self.worktree, BUDGET
+        )
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
+
+    def test_the_smoke_role_can_write(self) -> None:
+        """A dry run and a model evaluation both prove a worker can change a
+        file, so they must not be given a read-only mode. This is the bug the
+        first dry run after the review change walked into."""
+        self.assertNotIn("smoke", executors.READ_ONLY_ROLES)
+        argv = executors.ClaudeCliExecutor().argv(
+            "claude-haiku-4.5", "smoke", self.worktree, BUDGET
+        )
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
+
+    def test_an_opencode_smoke_worker_may_edit(self) -> None:
+        config = executors.OpenCodeExecutor().config("smoke")
+        self.assertEqual(config["permission"]["edit"], "allow")
+
+
 class TestAvailability(ExecutorCase):
     def test_a_missing_key_disables_openrouter_cleanly(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=True):
