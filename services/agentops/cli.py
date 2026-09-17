@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from . import (
+    approvals,
     catalog,
     classify,
     control_center,
@@ -1063,6 +1064,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     """
     root = _root(args)
     paths = _local_paths(args)
+    if args.enable:
+        # Typing the command is the authorisation. It is recorded locally and
+        # never touches ops/policy.json, so cloud autonomy stays exactly as it
+        # was.
+        local.enable_local(paths)
     localstate.write(
         paths.runtime,
         {
@@ -1075,7 +1081,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     results = []
     try:
         for _ in range(max(1, args.iterations)):
-            result = local.run_once(root, paths, verification_kind=args.verification)
+            result = local.run_once(
+                root,
+                paths,
+                verification_kind=args.verification,
+                review=not args.no_review,
+            )
             results.append(result)
             if not result.get("dispatched"):
                 break
@@ -1122,17 +1133,26 @@ def cmd_stop(args: argparse.Namespace) -> int:
     ends up half written with nothing recording why.
     """
     paths = _local_paths(args)
+    # Stopping means stop scheduling locally. Cloud policy is not consulted
+    # and not changed.
+    local.disable_local(paths)
     runtime = localstate.read(paths.runtime, {})
     raw = str(runtime.get("pid") or "")
     pid = int(raw) if raw.isdigit() else None
     if pid is None or not localstate.process_alive(pid):
-        return _emit({"stopped": False, "reason": "no local runtime is running"})
+        return _emit(
+            {
+                "stopped": False,
+                "local_enabled": False,
+                "reason": "local scheduling disabled; no runtime process was running",
+            }
+        )
     try:
         os.kill(pid, signal.SIGTERM)
     except (OSError, ValueError) as failure:
         return _emit({"stopped": False, "reason": str(failure)})
     localstate.append_event(paths, "runtime_stopped", pid=pid)
-    return _emit({"stopped": True, "pid": pid})
+    return _emit({"stopped": True, "pid": pid, "local_enabled": False})
 
 
 def cmd_provider(args: argparse.Namespace) -> int:
@@ -1185,6 +1205,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         report["uv"] = {"ok": False, "reason": str(failure)}
     config = localstate.load_config(paths)
     report["provider"] = local.provider_status(config)
+    report["harnesses"] = local.harness_status()
+    enabled, why = local.local_authorized(config)
+    report["local_execution"] = {"enabled": enabled, "reason": why}
+    report["cloud_autonomy"] = {
+        "enabled": state.autonomy_enabled(state.load_policy(state.Paths(root))),
+        "note": "governed by ops/policy.json; the local runtime never changes it",
+    }
     report["worktree_root"] = str(local.worktree_root(root, config))
     report["claude_binary"] = shutil.which(local.CLAUDE_BINARY) or "not on PATH"
     report["local_state"] = str(paths.dir)
@@ -1199,6 +1226,72 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     return _emit(
         local.dry_run_lifecycle(_root(args), _local_paths(args), cleanup=not args.keep)
     )
+
+
+def cmd_models(args: argparse.Namespace) -> int:
+    """Show model approval, and what is worth evaluating next."""
+    root = _root(args)
+    paths = _local_paths(args)
+    store = approvals.load(paths)
+    models_state = state.read_json(state.Paths(root).models, {"models": {}})
+    models = catalog.models_from_state(models_state)
+    return _emit(
+        {
+            "approval": approvals.summary(store),
+            "candidates": approvals.candidates(models, store),
+            "harnesses": local.harness_status(),
+        }
+    )
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    """Move one model between approval states.
+
+    Nothing discovers its way into real work. A model takes a Shoulder task
+    because somebody said it could.
+    """
+    paths = _local_paths(args)
+    store = approvals.load(paths)
+    entry = approvals.set_state(
+        paths,
+        store,
+        args.model,
+        args.state,
+        risk_class=args.risk_class,
+        note=args.note or "",
+    )
+    return _emit({"model": args.model, **entry})
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """Run the same throwaway task on several models and compare what happened.
+
+    Deliberately small. It holds the task and the harness constant and reports
+    what each model did with them, which is the comparison that decides an
+    approval. OpenRouter's own Ori Eval is the larger tool for this and is
+    documented in docs/agentops-local-runtime.md; it needs Bun and a bash
+    installer, so it is not the path this repository depends on.
+    """
+    root = _root(args)
+    paths = _local_paths(args)
+    store = approvals.load(paths)
+    results = []
+    for model_id in args.models:
+        lane = "claude_subscription" if "/" not in model_id else "openrouter"
+        allowed, reason = approvals.may_take(
+            store,
+            model_id,
+            lane=lane,
+            capability_class="CHEAP_MECHANICAL",
+            purpose="evaluation",
+        )
+        if not allowed:
+            results.append({"model": model_id, "skipped": reason})
+            continue
+        results.append(
+            local.evaluate_model(root, paths, model_id, lane=lane, keep=args.keep)
+        )
+    return _emit({"evaluation": results})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1424,6 +1517,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="how many tasks to attempt before stopping",
     )
     run.add_argument(
+        "--enable",
+        action="store_true",
+        help="authorise local execution on this machine (local state only)",
+    )
+    run.add_argument(
+        "--no-review",
+        action="store_true",
+        help="skip the local review stage (diagnostics only)",
+    )
+    run.add_argument(
         "--verification",
         choices=["fast", "gated"],
         default="fast",
@@ -1470,6 +1573,25 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["status", *local.PROVIDERS],
     )
     provider.set_defaults(func=cmd_provider)
+
+    models_cmd = sub.add_parser(
+        "models", help="model approval state and evaluation candidates"
+    )
+    models_cmd.set_defaults(func=cmd_models)
+
+    approve = sub.add_parser("approve-model", help="set a model's approval state")
+    approve.add_argument("model")
+    approve.add_argument("state", choices=list(approvals.STATES))
+    approve.add_argument("--risk-class", choices=["standard", "high"])
+    approve.add_argument("--note")
+    approve.set_defaults(func=cmd_approve)
+
+    evaluate = sub.add_parser(
+        "evaluate", help="run one throwaway task on several models and compare"
+    )
+    evaluate.add_argument("models", nargs="+")
+    evaluate.add_argument("--keep", action="store_true")
+    evaluate.set_defaults(func=cmd_evaluate)
 
     return parser
 

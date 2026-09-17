@@ -19,14 +19,29 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from services.agentops import control_center, coordinator, local, localstate, state
+from services.agentops import (
+    approvals,
+    control_center,
+    coordinator,
+    local,
+    localstate,
+    state,
+)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4317
 
+# The lifecycle, in the order a task passes through it.
+LIFECYCLE = ("implementing", "verifying", "review", "repairing", "verifying_full")
+
 PHASE_TONE = {
     "completed": "ok",
-    "review": "ok",
+    "ready_for_pr": "ok",
+    "review": "busy",
+    "repairing": "warn",
+    "verifying": "busy",
+    "verifying_full": "busy",
+    "blocked": "bad",
     "implementing": "busy",
     "verification_failed": "bad",
     "implementation_failed": "bad",
@@ -70,6 +85,15 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
         "events": localstate.events(paths, limit=40),
         "usage": localstate.usage_totals(paths),
         "worktree_root": str(local.worktree_root(root, config)),
+        "harnesses": local.harness_status(),
+        "local_execution": dict(
+            zip(
+                ("enabled", "reason"),
+                local.local_authorized(config),
+                strict=True,
+            )
+        ),
+        "approval": approvals.summary(approvals.load(paths)),
     }
 
     try:
@@ -77,7 +101,7 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
         ctx.tasks = local.load_leases(root, paths)
         eligible = coordinator.next_eligible(ctx)
         data["coordinator"] = {
-            "autonomy_enabled": state.autonomy_enabled(ctx.policy),
+            "cloud_autonomy_enabled": state.autonomy_enabled(ctx.policy),
             "max_parallel_writers": int(ctx.policy["autonomy"]["max_parallel_writers"]),
             "completed_tasks": len(state.completed_tasks(ctx.progress)),
             "next_task": (
@@ -111,12 +135,18 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
                 "provider": record.get("provider", ""),
                 "branch": record.get("branch", ""),
                 "worktree": record.get("worktree", ""),
+                "harness": record.get("harness", ""),
                 "phase": record.get("recovery_state") or record.get("phase", ""),
                 "elapsed": _elapsed(record.get("started_at")),
                 "last_action": record.get("last_action", ""),
                 "verification": record.get("verification"),
                 "violations": record.get("violations") or [],
                 "cost_usd": record.get("cost_usd", 0),
+                "cost_known": bool(record.get("cost_known")),
+                "usage": record.get("usage") or {},
+                "review": record.get("review") or {},
+                "escalations": record.get("escalations") or [],
+                "reviewer_independent": record.get("reviewer_independent"),
             }
         )
 
@@ -195,6 +225,55 @@ def _queue_state(item: dict[str, Any]) -> str:
     return html.escape(f"waiting on {item.get('missing_prerequisites')}")
 
 
+def _cost(worker: dict[str, Any]) -> str:
+    """What this worker cost, or an honest statement that nobody knows.
+
+    A subscription does not bill per run, so the harness figure is notional.
+    Printing it as money would invent a number; printing nothing would hide
+    the OpenRouter case, where the figure is real.
+    """
+    amount = float(worker.get("cost_usd") or 0)
+    if worker.get("cost_known"):
+        return f"${amount:.4f} billed via OpenRouter"
+    if amount:
+        return f"${amount:.4f} reported (subscription, not billed)"
+    return "not billed per run (subscription)"
+
+
+def _lifecycle(worker: dict[str, Any]) -> str:
+    """The lifecycle as a row of stages, with the current one marked."""
+    phase = str(worker.get("phase") or "")
+    done = LIFECYCLE.index(phase) if phase in LIFECYCLE else len(LIFECYCLE)
+    marks = []
+    for index, stage in enumerate(LIFECYCLE):
+        if phase == stage:
+            marks.append(f'<span class="tag busy">{stage}</span>')
+        elif index < done or phase in ("ready_for_pr", "completed"):
+            marks.append(f'<span class="tag ok">{stage}</span>')
+        else:
+            marks.append(f'<span class="tag">{stage}</span>')
+    return " ".join(marks)
+
+
+def _tokens(worker: dict[str, Any]) -> str:
+    usage = worker.get("usage") or {}
+    return (
+        f"{usage.get('input_tokens', '-')} in / {usage.get('output_tokens', '-')} out"
+    )
+
+
+def _review_summary(worker: dict[str, Any]) -> str:
+    review = worker.get("review") or {}
+    if not review:
+        return "-"
+    findings = review.get("findings") or []
+    independent = "" if review.get("independent", True) else " (same family)"
+    return (
+        f"{review.get('verdict', '?')}{independent}: "
+        f"{len(findings)} finding(s) by {review.get('reviewer', '?')}"
+    )
+
+
 def _event_detail(event: dict[str, Any]) -> str:
     detail = {k: v for k, v in event.items() if k not in ("at", "kind")}
     return html.escape(json.dumps(detail)[:200])
@@ -222,8 +301,9 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
                         ("title", worker.get("title")),
                         ("role", worker.get("role")),
                         ("model", worker.get("model")),
-                        ("lane", worker.get("lane")),
                         ("provider", worker.get("provider")),
+                        ("harness", worker.get("harness")),
+                        ("lane", worker.get("lane")),
                         ("branch", worker.get("branch")),
                         ("worktree", worker.get("worktree")),
                         ("elapsed", worker.get("elapsed")),
@@ -233,7 +313,13 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
                             if verification is None
                             else ("passed" if verification else "FAILED"),
                         ),
-                        ("reported cost", f"${float(worker.get('cost_usd') or 0):.4f}"),
+                        ("tokens", _tokens(worker)),
+                        ("cost", _cost(worker)),
+                        ("review", _review_summary(worker)),
+                        (
+                            "escalations",
+                            len(worker.get("escalations") or []) or "none",
+                        ),
                         ("last action", worker.get("last_action")),
                         (
                             "violations",
@@ -241,7 +327,9 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
                         ),
                     ]
                 )
-                + "</div>"
+                + '<div class="row"><span>lifecycle</span><span>'
+                + _lifecycle(worker)
+                + "</span></div></div>"
             )
         worker_html = f'<div class="grid">{"".join(cards)}</div>'
     else:
@@ -258,6 +346,21 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
             for item in queue
         )
         or '<tr><td colspan="3" class="empty">nothing queued</td></tr>'
+    )
+
+    escalation_rows = (
+        "".join(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('at', '')))}</td>"
+            f"<td>{html.escape(str(row.get('task_id', '')))}</td>"
+            f"<td>{html.escape(str(row.get('previous_model', '')))}</td>"
+            f"<td>{html.escape(str(row.get('next_model', '')))}</td>"
+            f"<td>{html.escape(str(row.get('harness', '')))}</td>"
+            "</tr>"
+            for row in (data.get("events") or [])
+            if row.get("kind") == "escalation"
+        )
+        or '<tr><td colspan="5" class="empty">none</td></tr>'
     )
 
     events = data.get("events") or []
@@ -288,19 +391,30 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
     )
 
     autonomy = co.get("autonomy_enabled")
-    autonomy_tone = "ok" if autonomy else "warn"
+    local_execution = data.get("local_execution") or {}
+    local_enabled = bool(local_execution.get("enabled"))
+    autonomy_tone = "ok" if local_enabled else "warn"
     autonomy_text = "enabled" if autonomy else "disabled"
+    # Two different permissions, stated separately, because conflating them is
+    # what made the local runtime unusable while the cloud one stayed off.
     autonomy_banner = (
-        "autonomy enabled"
-        if autonomy
-        else "autonomy disabled - no task will be dispatched"
+        "local execution enabled by an operator; cloud autonomy "
+        + ("enabled" if autonomy else "off")
+        if local_enabled
+        else "local execution not enabled - start it explicitly to run work"
     )
     reported_cost = "${:.4f}".format(float(usage.get("reported_cost_usd", 0)))
     # Built before the template rather than inside it: nested quotes in an
     # f-string placeholder are Python 3.12 syntax and this runs on 3.11.
+    harnesses = data.get("harnesses") or {}
+    harness_rows = _rows(
+        [(name, str(row.get("status"))) for name, row in harnesses.items()]
+    ) or _rows([("harnesses", "none reported")])
+    approval = data.get("approval") or {}
     decision_rows = _rows(
         [
-            ("autonomy", autonomy_text),
+            ("local execution", "enabled" if local_enabled else "not enabled"),
+            ("cloud autonomy", autonomy_text),
             ("max parallel writers", co.get("max_parallel_writers")),
             ("completed tasks", co.get("completed_tasks")),
             ("next eligible", co.get("next_task")),
@@ -318,9 +432,12 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
     usage_rows = _rows(
         [
             ("cost (harness reported)", reported_cost),
+            ("billing note", "subscription runs are not billed per run"),
             ("input tokens", int(usage.get("input_tokens", 0))),
             ("output tokens", int(usage.get("output_tokens", 0))),
             ("leases", json.dumps(co.get("active_leases") or {})),
+            ("approved models", len(approval.get("APPROVED") or [])),
+            ("canary models", len(approval.get("CANARY") or [])),
         ]
     )
     generated = html.escape(str(data.get("generated_at")))
@@ -338,6 +455,7 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
   <div class="card"><h3>Decision</h3>{decision_rows}</div>
   <div class="card"><h3>Provider</h3>{provider_rows}</div>
   <div class="card"><h3>Reported usage</h3>{usage_rows}</div>
+  <div class="card"><h3>Harnesses</h3>{harness_rows}</div>
 </div>
 <p class="sub"><span class="tag {autonomy_tone}">{autonomy_banner}</span></p>
 
@@ -346,6 +464,9 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
 
 <h2>Queue</h2>
 <table><tr><th>task</th><th>title</th><th>state</th></tr>{queue_rows}</table>
+
+<h2>Model transitions</h2>
+<table><tr><th>at</th><th>task</th><th>from</th><th>to</th><th>harness</th></tr>{escalation_rows}</table>
 
 <h2>Failures and escalations</h2>
 <table><tr><th>at</th><th>task</th><th>outcome</th><th>lease</th></tr>{failure_rows}</table>

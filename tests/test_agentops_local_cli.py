@@ -60,10 +60,10 @@ class CliCase(unittest.TestCase):
 
 
 class TestRunObeysTheSwitch(CliCase):
-    def test_run_refuses_while_autonomy_is_disabled(self) -> None:
+    def test_run_refuses_without_explicit_local_intent(self) -> None:
         payload = self.run_cli("run", "--once")
         self.assertFalse(payload["results"][0]["dispatched"])
-        self.assertIn("AUTONOMY_ENABLED is false", payload["results"][0]["reason"])
+        self.assertIn("local execution is not enabled", payload["results"][0]["reason"])
 
     def test_run_records_that_the_runtime_stopped(self) -> None:
         self.run_cli("run", "--once")
@@ -92,9 +92,10 @@ class TestProviderSwitching(CliCase):
         self.assertNotIn("sk-or-cli", stored)
 
     def test_switching_back_to_claude_needs_no_key(self) -> None:
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"PATH": os.environ.get("PATH", "")}):
             payload = self.run_cli("provider", "claude")
-        self.assertEqual(payload["status"], "AVAILABLE")
+        self.assertEqual(payload["provider"], "claude")
+        self.assertEqual(payload["harness"], "claude-cli")
 
 
 class TestReadOnlyVerbs(CliCase):

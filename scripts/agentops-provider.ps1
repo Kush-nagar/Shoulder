@@ -4,6 +4,13 @@
 #   ./scripts/agentops-provider.ps1 openrouter
 #   ./scripts/agentops-provider.ps1 status
 #
+# claude     native Claude Code against the subscription (default)
+# openrouter non-Anthropic models through OpenCode, a model-neutral harness
+#
+# The OpenRouter path also needs OpenCode installed once:
+#
+#   npm install -g opencode-ai
+#
 # The OpenRouter key is never stored, never printed and never committed. It is
 # read from the environment of the shell that starts a worker, so enabling the
 # lane means setting it there:

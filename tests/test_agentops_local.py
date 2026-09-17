@@ -108,13 +108,21 @@ class TestProviderSelection(LocalCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             status = local.provider_status({"provider": "openrouter"})
         self.assertEqual(status["status"], "AVAILABLE_LATER")
-        self.assertIn(local.OPENROUTER_KEY_ENV, status["reason"])
+        self.assertEqual(status["harness"], "opencode")
 
-    def test_openrouter_with_a_key_is_available(self) -> None:
+    def test_openrouter_needs_its_harness_installed_as_well_as_a_key(self) -> None:
+        """A key with no OpenCode on PATH is still not something that can run."""
         with mock.patch.dict(os.environ, {local.OPENROUTER_KEY_ENV: "sk-or-live"}):
-            self.assertEqual(
-                local.provider_status({"provider": "openrouter"})["status"], "AVAILABLE"
-            )
+            with mock.patch.object(shutil, "which", return_value=None):
+                status = local.provider_status({"provider": "openrouter"})
+        self.assertEqual(status["status"], "AVAILABLE_LATER")
+        self.assertIn("opencode-ai", status["reason"])
+
+    def test_openrouter_is_available_with_both_the_key_and_the_harness(self) -> None:
+        with mock.patch.dict(os.environ, {local.OPENROUTER_KEY_ENV: "sk-or-live"}):
+            with mock.patch.object(shutil, "which", return_value="C:/bin/opencode.cmd"):
+                status = local.provider_status({"provider": "openrouter"})
+        self.assertEqual(status["status"], "AVAILABLE")
 
     def test_an_unknown_provider_is_reported_rather_than_guessed(self) -> None:
         self.assertEqual(
@@ -129,12 +137,10 @@ class TestTheChildEnvironment(LocalCase):
         self.assertNotIn("ANTHROPIC_BASE_URL", env)
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
-    def test_the_openrouter_environment_matches_the_proven_cloud_one(self) -> None:
+    def test_the_openrouter_key_reaches_the_child_environment_only(self) -> None:
         with mock.patch.dict(os.environ, {local.OPENROUTER_KEY_ENV: "sk-or-live"}):
             env = local.child_env({"provider": "openrouter"}, {"PATH": "/usr/bin"})
-        self.assertEqual(env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api")
-        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "sk-or-live")
-        self.assertEqual(env["ANTHROPIC_API_KEY"], "")
+        self.assertEqual(env[local.OPENROUTER_KEY_ENV], "sk-or-live")
 
     def test_openrouter_without_a_key_refuses_to_spawn_rather_than_run_anonymously(
         self,
@@ -147,7 +153,8 @@ class TestTheChildEnvironment(LocalCase):
         config = {"provider": "openrouter", "openrouter_api_key": "sk-from-config"}
         with mock.patch.dict(os.environ, {local.OPENROUTER_KEY_ENV: "sk-or-live"}):
             env = local.child_env(config, {})
-        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "sk-or-live")
+        self.assertEqual(env[local.OPENROUTER_KEY_ENV], "sk-or-live")
+        self.assertNotIn("sk-from-config", "".join(env.values()))
 
 
 class TestSkillRouting(LocalCase):
@@ -409,12 +416,12 @@ class LoopCase(unittest.TestCase):
 
 
 class TestTheRunLoopRefusesBeforeItStarts(LoopCase):
-    def test_nothing_is_dispatched_while_autonomy_is_disabled(self) -> None:
-        """The shipped policy has it off, and a local runtime is not an
-        exception to it."""
+    def test_nothing_is_dispatched_without_explicit_local_intent(self) -> None:
+        """Cloud autonomy is a different permission with a different blast
+        radius. Local execution has its own switch, and it starts off."""
         result = local.run_once(self.root, self.paths)
         self.assertFalse(result["dispatched"])
-        self.assertIn("AUTONOMY_ENABLED is false", result["reason"])
+        self.assertIn("local execution is not enabled", result["reason"])
 
     def test_refusing_starts_no_worker_and_no_worktree(self) -> None:
         calls: list[object] = []
@@ -427,7 +434,7 @@ class TestTheWriterCap(LoopCase):
     def test_the_cap_comes_from_policy_and_is_enforced(self) -> None:
         """max_parallel_writers is 1 in the shipped policy. A second writer is
         refused by the existing lease module, not by a local reimplementation."""
-        self.policy_with_autonomy(True)
+        local.enable_local(self.paths, by="test")
         localstate.write(
             self.paths.leases,
             {
@@ -579,12 +586,12 @@ class TestEscalationUsesTheExistingCeilings(LoopCase):
         )
         self.assertEqual(result["lease_state"], "blocked")
 
-    def test_a_completed_task_waits_for_review(self) -> None:
+    def test_a_finished_task_parks_as_ready_for_a_pull_request(self) -> None:
         tasks = self.lease()
         result = local._finish(
-            self.paths, tasks, self.policy(), 15, "completed", once_key="r4"
+            self.paths, tasks, self.policy(), 15, "ready_for_pr", once_key="r4"
         )
-        self.assertEqual(result["lease_state"], "review")
+        self.assertEqual(result["lease_state"], "ready_for_pr")
 
 
 class TestVerificationRouting(LoopCase):
@@ -717,7 +724,8 @@ class TestFableIsNeverSelected(unittest.TestCase):
         source = (REPO_ROOT / "services" / "agentops" / "local.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("built.writer.harness_model", source)
+        self.assertIn("routing.select(", source)
+        self.assertIn("assignment.harness_model", source)
 
 
 class TestTheWorkerPidIsRecorded(LocalCase):
@@ -750,17 +758,17 @@ class TestTheWorkerPidIsRecorded(LocalCase):
 class TestABlockedPlanIsNotRun(LoopCase):
     def test_a_plan_blocked_for_any_reason_dispatches_nothing(self) -> None:
         """A writer can be routed while the plan is still blocked -- no
-        independent reviewer, for instance. Running it anyway would carry out
-        work the coordinator had already refused."""
-        self.policy_with_autonomy(True)
+        reviewer at all, for instance. Running it anyway would carry out work
+        the planner had already refused."""
+        local.enable_local(self.paths, by="test")
         blocked = mock.Mock(
             writer=mock.Mock(),
             reviewer=None,
-            blocked_reason="no independent reviewer available",
+            blocked_reason="no reviewer available",
             rejections=[],
             branch="block-05-t15",
         )
-        with mock.patch("services.agentops.coordinator.plan", return_value=blocked):
+        with mock.patch("services.agentops.local.local_plan", return_value=blocked):
             result = local.run_once(self.root, self.paths)
         self.assertFalse(result["dispatched"])
         self.assertIn("reviewer", result["reason"])

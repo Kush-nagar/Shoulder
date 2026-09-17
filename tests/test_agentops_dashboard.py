@@ -147,13 +147,17 @@ class TestWhatThePageShows(DashboardCase):
         self.start()
         _, body = self.request("GET", "/state")
         data = json.loads(body)
-        self.assertIn("autonomy_enabled", data["coordinator"])
+        self.assertIn("cloud_autonomy_enabled", data["coordinator"])
+        self.assertFalse(data["local_execution"]["enabled"])
         self.assertEqual(data["coordinator"]["max_parallel_writers"], 1)
 
-    def test_a_disabled_autonomy_is_stated_rather_than_implied(self) -> None:
+    def test_local_and_cloud_permissions_are_stated_separately(self) -> None:
+        """Conflating them is what made the local runtime unusable while the
+        cloud one was correctly left off."""
         self.start()
         _, body = self.request("GET", "/")
-        self.assertIn("autonomy disabled", body)
+        self.assertIn("local execution not enabled", body)
+        self.assertIn("cloud autonomy", body)
 
     def test_reported_cost_is_labelled_as_reported(self) -> None:
         """On a subscription the harness figure is notional, not billed."""

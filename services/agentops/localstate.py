@@ -46,6 +46,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "Local runtime configuration. Ignored by Git: it is machine specific "
         "and may name paths that exist only on this workstation."
     ),
+    # Local execution authorisation. Cloud autonomy lives in ops/policy.json
+    # and is governance; this is the separate, local, operator-intent switch,
+    # and it is why importing a module or loading the dashboard can never
+    # start work. Only an explicit local command sets it.
+    "local_enabled": False,
+    "local_enabled_at": "",
+    "local_enabled_by": "",
     "provider": "claude",
     "uv_path": "",
     "worktree_root": "",
@@ -88,6 +95,10 @@ class LocalPaths:
     @property
     def leases(self) -> Path:
         return self.dir / "leases.json"
+
+    @property
+    def approvals(self) -> Path:
+        return self.dir / "approvals.json"
 
     @property
     def events(self) -> Path:

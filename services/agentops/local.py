@@ -18,35 +18,42 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from services.agentops import (
-    brief as brief_mod,
-)
-from services.agentops import (
+    approvals,
+    classify,
     coordinator,
+    executors,
     governance,
     leases,
     localstate,
+    routing,
     state,
     toolchain,
+)
+from services.agentops import (
+    brief as brief_mod,
 )
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
-CLAUDE_BINARY = os.environ.get("SHOULDER_CLAUDE_BINARY", "claude")
+# The harness constants live with the harnesses now; these names stay so
+# callers and tests have one place to reach for them.
+CLAUDE_BINARY = executors.CLAUDE_BINARY
+OPENCODE_BINARY = executors.OPENCODE_BINARY
 
 # OpenRouter speaks the Anthropic protocol at this address, which is why the
 # same harness can drive either provider. These are the variable names the
 # cloud worker already uses; keeping them identical means one thing is proven
 # in both places rather than two things proven separately.
-OPENROUTER_BASE_URL = "https://openrouter.ai/api"
-OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
+OPENROUTER_BASE_URL = executors.OPENROUTER_BASE_URL
+OPENROUTER_KEY_ENV = executors.OPENROUTER_KEY_ENV
 
 PROVIDERS = ("claude", "openrouter")
 
@@ -152,35 +159,32 @@ def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
 
     A missing OpenRouter key is not a failure. The lane is implemented and
     stays selectable; it simply cannot run until the key is in the environment,
-    which is a state the operator can see and fix rather than a crash.
+    which is a state the operator can see and fix rather than a crash. The same
+    is true of a harness that has never been installed.
     """
     provider = str(config.get("provider") or "claude")
     if provider not in PROVIDERS:
         return {
             "provider": provider,
             "status": "UNKNOWN",
+            "harness": "",
             "reason": f"unknown provider; expected one of {', '.join(PROVIDERS)}",
         }
-    if provider == "claude":
-        return {
-            "provider": "claude",
-            "status": "AVAILABLE",
-            "reason": "native Claude Code subscription session",
-        }
-    if os.environ.get(OPENROUTER_KEY_ENV, "").strip():
-        return {
-            "provider": "openrouter",
-            "status": "AVAILABLE",
-            "reason": f"{OPENROUTER_KEY_ENV} is present in the environment",
-        }
+    executor = executors.for_lane(
+        "openrouter" if provider == "openrouter" else "claude_subscription"
+    )
+    ok, reason = executor.available()
     return {
-        "provider": "openrouter",
-        "status": "AVAILABLE_LATER",
-        "reason": (
-            f"{OPENROUTER_KEY_ENV} is not set in this environment. "
-            "Set it in the shell that starts the runtime; it is never stored."
-        ),
+        "provider": provider,
+        "harness": executor.name,
+        "status": "AVAILABLE" if ok else "AVAILABLE_LATER",
+        "reason": reason,
     }
+
+
+def harness_status() -> dict[str, dict[str, Any]]:
+    """Every harness this machine could run, and why one cannot."""
+    return executors.availability()
 
 
 def child_env(
@@ -188,9 +192,9 @@ def child_env(
 ) -> dict[str, str]:
     """The environment a worker process runs with.
 
-    The key is read here, at spawn time, straight from the parent environment.
-    It is never written to configuration, state, an event, or a log, so there
-    is no copy of it for anything downstream to leak.
+    Kept for the native path and for callers that want to see it. The key is
+    read at spawn time, straight from the parent environment, by the harness
+    that needs it -- never written to configuration, state, an event or a log.
     """
     env = dict(base if base is not None else os.environ)
     if str(config.get("provider") or "claude") != "openrouter":
@@ -201,9 +205,7 @@ def child_env(
             f"{OPENROUTER_KEY_ENV} is not set; "
             "switch the provider back to claude or set the key"
         )
-    env["ANTHROPIC_BASE_URL"] = OPENROUTER_BASE_URL
-    env["ANTHROPIC_AUTH_TOKEN"] = key
-    env["ANTHROPIC_API_KEY"] = ""
+    env[OPENROUTER_KEY_ENV] = key
     return env
 
 
@@ -220,37 +222,15 @@ def role_budget(config: Mapping[str, Any], role: str) -> dict[str, int]:
 
 
 def executor_argv(
-    model: str, role: str, worktree: Path, config: Mapping[str, Any]
+    model: str,
+    role: str,
+    worktree: Path,
+    config: Mapping[str, Any],
+    lane: str = "claude_subscription",
 ) -> list[str]:
-    """The headless command line, verified against the installed CLI.
-
-    `stream-json` refuses to run without `--verbose`, which is why it is here.
-    `--permission-prompts none` denies anything that would have asked a human
-    instead of waiting for one, which is what makes an unattended run safe
-    without reaching for `--dangerously-skip-permissions`.
-
-    There is deliberately no `--add-dir`. It takes a variadic list, so it ate
-    the prompt that follows it and the worker started with no instructions at
-    all -- it exited having done nothing, which read as a failed model rather
-    than a malformed command line. The worktree is the working directory, so
-    naming it again bought nothing to begin with.
-    """
-    budget = role_budget(config, role)
-    return [
-        CLAUDE_BINARY,
-        "-p",
-        "--model",
-        model,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--permission-mode",
-        "acceptEdits",
-        "--permission-prompts",
-        "none",
-        "--max-turns",
-        str(budget["max_turns"]),
-    ]
+    """The harness command line for this lane, without the prompt."""
+    executor = executors.for_lane(lane)
+    return executor.argv(model, role, worktree, role_budget(config, role))
 
 
 def skill_line(role: str, *, planning: bool = False, repairing: bool = False) -> str:
@@ -269,19 +249,6 @@ def skill_line(role: str, *, planning: bool = False, repairing: bool = False) ->
     )
 
 
-def _assistant_text(event: dict[str, Any]) -> str:
-    message = event.get("message") or {}
-    parts = message.get("content") or []
-    for part in parts:
-        if isinstance(part, dict) and part.get("type") == "text":
-            text = str(part.get("text") or "").strip()
-            if text:
-                return text[:400]
-        if isinstance(part, dict) and part.get("type") == "tool_use":
-            return f"tool: {part.get('name')}"
-    return ""
-
-
 def run_worker(
     root: Path,
     paths: localstate.LocalPaths,
@@ -291,128 +258,30 @@ def run_worker(
     role: str,
     worktree: Path,
     config: Mapping[str, Any],
+    lane: str = "claude_subscription",
     run_id: str | None = None,
     popen: Callable[..., Any] | None = None,
-    on_event: Callable[[dict[str, Any]], None] | None = None,
     on_spawn: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
-    """Run one headless worker to completion, a timeout, or a failure.
+    """Run one worker in the harness its lane runs in.
 
-    The wall clock is the real bound. `--max-turns` is accepted by the installed
-    CLI but is not in its documented interface, so it is passed as a hint and
-    never relied on as the only thing standing between a loop and the whole
-    afternoon.
+    Which harness is not a new decision: the router already chose the lane, and
+    policy already confines each model family to a lane, so the lane says which
+    of the two harnesses starts.
     """
-    localstate.ensure(paths)
-    run_id = run_id or uuid.uuid4().hex[:12]
-    run_dir = paths.run_dir(run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "brief.md").write_text(prompt, encoding="utf-8")
-
-    argv = executor_argv(model, role, worktree, config)
-    budget = role_budget(config, role)
-    started = time.monotonic()
-
-    localstate.append_event(
+    executor = executors.for_lane(lane)
+    return executors.run(
+        executor,
         paths,
-        "worker_started",
-        run_id=run_id,
-        role=role,
+        prompt=prompt,
         model=model,
-        worktree=str(worktree),
-        provider=str(config.get("provider") or "claude"),
+        role=role,
+        worktree=worktree,
+        budget=role_budget(config, role),
+        run_id=run_id,
+        popen=popen,
+        on_spawn=on_spawn,
     )
-
-    spawn = popen or subprocess.Popen
-    process = spawn(
-        [*argv, prompt],
-        cwd=str(worktree),
-        env=child_env(config),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
-    )
-
-    # The pid has to be recorded while the process exists. Recovery asks
-    # whether it is still alive, and a record with no pid reads as gone --
-    # so a running worker would be classified as interrupted and its lease
-    # handed to a second writer on the same branch.
-    if on_spawn is not None and getattr(process, "pid", None):
-        on_spawn(int(process.pid))
-
-    result_event: dict[str, Any] = {}
-    last_action = ""
-    turns = 0
-    timed_out = False
-    stream_path = run_dir / "stdout.jsonl"
-
-    with stream_path.open("a", encoding="utf-8", newline="\n") as stream:
-        for line in process.stdout or []:
-            line = line.strip()
-            if not line:
-                continue
-            stream.write(localstate.redact(line) + "\n")
-            stream.flush()
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if on_event is not None:
-                on_event(event)
-            if event.get("type") == "assistant":
-                turns += 1
-                text = _assistant_text(event)
-                if text:
-                    last_action = text
-            elif event.get("type") == "result":
-                result_event = event
-            # `>=` so a zero budget stops immediately: the Windows clock
-            # has ~16ms resolution, and a strict `>` reads 0.0 as "not yet".
-            if time.monotonic() - started >= budget["timeout_seconds"]:
-                timed_out = True
-                process.kill()
-                break
-
-    stderr = ""
-    try:
-        _, stderr = process.communicate(timeout=60)
-    except Exception:  # noqa: BLE001 - a hung child must not hang the runtime
-        process.kill()
-    if stderr:
-        (run_dir / "stderr.log").write_text(localstate.redact(stderr), encoding="utf-8")
-
-    returncode = process.returncode if process.returncode is not None else -1
-    subtype = str(result_event.get("subtype") or "")
-    ok = (not timed_out) and returncode == 0 and subtype in ("", "success")
-    outcome = "timeout" if timed_out else ("completed" if ok else "failed")
-
-    run = {
-        "ok": ok,
-        "outcome": outcome,
-        "run_id": run_id,
-        "role": role,
-        "model": model,
-        "returncode": returncode,
-        "turns": turns,
-        "elapsed_seconds": round(time.monotonic() - started, 1),
-        "pid": getattr(process, "pid", None),
-        "stop_reason": result_event.get("stop_reason") or result_event.get("subtype"),
-        "session_id": result_event.get("session_id"),
-        "usage": result_event.get("usage") or {},
-        "cost_usd": float(result_event.get("total_cost_usd") or 0.0),
-        "last_action": last_action,
-        "stream": str(stream_path),
-    }
-    localstate.write(run_dir / "result.json", run)
-    localstate.append_event(
-        paths,
-        "worker_finished",
-        **{k: run[k] for k in ("run_id", "role", "outcome", "turns", "cost_usd")},
-    )
-    return run
 
 
 def build_prompt(
@@ -429,12 +298,321 @@ def build_prompt(
     return f"{packet}\n\n### Capabilities\n\n{line}\n"
 
 
-def worker_image() -> str:
-    return "claude.exe" if sys.platform == "win32" else "claude"
+def worker_image(lane: str = "claude_subscription") -> str:
+    return executors.worker_image(executors.for_lane(lane))
 
 
 def resolve_uv(root: Path, paths: localstate.LocalPaths) -> Path:
     return toolchain.resolve_uv(root, paths)
+
+
+# --------------------------------------------------------------------------
+# Local execution authorisation
+# --------------------------------------------------------------------------
+
+# Cloud autonomy and local execution are different permissions with different
+# blast radii. `ops/policy.json` decides whether this system may write code
+# unattended in GitHub Actions, on credentials nobody is watching; it is
+# governance, it stays off, and nothing here touches it. Whether an operator
+# may run a worker on their own workstation, having just typed the command, is
+# a different question, and answering it by reading the cloud switch meant the
+# local runtime could not be used at all without granting the cloud one.
+#
+# So local execution has its own switch, in ignored local state. It is set only
+# by an explicit local command. Importing a module does not set it, and neither
+# does loading the dashboard, which is why neither can start work.
+LOCAL_INTENT_HINT = (
+    "start the local runtime explicitly: ./scripts/agentops-local.ps1 start "
+    "(or: python -m services.agentops.cli run --enable)"
+)
+
+
+def local_authorized(config: Mapping[str, Any]) -> tuple[bool, str]:
+    """Whether an operator has explicitly authorised local execution."""
+    if not bool(config.get("local_enabled")):
+        return False, (
+            "local execution is not enabled on this machine; " + LOCAL_INTENT_HINT
+        )
+    at = str(config.get("local_enabled_at") or "unknown time")
+    by = str(config.get("local_enabled_by") or "an operator")
+    return True, f"local execution enabled by {by} at {at}"
+
+
+def enable_local(paths: localstate.LocalPaths, *, by: str = "") -> dict[str, Any]:
+    """Record explicit local operator intent. Never touches cloud policy."""
+    config = localstate.load_config(paths)
+    config["local_enabled"] = True
+    config["local_enabled_at"] = localstate.now()
+    config["local_enabled_by"] = by or os.environ.get("USERNAME") or "operator"
+    localstate.save_config(paths, config)
+    localstate.append_event(paths, "local_enabled", by=config["local_enabled_by"])
+    return config
+
+
+def disable_local(paths: localstate.LocalPaths) -> dict[str, Any]:
+    """Stop local scheduling. Cloud policy is not consulted or changed."""
+    config = localstate.load_config(paths)
+    config["local_enabled"] = False
+    config["local_disabled_at"] = localstate.now()
+    localstate.save_config(paths, config)
+    localstate.append_event(paths, "local_disabled")
+    return config
+
+
+# --------------------------------------------------------------------------
+# Planning, with approval and harness availability folded in
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class LocalPlan:
+    """What the router decided, once local constraints are applied."""
+
+    candidate: Any
+    classification: Any
+    capability_class: str
+    branch: str
+    writer: Any | None = None
+    reviewer: Any | None = None
+    reviewer_independent: bool = True
+    blocked_reason: str | None = None
+    rejections: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.candidate.task.id,
+            "task_title": self.candidate.task.title,
+            "branch": self.branch,
+            "capability_class": self.capability_class,
+            "classification": self.classification.as_dict(),
+            "writer": self.writer.as_dict() if self.writer else None,
+            "reviewer": self.reviewer.as_dict() if self.reviewer else None,
+            "reviewer_independent": self.reviewer_independent,
+            "blocked_reason": self.blocked_reason,
+            "rejections": self.rejections,
+        }
+
+
+def unavailable_lanes(policy: Mapping[str, Any]) -> dict[str, str]:
+    """Lanes whose harness cannot run on this machine right now.
+
+    A lane the router would happily choose is useless locally if its harness is
+    not installed or its key is absent, and discovering that after taking a
+    lease wastes an attempt. Cloud-only lanes are excluded here for the same
+    reason: locally there is nothing to run them with.
+    """
+    out: dict[str, str] = {}
+    for name, lane in (policy.get("lanes") or {}).items():
+        harness = str(lane.get("harness") or "")
+        if harness in ("codex-cloud-github", "codex-action"):
+            out[name] = f"{name}: {harness} runs in the cloud, not locally"
+            continue
+        ok, reason = executors.for_lane(name).available()
+        if not ok:
+            out[name] = f"{name}: {reason}"
+    return out
+
+
+def local_plan(
+    ctx: Any,
+    candidate: Any,
+    store: dict[str, Any],
+    *,
+    escalations: int = 0,
+    exclude_lanes: frozenset[str] = frozenset(),
+    purpose: str = "task",
+) -> LocalPlan:
+    """The existing router, asked the question with local constraints attached.
+
+    Approval and harness availability are expressed as inputs -- an unapproved
+    model is not a qualified candidate, an unavailable lane is an excluded lane
+    -- so the router, its rejection messages, its fallback chain and its
+    escalation ladder all keep working without a second router existing.
+    """
+    classification = classify.classify(candidate.task, prior_failures=escalations)
+    branch = coordinator.branch_name(candidate.task, candidate.block)
+    inputs = ctx.routing_inputs()
+    class_name = routing.capability_class(inputs.policy, classification)
+    gated = approvals.gate_inputs(
+        inputs, store, capability_class=class_name, purpose=purpose
+    )
+
+    unusable = unavailable_lanes(inputs.policy)
+    excluded = frozenset(exclude_lanes) | frozenset(unusable)
+    plan = LocalPlan(
+        candidate=candidate,
+        classification=classification,
+        capability_class=class_name,
+        branch=branch,
+        rejections=list(unusable.values()),
+    )
+
+    try:
+        plan.writer = routing.select(
+            gated,
+            classification,
+            effort_escalations=escalations,
+            exclude_lanes=excluded,
+        )
+    except routing.RoutingBlocked as blocked:
+        plan.blocked_reason = blocked.reason
+        plan.rejections.extend(blocked.rejections)
+        return plan
+
+    plan.rejections.extend(plan.writer.rejections)
+
+    try:
+        plan.reviewer = routing.select_reviewer(gated, classification, plan.writer)
+    except routing.RoutingBlocked as blocked:
+        # Independence is the ideal and is not always purchasable locally: with
+        # only one provider family installed there is no other family to ask.
+        # Reviewing with a same-family reviewer and saying so is better than
+        # either skipping review or refusing to work at all -- and the cloud
+        # review on the pull request, which is independent, still happens.
+        plan.rejections.extend(blocked.rejections)
+        try:
+            plan.reviewer = routing.select(
+                gated, classification, purpose="review", exclude_lanes=excluded
+            )
+            plan.reviewer_independent = False
+        except routing.RoutingBlocked as also_blocked:
+            plan.blocked_reason = f"no reviewer available: {also_blocked.reason}"
+            plan.rejections.extend(also_blocked.rejections)
+    return plan
+
+
+# --------------------------------------------------------------------------
+# Review findings
+# --------------------------------------------------------------------------
+
+BLOCKING_SEVERITIES = ("blocker", "major")
+BLOCKING_CONFIDENCE = ("high", "medium")
+
+REVIEW_SCHEMA = """Reply with one JSON object and nothing else:
+
+{"verdict": "pass" | "changes_requested",
+ "summary": "<one sentence>",
+ "findings": [
+   {"severity": "blocker|major|minor|nit",
+    "confidence": "high|medium|low",
+    "file": "<path or empty>",
+    "line": <number or null>,
+    "requirement": "<the rule or invariant this breaks>",
+    "repair": "<the smallest change that fixes it>"}
+ ]}
+
+Report only defects you can point at in the diff. A style preference is `nit`
+with `low` confidence. Do not restate what the code does."""
+
+
+def parse_findings(text: str) -> dict[str, Any]:
+    """The reviewer's verdict, read from whatever it actually replied with.
+
+    A reviewer that answers in prose has still reviewed; the run is not thrown
+    away over formatting. But an unreadable verdict is never read as a pass,
+    because "could not tell" and "looks fine" are different answers.
+    """
+    if not text:
+        return {"verdict": "unreadable", "summary": "", "findings": []}
+    candidates = [text]
+    if "```" in text:
+        for chunk in text.split("```"):
+            chunk = chunk.strip()
+            if chunk.startswith("json"):
+                chunk = chunk[4:].strip()
+            if chunk.startswith("{"):
+                candidates.insert(0, chunk)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        candidates.insert(0, text[start : end + 1])
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        findings = parsed.get("findings")
+        return {
+            "verdict": str(parsed.get("verdict") or "changes_requested"),
+            "summary": str(parsed.get("summary") or "")[:400],
+            "findings": [f for f in (findings or []) if isinstance(f, dict)],
+        }
+    return {"verdict": "unreadable", "summary": text[:400], "findings": []}
+
+
+def blocking_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The findings that must be fixed before this task can be finished.
+
+    A low-confidence style note is recorded and does not block: leaving the
+    loop hostage to taste is how a repair budget gets spent on rewording a
+    comment.
+    """
+    blocking = []
+    for finding in findings:
+        severity = str(finding.get("severity") or "").lower()
+        confidence = str(finding.get("confidence") or "high").lower()
+        if severity in BLOCKING_SEVERITIES and confidence in BLOCKING_CONFIDENCE:
+            blocking.append(finding)
+    return blocking
+
+
+def review_prompt(root: Path, task_id: int, diff: str, changed: list[str]) -> str:
+    """What the reviewer is asked, and what it is allowed to look at."""
+    packet = brief_mod.render(root, task_id)
+    files = "\n".join(f"- `{path}`" for path in changed) or "- (no files changed)"
+    return (
+        "You are reviewing an implementation. You may read files and run read-only\n"
+        "commands. You may not edit anything: report findings instead.\n\n"
+        f"### Files changed\n\n{files}\n\n"
+        f"### Diff\n\n```diff\n{diff[:60000]}\n```\n\n"
+        f"### The canonical requirements\n\n{packet}\n\n"
+        f"### How to answer\n\n{REVIEW_SCHEMA}\n"
+    )
+
+
+def repair_prompt(root: Path, task_id: int, findings: list[dict[str, Any]]) -> str:
+    """The repair worker gets the exact findings, and only those."""
+    lines = []
+    for index, finding in enumerate(findings, start=1):
+        where = finding.get("file") or "unknown file"
+        line = finding.get("line")
+        where = f"{where}:{line}" if line else where
+        lines.append(
+            f"{index}. [{finding.get('severity')}/{finding.get('confidence')}] "
+            f"{where}\n   requirement: {finding.get('requirement')}\n"
+            f"   repair: {finding.get('repair')}"
+        )
+    findings_text = "\n".join(lines) or "(none recorded)"
+    packet = brief_mod.render(root, task_id, repair="review findings")
+    return (
+        "A reviewer found the problems below in your branch. Fix exactly these,\n"
+        "in the smallest way that is correct, and change nothing else.\n\n"
+        f"### Findings\n\n{findings_text}\n\n{packet}\n\n"
+        f"### Capabilities\n\n{skill_line('implement', repairing=True)}\n"
+    )
+
+
+def diff_of(root: Path, worktree: Path, *, runner: Runner | None = None) -> str:
+    """The change under review, committed or not."""
+    tracked = _git(worktree, ["diff", "HEAD"], runner=runner)
+    untracked = _git(
+        worktree, ["ls-files", "--others", "--exclude-standard"], runner=runner
+    )
+    parts = [tracked.stdout or ""]
+    for name in (untracked.stdout or "").splitlines():
+        name = name.strip()
+        if not name:
+            continue
+        path = worktree / name
+        try:
+            body = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        parts.append(f"\n--- /dev/null\n+++ b/{name}\n" + body[:20000])
+    return "\n".join(part for part in parts if part.strip())
 
 
 # --------------------------------------------------------------------------
@@ -581,13 +759,13 @@ def _finish(
     branch that is not this one.
     """
     lease = tasks.get("leases", {}).get(str(task_id), {})
-    if outcome == "completed":
-        lease["state"] = "review"
+    if outcome in ("completed", "ready_for_pr"):
+        lease["state"] = "ready_for_pr"
         lease["heartbeat_at"] = localstate.now()
         save_leases(paths, tasks)
-        return {"lease_state": "review", "escalated": False}
+        return {"lease_state": "ready_for_pr", "escalated": False}
 
-    if outcome == "governance_refused":
+    if outcome in ("governance_refused", "blocked"):
         leases.release(tasks, task_id, "blocked")
         save_leases(paths, tasks)
         return {"lease_state": "blocked", "escalated": False}
@@ -612,6 +790,56 @@ def _finish(
     return {"lease_state": lease.get("state"), "escalated": False}
 
 
+def _record(paths: localstate.LocalPaths, task_id: int, /, **fields: Any) -> None:
+    """Update this task's worker record.
+
+    `task_id` is positional-only so a caller may also record a field of
+    its own called `task_id` without colliding with this parameter.
+    """
+    localstate.save_worker(paths, str(task_id), fields)
+
+
+def _implement(
+    root: Path,
+    paths: localstate.LocalPaths,
+    *,
+    task_id: int,
+    assignment: Any,
+    worktree: Path,
+    config: Mapping[str, Any],
+    prompt: str,
+    role: str,
+    popen: Callable[..., Any] | None,
+) -> dict[str, Any]:
+    run = run_worker(
+        root,
+        paths,
+        prompt=prompt,
+        model=assignment.harness_model,
+        role=role,
+        worktree=worktree,
+        config=config,
+        lane=assignment.lane,
+        popen=popen,
+        on_spawn=lambda pid: _record(
+            paths, task_id, pid=pid, image=worker_image(assignment.lane)
+        ),
+    )
+    _record(
+        paths,
+        task_id,
+        model=assignment.harness_model,
+        lane=assignment.lane,
+        harness=run.get("harness"),
+        provider=run.get("provider"),
+        usage=run.get("usage"),
+        cost_usd=run.get("cost_usd"),
+        cost_known=run.get("cost_known"),
+        last_action=run.get("last_action"),
+    )
+    return run
+
+
 def run_once(
     root: Path,
     paths: localstate.LocalPaths,
@@ -620,36 +848,40 @@ def run_once(
     popen: Callable[..., Any] | None = None,
     runner: Runner | None = None,
     verification_kind: str = "fast",
+    review: bool = True,
 ) -> dict[str, Any]:
-    """One full local iteration: decide, lease, run, judge, record.
+    """One task, taken from assignment to ready-for-review, locally.
 
-    Every decision in here belongs to a module that already existed. What is
-    new is only the part between them.
+    The whole lifecycle lives here rather than in a second workflow engine:
+    implement, verify what changed, review it, repair exactly what review
+    found, re-review, verify in full, and only then call it ready for a pull
+    request. Every decision inside is made by a module that already existed --
+    the router picks both workers, the lease module bounds the repairs, the
+    governance guard decides what a branch may not touch.
     """
     localstate.ensure(paths)
+    config = localstate.load_config(paths)
+    authorized, why = local_authorized(config)
+    if not authorized:
+        # Deliberately not the cloud switch. Cloud autonomy stays off; this is
+        # about whether an operator has started the local runtime on purpose.
+        return {"dispatched": False, "reason": why, "local_enabled": False}
+
     ctx = coordinator.load_context(root)
     ctx.tasks = load_leases(root, paths)
+    store = approvals.load(paths)
     owner = owner or f"local-{os.getpid()}"
-
-    if not state.autonomy_enabled(ctx.policy):
-        return {
-            "dispatched": False,
-            "reason": "AUTONOMY_ENABLED is false; no implementation work is assigned",
-        }
 
     candidate = coordinator.next_eligible(ctx)
     if candidate is None:
         return {"dispatched": False, "reason": "no eligible task"}
 
-    built = coordinator.plan(ctx, candidate)
-    # `blocked_reason` is set with a writer still present when the plan failed
-    # for another reason -- no independent reviewer, for instance. Starting
-    # anyway would run work the coordinator had already refused.
-    if built.writer is None or built.blocked_reason:
+    plan = local_plan(ctx, candidate, store)
+    if plan.writer is None or plan.blocked_reason:
         return {
             "dispatched": False,
-            "reason": built.blocked_reason or "no writer could be routed",
-            "rejections": built.rejections,
+            "reason": plan.blocked_reason or "no writer could be routed",
+            "rejections": plan.rejections,
         }
 
     run_id = uuid.uuid4().hex[:12]
@@ -659,11 +891,14 @@ def run_once(
             ctx.policy,
             task_id=candidate.task.id,
             owner=owner,
-            branch=built.branch,
-            assignment=built.writer.as_dict(),
+            branch=plan.branch,
+            assignment=plan.writer.as_dict(),
             run_id=run_id,
             owner_finished=lambda held: (
-                not localstate.process_alive(held.get("pid"), worker_image())
+                not localstate.process_alive(
+                    held.get("pid"),
+                    worker_image(plan.writer.lane if plan.writer else ""),
+                )
             ),
         )
     except leases.LeaseConflict as conflict:
@@ -674,87 +909,342 @@ def run_once(
         return {"dispatched": False, "reason": f"BLOCKED_AUTOMATION: {exhausted}"}
     save_leases(paths, ctx.tasks)
 
-    config = localstate.load_config(paths)
-    worktree = worktree_path(root, config, built.branch)
-    create_worktree(root, built.branch, worktree, runner=runner)
-    localstate.save_worker(
+    task_id = candidate.task.id
+    worktree = worktree_path(root, config, plan.branch)
+    create_worktree(root, plan.branch, worktree, runner=runner)
+    _record(
         paths,
-        str(candidate.task.id),
-        {
-            "task_id": candidate.task.id,
-            "task_title": candidate.task.title,
-            "role": "implement",
-            "branch": built.branch,
-            "worktree": str(worktree),
-            "lane": built.writer.lane,
-            "model": built.writer.harness_model,
-            "provider": config.get("provider"),
-            "phase": "implementing",
-            "run_id": run_id,
-            "started_at": localstate.now(),
-        },
+        task_id,
+        task_id=task_id,
+        task_title=candidate.task.title,
+        role="implement",
+        branch=plan.branch,
+        worktree=str(worktree),
+        provider=config.get("provider"),
+        phase="implementing",
+        run_id=run_id,
+        started_at=localstate.now(),
+        reviewer_independent=plan.reviewer_independent,
+        escalations=[],
     )
+
+    phases: list[dict[str, Any]] = []
+    escalations: list[dict[str, Any]] = []
+    writer = plan.writer
+    ceilings = ctx.policy["escalation"]
+    max_implementation = int(ceilings["max_implementation_attempts"])
+    max_review_cycles = int(ceilings["max_review_repair_cycles"])
+    outcome = "unverified"
+    verification: dict[str, Any] | None = None
+    verdict: dict[str, Any] = {}
+    run: dict[str, Any] = {}
+
+    def finish(final: str, detail: str = "") -> dict[str, Any]:
+        result = _finish(paths, ctx.tasks, ctx.policy, task_id, final, once_key=run_id)
+        _record(
+            paths,
+            task_id,
+            phase=final,
+            verification=None if verification is None else verification["ok"],
+            review=verdict,
+            escalations=escalations,
+            finished_at=localstate.now(),
+        )
+        localstate.append_event(
+            paths, "task_outcome", task_id=task_id, outcome=final, detail=detail
+        )
+        return {
+            "dispatched": True,
+            "task_id": task_id,
+            "branch": plan.branch,
+            "worktree": str(worktree),
+            "assignment": writer.as_dict() if writer else None,
+            "reviewer": plan.reviewer.as_dict() if plan.reviewer else None,
+            "reviewer_independent": plan.reviewer_independent,
+            "phases": phases,
+            "escalations": escalations,
+            "run": run,
+            "review": verdict,
+            "verification": verification,
+            "outcome": final,
+            "detail": detail,
+            **result,
+        }
+
+    # ---------------------------------------------------- implement + verify
+    for attempt in range(max_implementation):
+        if attempt:
+            # Escalation is the existing ladder: more effort first, then a
+            # different lane, which is what moves the work across families.
+            previous = writer
+            skip = frozenset({previous.lane}) if attempt > 1 else frozenset()
+            escalated = local_plan(
+                ctx,
+                candidate,
+                store,
+                escalations=attempt,
+                exclude_lanes=skip,
+            )
+            if escalated.writer is not None:
+                writer = escalated.writer
+                escalations.append(
+                    {
+                        "at": localstate.now(),
+                        "attempt": attempt,
+                        "previous_model": previous.harness_model,
+                        "previous_lane": previous.lane,
+                        "failure": outcome,
+                        "next_model": writer.harness_model,
+                        "next_lane": writer.lane,
+                        "harness": executors.for_lane(writer.lane).name,
+                    }
+                )
+                localstate.append_event(
+                    paths, "escalation", task_id=task_id, **escalations[-1]
+                )
+
+        _record(paths, task_id, phase="implementing")
+        if attempt == 0:
+            prompt = build_prompt(root, task_id, "implement")
+        elif verdict.get("findings"):
+            prompt = repair_prompt(
+                root, task_id, blocking_findings(verdict["findings"])
+            )
+        else:
+            prompt = build_prompt(root, task_id, "implement", repair="a failing check")
+        run = _implement(
+            root,
+            paths,
+            task_id=task_id,
+            assignment=writer,
+            worktree=worktree,
+            config=config,
+            prompt=prompt,
+            role="implement",
+            popen=popen,
+        )
+        phases.append({"phase": "implementing", "outcome": run["outcome"]})
+
+        changed = changed_paths(root, worktree, runner=runner)
+        violations = governance.violations(changed)
+        if violations:
+            outcome = "governance_refused"
+            return finish(outcome, ", ".join(violations))
+        if not run["ok"]:
+            outcome = classify_outcome(run, None, [])
+            if attempt + 1 >= max_implementation:
+                return finish(outcome, "implementation attempts exhausted")
+            continue
+
+        _record(paths, task_id, phase="verifying", changed_files=changed)
+        verification = verify(
+            root, paths, worktree, kind="fast", owner=owner, runner=runner
+        )
+        phases.append({"phase": "verifying", "ok": verification["ok"]})
+        if verification["ok"]:
+            break
+        outcome = "verification_failed"
+        if attempt + 1 >= max_implementation:
+            return finish(outcome, "verification still failing")
+    else:
+        return finish(outcome or "implementation_failed", "no attempt succeeded")
+
+    if not run.get("ok") or verification is None or not verification["ok"]:
+        return finish(outcome or "verification_failed", "targeted verification failed")
+
+    # ----------------------------------------------------------- review loop
+    if review and plan.reviewer is not None:
+        for cycle in range(max_review_cycles + 1):
+            _record(paths, task_id, phase="review")
+            diff = diff_of(root, worktree, runner=runner)
+            review_run = run_worker(
+                root,
+                paths,
+                prompt=review_prompt(root, task_id, diff, changed),
+                model=plan.reviewer.harness_model,
+                role="review",
+                worktree=worktree,
+                config=config,
+                lane=plan.reviewer.lane,
+                popen=popen,
+            )
+            verdict = parse_findings(review_run.get("last_action", ""))
+            verdict["reviewer"] = plan.reviewer.harness_model
+            verdict["independent"] = plan.reviewer_independent
+            verdict["cycle"] = cycle
+            localstate.write(
+                paths.run_dir(review_run["run_id"]) / "findings.json", verdict
+            )
+            phases.append(
+                {
+                    "phase": "review",
+                    "verdict": verdict["verdict"],
+                    "findings": len(verdict.get("findings", [])),
+                }
+            )
+            _record(paths, task_id, review=verdict)
+
+            must_fix = blocking_findings(verdict.get("findings", []))
+            if not must_fix and verdict["verdict"] != "unreadable":
+                break
+            if verdict["verdict"] == "unreadable" and not must_fix:
+                # An unreadable verdict is not a pass. It is also not a defect
+                # to hand a repair worker, so it stops the task rather than
+                # burning the budget on a guess.
+                return finish("blocked", "the reviewer's verdict could not be read")
+            if cycle >= max_review_cycles:
+                return finish(
+                    "blocked",
+                    "review repair budget exhausted with "
+                    + "; ".join(
+                        str(f.get("requirement") or f.get("repair")) for f in must_fix
+                    ),
+                )
+
+            try:
+                leases.begin_repair(
+                    ctx.tasks,
+                    dict(ctx.policy),
+                    task_id,
+                    reason="review",
+                    once_key=f"{run_id}-review-{cycle}",
+                )
+                save_leases(paths, ctx.tasks)
+            except leases.RepairBudgetExhausted as exhausted:
+                return finish("blocked", str(exhausted))
+
+            _record(paths, task_id, phase="repairing")
+            run = _implement(
+                root,
+                paths,
+                task_id=task_id,
+                assignment=writer,
+                worktree=worktree,
+                config=config,
+                prompt=repair_prompt(root, task_id, must_fix),
+                role="implement",
+                popen=popen,
+            )
+            phases.append({"phase": "repairing", "outcome": run["outcome"]})
+
+            changed = changed_paths(root, worktree, runner=runner)
+            violations = governance.violations(changed)
+            if violations:
+                return finish("governance_refused", ", ".join(violations))
+            if not run["ok"]:
+                return finish("implementation_failed", "repair worker failed")
+
+            _record(paths, task_id, phase="verifying", changed_files=changed)
+            verification = verify(
+                root, paths, worktree, kind="fast", owner=owner, runner=runner
+            )
+            phases.append({"phase": "verifying", "ok": verification["ok"]})
+            if not verification["ok"]:
+                return finish("verification_failed", "repair did not verify")
+
+    # ------------------------------------------------------ full verification
+    _record(paths, task_id, phase="verifying_full")
+    verification = verify(
+        root, paths, worktree, kind=verification_kind, owner=owner, runner=runner
+    )
+    phases.append(
+        {
+            "phase": "verifying_full",
+            "kind": verification_kind,
+            "ok": verification["ok"],
+        }
+    )
+    if not verification["ok"]:
+        return finish("verification_failed", "full verification failed")
+
+    changed = changed_paths(root, worktree, runner=runner)
+    violations = governance.violations(changed)
+    if violations:
+        return finish("governance_refused", ", ".join(violations))
+
+    _record(paths, task_id, changed_files=changed)
+    return finish("ready_for_pr")
+
+
+EVAL_PROMPT = (
+    "This is a model evaluation on a throwaway branch, not product work.\n"
+    "Create a file named EVAL.md in the current working directory containing "
+    "exactly two lines: the first the single word ok, the second the number of "
+    "Python files under services/agentops as a bare integer.\n"
+    "Change nothing else, and do not edit any existing file. "
+    "Reply with the single word done."
+)
+
+
+def evaluate_model(
+    root: Path,
+    paths: localstate.LocalPaths,
+    model: str,
+    *,
+    lane: str = "claude_subscription",
+    keep: bool = False,
+    popen: Callable[..., Any] | None = None,
+    runner: Runner | None = None,
+) -> dict[str, Any]:
+    """Run one fixed task on one model and record what it cost to get it.
+
+    The task and the harness are held constant so the numbers compare. This is
+    not a benchmark suite and is not trying to be: it answers whether a
+    candidate can follow a small instruction in this repository without
+    wandering, which is the question an approval actually turns on.
+    """
+    localstate.ensure(paths)
+    config = localstate.load_config(paths)
+    branch = f"agentops/eval-{uuid.uuid4().hex[:8]}"
+    worktree = worktree_path(root, config, branch.replace("/", "-"))
+    create_worktree(root, branch, worktree, runner=runner)
+    started = time.monotonic()
 
     run = run_worker(
         root,
         paths,
-        prompt=build_prompt(root, candidate.task.id, "implement"),
-        model=built.writer.harness_model,
-        role="implement",
+        prompt=EVAL_PROMPT,
+        model=model,
+        role="scout",
         worktree=worktree,
         config=config,
-        run_id=run_id,
+        lane=lane,
         popen=popen,
-        on_spawn=lambda pid: localstate.save_worker(
-            paths, str(candidate.task.id), {"pid": pid, "image": worker_image()}
-        ),
     )
-
+    marker = worktree / "EVAL.md"
     changed = changed_paths(root, worktree, runner=runner)
     violations = governance.violations(changed)
-    verification: dict[str, Any] | None = None
-    if run["ok"] and not violations:
-        verification = verify(
-            root, paths, worktree, kind=verification_kind, owner=owner, runner=runner
-        )
+    verification = verify(
+        root, paths, worktree, kind="fast", owner="evaluation", runner=runner
+    )
+    usage = run.get("usage") or {}
 
-    outcome = classify_outcome(run, verification, violations)
-    finished = _finish(
-        paths, ctx.tasks, ctx.policy, candidate.task.id, outcome, once_key=run_id
-    )
-    localstate.save_worker(
-        paths,
-        str(candidate.task.id),
-        {
-            "phase": outcome,
-            "usage": run.get("usage"),
-            "cost_usd": run.get("cost_usd"),
-            "last_action": run.get("last_action"),
-            "verification": None if verification is None else verification["ok"],
-            "changed_files": changed,
-            "violations": violations,
-            "finished_at": localstate.now(),
-        },
-    )
+    result = {
+        "model": model,
+        "lane": lane,
+        "harness": run.get("harness"),
+        "outcome": run.get("outcome"),
+        "completed_task": marker.exists(),
+        "unnecessary_edits": [p for p in changed if p != "EVAL.md"],
+        "governance_violations": violations,
+        "tests_ok": verification["ok"],
+        "turns": run.get("turns"),
+        "latency_seconds": round(time.monotonic() - started, 1),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "cost_usd": run.get("cost_usd"),
+        "cost_known": run.get("cost_known"),
+        "reason": run.get("reason", ""),
+    }
     localstate.append_event(
         paths,
-        "task_outcome",
-        task_id=candidate.task.id,
-        outcome=outcome,
-        lease_state=finished.get("lease_state"),
+        "model_evaluated",
+        **{k: result[k] for k in ("model", "lane", "outcome", "completed_task")},
     )
-    return {
-        "dispatched": True,
-        "task_id": candidate.task.id,
-        "branch": built.branch,
-        "worktree": str(worktree),
-        "assignment": built.writer.as_dict(),
-        "run": run,
-        "violations": violations,
-        "verification": verification,
-        "outcome": outcome,
-        **finished,
-    }
+    if not keep:
+        remove_worktree(root, worktree, runner=runner)
+        _git(root, ["branch", "-D", branch], runner=runner)
+    return result
 
 
 def recover(
