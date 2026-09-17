@@ -24,3 +24,4 @@ footage/
 datasets/
 weights/
 frames/
+.agentops/

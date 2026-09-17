@@ -9,6 +9,16 @@ refuses while autonomy is disabled.
     python -m services.agentops.cli qualify --lane openrouter
     python -m services.agentops.cli health
     python -m services.agentops.cli dispatch
+
+The local runtime lives behind its own verbs. `run` is the only one that
+starts work, and it refuses while autonomy is disabled:
+
+    python -m services.agentops.cli doctor
+    python -m services.agentops.cli run --once
+    python -m services.agentops.cli serve
+    python -m services.agentops.cli local-status
+    python -m services.agentops.cli resume
+    python -m services.agentops.cli provider openrouter
 """
 
 from __future__ import annotations
@@ -16,17 +26,23 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import signal
 import sys
 from pathlib import Path
 from typing import Any
 
 from . import (
+    approvals,
     catalog,
     classify,
     control_center,
     coordinator,
+    dashboard,
     governance,
     leases,
+    local,
+    localstate,
     notify,
     qualify,
     reconcile,
@@ -34,6 +50,7 @@ from . import (
     routing,
     state,
     statebranch,
+    toolchain,
     watchdog,
 )
 
@@ -1030,6 +1047,268 @@ def cmd_notify(args: argparse.Namespace) -> int:
     return _emit({"ok": ok, "issue": issue})
 
 
+# --------------------------------------------------------------------------
+# The local runtime
+# --------------------------------------------------------------------------
+
+
+def _local_paths(args: argparse.Namespace) -> localstate.LocalPaths:
+    return localstate.ensure(localstate.LocalPaths(_root(args)))
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Run local iterations until there is nothing eligible left to do.
+
+    Refuses while autonomy is disabled, exactly as `dispatch` does: a local
+    runtime is not an exception to the switch, it is another way to obey it.
+    """
+    root = _root(args)
+    paths = _local_paths(args)
+    if args.enable:
+        # Typing the command is the authorisation. It is recorded locally and
+        # never touches ops/policy.json, so cloud autonomy stays exactly as it
+        # was.
+        local.enable_local(paths)
+    localstate.write(
+        paths.runtime,
+        {
+            "pid": os.getpid(),
+            "image": Path(sys.executable).name,
+            "started_at": localstate.now(),
+            "state": "running",
+            "root": str(root),
+        },
+    )
+    results = []
+    try:
+        for _ in range(max(1, args.iterations)):
+            result = local.run_once(
+                root,
+                paths,
+                verification_kind=args.verification,
+                review=not args.no_review,
+            )
+            results.append(result)
+            if not result.get("dispatched"):
+                break
+            if args.once:
+                break
+    finally:
+        localstate.write(
+            paths.runtime,
+            {
+                "pid": os.getpid(),
+                "image": Path(sys.executable).name,
+                "stopped_at": localstate.now(),
+                "state": "stopped",
+                "root": str(root),
+            },
+        )
+    return _emit({"iterations": len(results), "results": results})
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Serve the read-only dashboard on the loopback interface."""
+    root = _root(args)
+    paths = _local_paths(args)
+    config = localstate.load_config(paths)
+    host = args.host or config["dashboard"]["host"]
+    port = int(args.port or config["dashboard"]["port"])
+    print(f"AgentOps local dashboard on http://{host}:{port}/ (Ctrl+C to stop)")
+    try:
+        dashboard.serve(root, paths, host=host, port=port)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Say what the last run left behind, without destroying any of it."""
+    return _emit(local.recover(_root(args), _local_paths(args)))
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    """Ask a running local coordinator to stop.
+
+    Only the coordinator is signalled. A worker that is mid-edit is left to
+    finish or to be found by recovery, because killing it is how a worktree
+    ends up half written with nothing recording why.
+    """
+    paths = _local_paths(args)
+    # Stopping means stop scheduling locally. Cloud policy is not consulted
+    # and not changed.
+    local.disable_local(paths)
+    runtime = localstate.read(paths.runtime, {})
+    raw = str(runtime.get("pid") or "")
+    pid = int(raw) if raw.isdigit() else None
+    # With the image as well as the number: after the coordinator exits, its
+    # pid can be reused, and an unconditional SIGTERM would then kill whatever
+    # inherited it.
+    image = str(runtime.get("image") or "")
+    if pid is None or not localstate.process_alive(pid, image or None):
+        return _emit(
+            {
+                "stopped": False,
+                "local_enabled": False,
+                "reason": "local scheduling disabled; no runtime process was running",
+            }
+        )
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (OSError, ValueError) as failure:
+        return _emit({"stopped": False, "reason": str(failure)})
+    localstate.append_event(paths, "runtime_stopped", pid=pid)
+    return _emit({"stopped": True, "pid": pid, "local_enabled": False})
+
+
+def cmd_provider(args: argparse.Namespace) -> int:
+    """Show or switch the provider a local worker runs against.
+
+    Switching records the choice and nothing else. The OpenRouter key is read
+    from the environment when a worker spawns and is never stored here.
+    """
+    paths = _local_paths(args)
+    config = localstate.load_config(paths)
+    if args.choice != "status":
+        config["provider"] = args.choice
+        localstate.save_config(paths, config)
+    status = local.provider_status(config)
+    if status["status"] == "AVAILABLE_LATER":
+        status["how_to_enable"] = (
+            f"set {local.OPENROUTER_KEY_ENV} in the shell that starts the runtime, "
+            "then run: python -m services.agentops.cli provider status"
+        )
+    return _emit(status)
+
+
+def cmd_local_status(args: argparse.Namespace) -> int:
+    """What the local runtime is doing, as the dashboard would show it."""
+    root = _root(args)
+    paths = _local_paths(args)
+    data = dashboard.snapshot(root, paths)
+    runtime = localstate.read(paths.runtime, {})
+    data["runtime"] = {
+        **runtime,
+        "alive": localstate.process_alive(runtime.get("pid")),
+    }
+    return _emit(data)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check the things a local run needs before it needs them."""
+    root = _root(args)
+    paths = _local_paths(args)
+    report: dict[str, Any] = {"root": str(root)}
+    try:
+        report["uv"] = {
+            "required": toolchain.required_version(root),
+            "resolved": str(toolchain.resolve_uv(root, paths)),
+            "ok": True,
+        }
+    except (toolchain.UvUnavailable, OSError) as failure:
+        # A doctor that crashes cannot diagnose anything, so a missing
+        # pyproject or an unreadable binary is a finding, not a traceback.
+        report["uv"] = {"ok": False, "reason": str(failure)}
+    config = localstate.load_config(paths)
+    report["provider"] = local.provider_status(config)
+    report["harnesses"] = local.harness_status()
+    enabled, why = local.local_authorized(config)
+    report["local_execution"] = {"enabled": enabled, "reason": why}
+    report["cloud_autonomy"] = {
+        "enabled": state.autonomy_enabled(state.load_policy(state.Paths(root))),
+        "note": "governed by ops/policy.json; the local runtime never changes it",
+    }
+    report["worktree_root"] = str(local.worktree_root(root, config))
+    report["claude_binary"] = shutil.which(local.CLAUDE_BINARY) or "not on PATH"
+    report["local_state"] = str(paths.dir)
+    # `ok` means "the configured run can start". Reporting success while the
+    # selected provider is AVAILABLE_LATER said the opposite of what it meant.
+    report["ok"] = (
+        bool(report["uv"].get("ok")) and report["provider"].get("status") == "AVAILABLE"
+    )
+    return _emit(report)
+
+
+def cmd_dry_run(args: argparse.Namespace) -> int:
+    """Exercise the whole local path on work that is not a backlog task."""
+    return _emit(
+        local.dry_run_lifecycle(_root(args), _local_paths(args), cleanup=not args.keep)
+    )
+
+
+def cmd_models(args: argparse.Namespace) -> int:
+    """Show model approval, and what is worth evaluating next."""
+    root = _root(args)
+    paths = _local_paths(args)
+    store = approvals.load(paths)
+    models_state = state.read_json(state.Paths(root).models, {"models": {}})
+    models = catalog.models_from_state(models_state)
+    return _emit(
+        {
+            "approval": approvals.summary(store),
+            "candidates": approvals.candidates(models, store),
+            "harnesses": local.harness_status(),
+        }
+    )
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    """Move one model between approval states.
+
+    Nothing discovers its way into real work. A model takes a Shoulder task
+    because somebody said it could.
+    """
+    paths = _local_paths(args)
+    store = approvals.load(paths)
+    entry = approvals.set_state(
+        paths,
+        store,
+        args.model,
+        args.state,
+        risk_class=args.risk_class,
+        note=args.note or "",
+    )
+    return _emit({"model": args.model, **entry})
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """Run the same throwaway task on several models and compare what happened.
+
+    Deliberately small. It holds the task and the harness constant and reports
+    what each model did with them, which is the comparison that decides an
+    approval. OpenRouter's own Ori Eval is the larger tool for this and is
+    documented in docs/agentops-local-runtime.md; it needs Bun and a bash
+    installer, so it is not the path this repository depends on.
+    """
+    root = _root(args)
+    paths = _local_paths(args)
+    store = approvals.load(paths)
+    results = []
+    models_state = state.read_json(state.Paths(root).models, {"models": {}})
+    known = {model.id: model.lane for model in catalog.models_from_state(models_state)}
+    for model_id in args.models:
+        # From the catalogue. Inferring it from a slash sent
+        # `anthropic/claude-sonnet-5` to OpenCode, because namespaced ids are
+        # not an OpenRouter-only shape.
+        lane = known.get(model_id) or (
+            "openrouter" if "/" in model_id else "claude_subscription"
+        )
+        allowed, reason = approvals.may_take(
+            store,
+            model_id,
+            lane=lane,
+            capability_class="CHEAP_MECHANICAL",
+            purpose="evaluation",
+        )
+        if not allowed:
+            results.append({"model": model_id, "skipped": reason})
+            continue
+        results.append(
+            local.evaluate_model(root, paths, model_id, lane=lane, keep=args.keep)
+        )
+    return _emit({"evaluation": results})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentops")
     parser.add_argument("--root", default=".", help="repository root")
@@ -1239,6 +1518,95 @@ def build_parser() -> argparse.ArgumentParser:
     feed.add_argument("--issue", type=int)
     feed.add_argument("--repo")
     feed.set_defaults(func=cmd_notify)
+
+    run = sub.add_parser(
+        "run", help="run the local runtime: decide, lease, implement, verify"
+    )
+    run.add_argument(
+        "--once", action="store_true", help="stop after one dispatched task"
+    )
+    run.add_argument(
+        "--iterations",
+        type=int,
+        default=1,
+        help="how many tasks to attempt before stopping",
+    )
+    run.add_argument(
+        "--enable",
+        action="store_true",
+        help="authorise local execution on this machine (local state only)",
+    )
+    run.add_argument(
+        "--no-review",
+        action="store_true",
+        help="skip the local review stage (diagnostics only)",
+    )
+    run.add_argument(
+        "--verification",
+        choices=["fast", "gated"],
+        default="fast",
+        help="fast is the Python gate; gated adds the shared-port suite",
+    )
+    run.set_defaults(func=cmd_run)
+
+    serve = sub.add_parser("serve", help="serve the read-only local dashboard")
+    serve.add_argument("--host")
+    serve.add_argument("--port", type=int)
+    serve.set_defaults(func=cmd_serve)
+
+    sub.add_parser(
+        "resume", help="classify what the last local run left behind"
+    ).set_defaults(func=cmd_resume)
+
+    sub.add_parser("stop", help="stop a running local coordinator").set_defaults(
+        func=cmd_stop
+    )
+
+    sub.add_parser(
+        "local-status", help="what the local runtime is doing, as JSON"
+    ).set_defaults(func=cmd_local_status)
+
+    sub.add_parser(
+        "doctor", help="check uv, provider and harness before a run needs them"
+    ).set_defaults(func=cmd_doctor)
+
+    dry = sub.add_parser(
+        "dry-run", help="exercise the local path on a throwaway branch"
+    )
+    dry.add_argument(
+        "--keep", action="store_true", help="leave the worktree and branch in place"
+    )
+    dry.set_defaults(func=cmd_dry_run)
+
+    provider = sub.add_parser(
+        "provider", help="show or switch the local worker provider"
+    )
+    provider.add_argument(
+        "choice",
+        nargs="?",
+        default="status",
+        choices=["status", *local.PROVIDERS],
+    )
+    provider.set_defaults(func=cmd_provider)
+
+    models_cmd = sub.add_parser(
+        "models", help="model approval state and evaluation candidates"
+    )
+    models_cmd.set_defaults(func=cmd_models)
+
+    approve = sub.add_parser("approve-model", help="set a model's approval state")
+    approve.add_argument("model")
+    approve.add_argument("state", choices=list(approvals.STATES))
+    approve.add_argument("--risk-class", choices=["standard", "high"])
+    approve.add_argument("--note")
+    approve.set_defaults(func=cmd_approve)
+
+    evaluate = sub.add_parser(
+        "evaluate", help="run one throwaway task on several models and compare"
+    )
+    evaluate.add_argument("models", nargs="+")
+    evaluate.add_argument("--keep", action="store_true")
+    evaluate.set_defaults(func=cmd_evaluate)
 
     return parser
 
