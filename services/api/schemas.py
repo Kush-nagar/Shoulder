@@ -380,3 +380,73 @@ class Observation(BaseModel):
     event_type: str | None
     created_by: UUID
     created_at: datetime
+
+
+# --- Coach judgments and revisions --------------------------------------------
+#
+# `author_user_id` never appears on a request model: it is always the
+# authenticated session, never a client-supplied value. `version` on a patch
+# request is the `If-Match` header, not a body field.
+
+Verdict = Literal["applied", "opportunity", "not_relevant"]
+
+
+class JudgmentCreate(BaseModel):
+    goal_id: UUID
+    verdict: Verdict
+    comment_text: str | None = Field(default=None, min_length=1, max_length=400)
+    clip_start_ms: int = Field(ge=0)
+    clip_end_ms: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> Self:
+        if self.clip_end_ms <= self.clip_start_ms:
+            raise ValueError("clip_end_ms must be greater than clip_start_ms")
+        return self
+
+
+class JudgmentPatch(BaseModel):
+    """A full content snapshot: every edit replaces the whole draft."""
+
+    verdict: Verdict
+    comment_text: str | None = Field(default=None, min_length=1, max_length=400)
+    clip_start_ms: int = Field(ge=0)
+    clip_end_ms: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> Self:
+        if self.clip_end_ms <= self.clip_start_ms:
+            raise ValueError("clip_end_ms must be greater than clip_start_ms")
+        return self
+
+
+PublicationStatus = Literal["draft", "published", "withdrawn"]
+
+
+class Judgment(BaseModel):
+    id: UUID
+    observation_id: UUID
+    goal_id: UUID
+    author_user_id: UUID
+    version: int
+    publication_status: PublicationStatus
+    current_revision_id: UUID | None
+    published_at: datetime | None
+    updated_at: datetime
+    created_at: datetime
+    verdict: Verdict
+    comment_text: str | None
+    clip_start_ms: int
+    clip_end_ms: int
+
+
+class JudgmentRevision(BaseModel):
+    id: UUID
+    judgment_id: UUID
+    version: int
+    author_user_id: UUID
+    verdict: Verdict
+    comment_text: str | None
+    clip_start_ms: int
+    clip_end_ms: int
+    created_at: datetime

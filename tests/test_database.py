@@ -46,6 +46,9 @@ TABLES = (
     "processing_job",
     # 0007 — Task 14 manual marking.
     "observation",
+    # 0008 — Task 15 coach judgments.
+    "judgment",
+    "judgment_revision",
 )
 
 
