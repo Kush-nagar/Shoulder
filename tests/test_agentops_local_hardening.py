@@ -518,5 +518,44 @@ class TestDoctorAndEvaluate(RepoCase):
         self.assertEqual(seen["lane"], "claude_subscription")
 
 
+class TestOnlyOneCoordinatorMayClaim(RepoCase):
+    def test_a_second_coordinator_is_refused_while_the_first_decides(self) -> None:
+        """Read, claim and write is not atomic across processes on its own:
+        both could see no lease and both start a worker on the same branch."""
+        from services.agentops import toolchain
+
+        with toolchain.schedule_lock(self.paths, owner="first"):
+            with mock.patch.object(local, "run_worker") as worker:
+                result = local.run_once(self.root, self.paths)
+        worker.assert_not_called()
+        self.assertFalse(result["dispatched"])
+        self.assertIn("another coordinator is deciding", result["reason"])
+
+    def test_scheduling_does_not_wait_behind_a_gated_verification(self) -> None:
+        """They are separate locks: a gated run holds the infrastructure lock
+        for minutes, and scheduling must not queue behind it."""
+        from services.agentops import toolchain
+
+        with toolchain.infra_lock(self.paths, owner="verifier"):
+            with toolchain.schedule_lock(self.paths, owner="coordinator") as held:
+                self.assertEqual(held["owner"], "coordinator")
+
+    def test_the_lock_is_released_after_the_decision(self) -> None:
+        from services.agentops import toolchain
+
+        with mock.patch.object(local, "run_worker") as worker:
+            worker.return_value = {
+                "ok": False,
+                "outcome": "failed",
+                "run_id": "r",
+                "usage": {},
+                "cost_usd": 0.0,
+                "last_action": "",
+            }
+            local.run_once(self.root, self.paths)
+        with toolchain.schedule_lock(self.paths, owner="next") as held:
+            self.assertFalse(held["recovered"])
+
+
 if __name__ == "__main__":
     unittest.main()

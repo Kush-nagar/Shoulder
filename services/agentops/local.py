@@ -1116,28 +1116,47 @@ def run_once(
 
     run_id = uuid.uuid4().hex[:12]
     try:
-        leases.acquire(
-            ctx.tasks,
-            ctx.policy,
-            task_id=candidate.task.id,
-            owner=owner,
-            branch=plan.branch,
-            assignment=plan.writer.as_dict(),
-            run_id=run_id,
-            owner_finished=lambda held: (
-                not localstate.process_alive(
-                    held.get("pid"),
-                    worker_image(plan.writer.lane if plan.writer else ""),
-                )
-            ),
-        )
+        # Read, claim and write under one cross-process lock. Two coordinators
+        # could otherwise each read no lease, each pass the writer cap against
+        # its own stale snapshot, and each start a worker on the same branch.
+        # It is held for the decision only, never for the work.
+        with toolchain.schedule_lock(paths, owner=owner):
+            ctx.tasks = load_leases(root, paths)
+            reclaim_abandoned(paths, ctx.tasks, ctx.policy)
+            settled_now = settled_locally(ctx.tasks, candidate.task.id)
+            if settled_now:
+                return {
+                    "dispatched": False,
+                    "task_id": candidate.task.id,
+                    "reason": f"task {candidate.task.id} is {settled_now} locally",
+                }
+            leases.acquire(
+                ctx.tasks,
+                ctx.policy,
+                task_id=candidate.task.id,
+                owner=owner,
+                branch=plan.branch,
+                assignment=plan.writer.as_dict(),
+                run_id=run_id,
+                owner_finished=lambda held: (
+                    not localstate.process_alive(
+                        held.get("pid"),
+                        worker_image(plan.writer.lane if plan.writer else ""),
+                    )
+                ),
+            )
+            save_leases(paths, ctx.tasks)
+    except toolchain.LockBusy as busy:
+        return {
+            "dispatched": False,
+            "reason": f"another coordinator is deciding: {busy}",
+        }
     except leases.LeaseConflict as conflict:
         return {"dispatched": False, "reason": str(conflict)}
     except leases.AttemptsExhausted as exhausted:
         leases.release(ctx.tasks, candidate.task.id, "blocked")
         save_leases(paths, ctx.tasks)
         return {"dispatched": False, "reason": f"BLOCKED_AUTOMATION: {exhausted}"}
-    save_leases(paths, ctx.tasks)
 
     task_id = candidate.task.id
     worktree = worktree_path(root, config, plan.branch)

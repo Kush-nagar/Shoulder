@@ -37,6 +37,10 @@ from services.agentops import localstate
 
 UV_ENV_OVERRIDE = "SHOULDER_UV_PATH"
 LOCK_NAME = "infra.lock"
+# Scheduling is a separate lock from verification on purpose: a gated run
+# holds the infrastructure lock for many minutes, and blocking every
+# scheduling decision behind it would serialise the whole runtime.
+SCHEDULE_LOCK_NAME = "schedule.lock"
 DEFAULT_LOCK_TTL_SECONDS = 5400
 
 # Every check that binds a fixed port or starts a container. `check.ps1` is on
@@ -273,10 +277,11 @@ def _take_from_stale(lock_path: Path, token: str) -> bool:
 
 
 @contextmanager
-def infra_lock(
+def file_lock(
     paths: localstate.LocalPaths,
     *,
     owner: str,
+    name: str = LOCK_NAME,
     ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
 ) -> Iterator[dict[str, Any]]:
     """Hold the one lock that shared-port verification runs under.
@@ -288,7 +293,7 @@ def infra_lock(
     that overran its TTL cannot delete its successor's lock on the way out.
     """
     localstate.ensure(paths)
-    lock_path = paths.locks / LOCK_NAME
+    lock_path = paths.locks / name
     token = uuid.uuid4().hex
     payload: dict[str, Any] = {
         "owner": owner,
@@ -305,10 +310,10 @@ def infra_lock(
         stale, why = _lock_is_stale(holder, ttl_seconds)
         if not stale:
             raise LockBusy(
-                f"infrastructure verification is held by {holder.get('owner')} "
+                f"{name} is held by {holder.get('owner')} "
                 f"(pid {holder.get('pid')}, since {holder.get('started_at')}): {why}"
                 if why
-                else f"infrastructure verification is held by {holder.get('owner')} "
+                else f"{name} is held by {holder.get('owner')} "
                 f"(pid {holder.get('pid')}, since {holder.get('started_at')})"
             )
         payload["recovered"] = True
@@ -320,8 +325,7 @@ def infra_lock(
         }
         if not _take_from_stale(lock_path, token) or not _publish(lock_path, payload):
             raise LockBusy(
-                "another process claimed the infrastructure lock while this one "
-                "was recovering it"
+                f"another process claimed {name} while this one was recovering it"
             )
         localstate.append_event(paths, "infra_lock_recovered", owner=owner, reason=why)
 
@@ -390,3 +394,32 @@ def run_commands(
         if result.returncode != 0:
             return {"ok": False, "steps": steps, "failed": command}
     return {"ok": True, "steps": steps, "failed": None}
+
+
+@contextmanager
+def infra_lock(
+    paths: localstate.LocalPaths,
+    *,
+    owner: str,
+    ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
+) -> Iterator[dict[str, Any]]:
+    """The lock shared-port verification runs under."""
+    with file_lock(paths, owner=owner, name=LOCK_NAME, ttl_seconds=ttl_seconds) as held:
+        yield held
+
+
+@contextmanager
+def schedule_lock(
+    paths: localstate.LocalPaths, *, owner: str, ttl_seconds: int = 300
+) -> Iterator[dict[str, Any]]:
+    """The lock a coordinator holds while it decides and claims a task.
+
+    Loading the ledger, acquiring in memory and writing it back is not atomic
+    across processes: two coordinators could each read no lease, each pass the
+    writer cap against its own stale snapshot, and each start a worker on the
+    same branch. It is held only for the decision, never for the work.
+    """
+    with file_lock(
+        paths, owner=owner, name=SCHEDULE_LOCK_NAME, ttl_seconds=ttl_seconds
+    ) as held:
+        yield held
