@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -221,7 +222,7 @@ class TestAvailability(ExecutorCase):
         it must refuse before it reaches a process."""
         with mock.patch.dict(os.environ, {}, clear=True):
             with mock.patch.object(shutil, "which", return_value=None):
-                with mock.patch.object(executors.subprocess, "Popen") as spawn:
+                with mock.patch.object(subprocess, "Popen") as spawn:
                     result = executors.run(
                         executors.OpenCodeExecutor(),
                         self.paths,
