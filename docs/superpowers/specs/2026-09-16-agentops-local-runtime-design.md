@@ -89,6 +89,10 @@ claude -p --model <assignment.harness_model>
         --add-dir <worktree>
 ```
 
+Superseded: writable roles now use `--dangerously-skip-permissions` and
+read-only roles use `--permission-mode plan --permission-prompts none`. See
+`docs/agentops-local-runtime.md`.
+
 cwd is the worktree. The prompt is the existing `brief.render()` packet plus a
 short skill-routing line. `--verbose` is mandatory with `stream-json`. The hard
 stop is a wall-clock timeout, because `--max-turns` is undocumented in CLI
