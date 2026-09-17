@@ -45,7 +45,9 @@ class JudgmentApiTests(DatabaseTestCase):
         self.goal = self.admin_insert_goal(self.player, self.coach)
         self.other_goal = self.admin_insert_goal(self.other_player, self.other_coach)
 
-    def add_membership(self, team_id: UUID, user_id: UUID, role: str = "player") -> None:
+    def add_membership(
+        self, team_id: UUID, user_id: UUID, role: str = "player"
+    ) -> None:
         with self.admin.connect() as connection, connection.begin():
             connection.execute(
                 text("""
@@ -180,9 +182,11 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(response.status_code, 404, response.text)
 
     def test_edit_requires_if_match(self) -> None:
-        created = self.client_for(self.coach).post(
-            f"/v1/observations/{self.observation}/judgments", json=self.payload()
-        ).json()
+        created = (
+            self.client_for(self.coach)
+            .post(f"/v1/observations/{self.observation}/judgments", json=self.payload())
+            .json()
+        )
         response = self.client_for(self.coach).patch(
             f"/v1/judgments/{created['id']}",
             json={
@@ -264,9 +268,11 @@ class JudgmentApiTests(DatabaseTestCase):
         )
 
     def test_only_the_original_author_may_edit(self) -> None:
-        created = self.client_for(self.coach).post(
-            f"/v1/observations/{self.observation}/judgments", json=self.payload()
-        ).json()
+        created = (
+            self.client_for(self.coach)
+            .post(f"/v1/observations/{self.observation}/judgments", json=self.payload())
+            .json()
+        )
         response = self.client_for(self.co_coach).patch(
             f"/v1/judgments/{created['id']}",
             headers={"If-Match": "1"},
@@ -290,9 +296,11 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(response.status_code, 404, response.text)
 
     def test_revision_history_is_coach_only(self) -> None:
-        created = self.client_for(self.coach).post(
-            f"/v1/observations/{self.observation}/judgments", json=self.payload()
-        ).json()
+        created = (
+            self.client_for(self.coach)
+            .post(f"/v1/observations/{self.observation}/judgments", json=self.payload())
+            .json()
+        )
         coach_history = self.client_for(self.coach).get(
             f"/v1/judgments/{created['id']}/revisions"
         )

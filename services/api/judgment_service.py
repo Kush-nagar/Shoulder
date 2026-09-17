@@ -7,6 +7,7 @@ database grants, which give the runtime role no other way to write either
 table.
 """
 
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -34,9 +35,7 @@ def sqlstate(error: DBAPIError) -> str | None:
     return code if isinstance(code, str) else None
 
 
-def _revision_snapshot(
-    connection: Connection, judgment_id: UUID, version: int
-) -> Any:
+def _revision_snapshot(connection: Connection, judgment_id: UUID, version: int) -> Any:
     return connection.execute(
         text("""
             SELECT verdict, comment_text, clip_start_ms, clip_end_ms
@@ -172,7 +171,7 @@ def edit_judgment(
     )
 
 
-def list_revisions(connection: Connection, judgment_id: UUID) -> list[Any]:
+def list_revisions(connection: Connection, judgment_id: UUID) -> Sequence[Any]:
     """Immutable revision history. RLS restricts this to the coaching team."""
     return connection.execute(
         text("""

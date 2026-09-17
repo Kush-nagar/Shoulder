@@ -120,8 +120,9 @@ class JudgmentIsolationTests(IsolationHarness):
                 )
             )
 
-    def write_as(self, user_id: UUID | str | None, **overrides: Any) -> Any:
-        params: dict[str, Any] = {
+    def write_parameters(self, **overrides: Any) -> dict[str, Any]:
+        """A create of the ordinary shape, with whatever the caller changes."""
+        return {
             "judgment_id": None,
             "observation_id": self.observation_a,
             "goal_id": self.goal_a,
@@ -132,22 +133,20 @@ class JudgmentIsolationTests(IsolationHarness):
             "clip_end_ms": 2000,
             **overrides,
         }
+
+    # Not named `write_as`: the harness already has one, with a different
+    # contract, and overriding it would hide the base method from every other
+    # suite that shares this fixture.
+    def judgment_write_as(self, user_id: UUID | str | None, **overrides: Any) -> Any:
+        params = self.write_parameters(**overrides)
         with self.runtime.connect() as connection, connection.begin():
             self.as_user(connection, user_id)
             return connection.execute(text(WRITE_SQL), params).one()
 
-    def refused_write_as(self, user_id: UUID | str | None, **overrides: Any) -> str | None:
-        params: dict[str, Any] = {
-            "judgment_id": None,
-            "observation_id": self.observation_a,
-            "goal_id": self.goal_a,
-            "expected_version": None,
-            "verdict": "applied",
-            "comment_text": "Nice first touch.",
-            "clip_start_ms": 1000,
-            "clip_end_ms": 2000,
-            **overrides,
-        }
+    def refused_write_as(
+        self, user_id: UUID | str | None, **overrides: Any
+    ) -> str | None:
+        params = self.write_parameters(**overrides)
         with self.assertRaises(DBAPIError) as caught:
             with self.runtime.connect() as connection, connection.begin():
                 self.as_user(connection, user_id)
@@ -207,7 +206,7 @@ class JudgmentIsolationTests(IsolationHarness):
     # --- Creation: spoofed author / cross-team goal ------------------------
 
     def test_create_writes_judgment_and_revision_one_atomically(self) -> None:
-        row = self.write_as(self.world.a.coach)
+        row = self.judgment_write_as(self.world.a.coach)
         judgment = self.admin_read(
             "SELECT version, author_user_id FROM app.judgment WHERE id = :id",
             id=row.id,
@@ -224,7 +223,7 @@ class JudgmentIsolationTests(IsolationHarness):
         self,
     ) -> None:
         """There is no author parameter to spoof: the function derives it."""
-        row = self.write_as(self.world.a.coach)
+        row = self.judgment_write_as(self.world.a.coach)
         judgment = self.admin_read(
             "SELECT author_user_id FROM app.judgment WHERE id = :id", id=row.id
         )[0]
@@ -254,16 +253,16 @@ class JudgmentIsolationTests(IsolationHarness):
         self.assertEqual(state, INVALID_PARAMETER)
 
     def test_duplicate_observation_goal_pair_is_rejected(self) -> None:
-        self.write_as(self.world.a.coach)
+        self.judgment_write_as(self.world.a.coach)
         with self.assertRaises(DBAPIError) as caught:
-            self.write_as(self.world.a.coach)
+            self.judgment_write_as(self.world.a.coach)
         self.assertEqual(sqlstate(caught.exception), UNIQUE_VIOLATION)
 
     # --- Editing: original-author-only, versions, no-op/replay -------------
 
     def test_original_author_only_may_edit(self) -> None:
         """A second coach on the same team cannot edit another coach's draft."""
-        created = self.write_as(self.world.a.coach)
+        created = self.judgment_write_as(self.world.a.coach)
         co_coach = self.create_auth_user("co.coach.a@example.test", "Co-coach A")
         self.add_membership(self.world.a.id, co_coach, "coach")
         state = self.refused_write_as(
@@ -276,8 +275,8 @@ class JudgmentIsolationTests(IsolationHarness):
         self.assertEqual(state, NOT_ORIGINAL_AUTHOR)
 
     def test_edit_creates_a_new_revision_and_increments_version(self) -> None:
-        created = self.write_as(self.world.a.coach)
-        edited = self.write_as(
+        created = self.judgment_write_as(self.world.a.coach)
+        edited = self.judgment_write_as(
             self.world.a.coach,
             judgment_id=created.id,
             observation_id=None,
@@ -295,8 +294,8 @@ class JudgmentIsolationTests(IsolationHarness):
         self.assertEqual(revisions[1].comment_text, "Even better second touch.")
 
     def test_no_op_replay_does_not_create_a_new_revision(self) -> None:
-        created = self.write_as(self.world.a.coach)
-        replayed = self.write_as(
+        created = self.judgment_write_as(self.world.a.coach)
+        replayed = self.judgment_write_as(
             self.world.a.coach,
             judgment_id=created.id,
             observation_id=None,
@@ -311,8 +310,8 @@ class JudgmentIsolationTests(IsolationHarness):
         self.assertEqual(len(revisions), 1)
 
     def test_stale_version_is_rejected(self) -> None:
-        created = self.write_as(self.world.a.coach)
-        self.write_as(
+        created = self.judgment_write_as(self.world.a.coach)
+        self.judgment_write_as(
             self.world.a.coach,
             judgment_id=created.id,
             observation_id=None,
@@ -334,7 +333,7 @@ class JudgmentIsolationTests(IsolationHarness):
         self,
     ) -> None:
         """Two overlapping edits never both succeed against version 1."""
-        created = self.write_as(self.world.a.coach)
+        created = self.judgment_write_as(self.world.a.coach)
         first_conn = self.runtime.connect()
         first_txn = first_conn.begin()
         self.as_user(first_conn, self.world.a.coach)
@@ -370,9 +369,9 @@ class JudgmentIsolationTests(IsolationHarness):
 
     def test_rollback_after_a_rejected_edit_leaves_no_revision_gap(self) -> None:
         """A failed edit (invalid bounds) must not consume a version number."""
-        created = self.write_as(self.world.a.coach)
+        created = self.judgment_write_as(self.world.a.coach)
         with self.assertRaises(DBAPIError):
-            self.write_as(
+            self.judgment_write_as(
                 self.world.a.coach,
                 judgment_id=created.id,
                 observation_id=None,
@@ -402,7 +401,7 @@ class JudgmentIsolationTests(IsolationHarness):
         self.assertEqual(state, JUDGMENT_NOT_FOUND)
 
     def test_not_relevant_verdict_is_preserved_as_a_draft(self) -> None:
-        row = self.write_as(self.world.a.coach, verdict="not_relevant")
+        row = self.judgment_write_as(self.world.a.coach, verdict="not_relevant")
         revision = self.admin_read(
             "SELECT verdict FROM app.judgment_revision WHERE judgment_id = :id",
             id=row.id,
@@ -413,11 +412,10 @@ class JudgmentIsolationTests(IsolationHarness):
         self,
     ) -> None:
         """No grant lets the runtime role set publication_status directly."""
-        row = self.write_as(self.world.a.coach, verdict="not_relevant")
+        row = self.judgment_write_as(self.world.a.coach, verdict="not_relevant")
         state = self.refused_as_update(
             self.world.a.coach,
-            "UPDATE app.judgment SET publication_status = 'published'"
-            " WHERE id = :id",
+            "UPDATE app.judgment SET publication_status = 'published' WHERE id = :id",
             id=row.id,
         )
         self.assertEqual(state, INSUFFICIENT_PRIVILEGE)
@@ -477,7 +475,7 @@ class JudgmentIsolationTests(IsolationHarness):
     # --- Read isolation ------------------------------------------------------
 
     def test_players_and_other_teams_cannot_read_judgments(self) -> None:
-        row = self.write_as(self.world.a.coach)
+        row = self.judgment_write_as(self.world.a.coach)
         for identity in (self.world.a.players[0], self.world.b.coach):
             with self.subTest(identity=identity):
                 self.assertEqual(
@@ -498,7 +496,7 @@ class JudgmentIsolationTests(IsolationHarness):
                 )
 
     def test_same_team_coach_can_read_the_judgment_and_its_revisions(self) -> None:
-        row = self.write_as(self.world.a.coach)
+        row = self.judgment_write_as(self.world.a.coach)
         self.assertEqual(
             len(
                 self.read_as(
