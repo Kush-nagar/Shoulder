@@ -294,6 +294,7 @@ def run_worker(
     run_id: str | None = None,
     popen: Callable[..., Any] | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    on_spawn: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
     """Run one headless worker to completion, a timeout, or a failure.
 
@@ -334,6 +335,13 @@ def run_worker(
         errors="replace",
         bufsize=1,
     )
+
+    # The pid has to be recorded while the process exists. Recovery asks
+    # whether it is still alive, and a record with no pid reads as gone --
+    # so a running worker would be classified as interrupted and its lease
+    # handed to a second writer on the same branch.
+    if on_spawn is not None and getattr(process, "pid", None):
+        on_spawn(int(process.pid))
 
     result_event: dict[str, Any] = {}
     last_action = ""
@@ -390,6 +398,7 @@ def run_worker(
         "returncode": returncode,
         "turns": turns,
         "elapsed_seconds": round(time.monotonic() - started, 1),
+        "pid": getattr(process, "pid", None),
         "stop_reason": result_event.get("stop_reason") or result_event.get("subtype"),
         "session_id": result_event.get("session_id"),
         "usage": result_event.get("usage") or {},
@@ -633,10 +642,13 @@ def run_once(
         return {"dispatched": False, "reason": "no eligible task"}
 
     built = coordinator.plan(ctx, candidate)
-    if built.writer is None:
+    # `blocked_reason` is set with a writer still present when the plan failed
+    # for another reason -- no independent reviewer, for instance. Starting
+    # anyway would run work the coordinator had already refused.
+    if built.writer is None or built.blocked_reason:
         return {
             "dispatched": False,
-            "reason": built.blocked_reason,
+            "reason": built.blocked_reason or "no writer could be routed",
             "rejections": built.rejections,
         }
 
@@ -693,6 +705,9 @@ def run_once(
         config=config,
         run_id=run_id,
         popen=popen,
+        on_spawn=lambda pid: localstate.save_worker(
+            paths, str(candidate.task.id), {"pid": pid, "image": worker_image()}
+        ),
     )
 
     changed = changed_paths(root, worktree, runner=runner)

@@ -178,6 +178,7 @@ class FakeProcess:
         self.stderr = None
         self.returncode = returncode
         self.killed = False
+        self.pid = 0
 
     def kill(self) -> None:
         self.killed = True
@@ -717,6 +718,52 @@ class TestFableIsNeverSelected(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("built.writer.harness_model", source)
+
+
+class TestTheWorkerPidIsRecorded(LocalCase):
+    def test_the_pid_is_recorded_while_the_process_still_exists(self) -> None:
+        """Recovery asks whether the pid is alive. A record without one reads
+        as gone, so a running worker would be called interrupted and its lease
+        handed to a second writer on the same branch."""
+        seen: list[int] = []
+
+        def popen(argv, **kwargs):  # type: ignore[no-untyped-def]
+            process = FakeProcess([RESULT_LINE])
+            process.pid = 4242
+            return process
+
+        run = local.run_worker(
+            self.root,
+            self.paths,
+            prompt="p",
+            model="claude-sonnet-5",
+            role="implement",
+            worktree=self.worktree,
+            config=self.config,
+            popen=popen,
+            on_spawn=seen.append,
+        )
+        self.assertEqual(seen, [4242])
+        self.assertEqual(run["pid"], 4242)
+
+
+class TestABlockedPlanIsNotRun(LoopCase):
+    def test_a_plan_blocked_for_any_reason_dispatches_nothing(self) -> None:
+        """A writer can be routed while the plan is still blocked -- no
+        independent reviewer, for instance. Running it anyway would carry out
+        work the coordinator had already refused."""
+        self.policy_with_autonomy(True)
+        blocked = mock.Mock(
+            writer=mock.Mock(),
+            reviewer=None,
+            blocked_reason="no independent reviewer available",
+            rejections=[],
+            branch="block-05-t15",
+        )
+        with mock.patch("services.agentops.coordinator.plan", return_value=blocked):
+            result = local.run_once(self.root, self.paths)
+        self.assertFalse(result["dispatched"])
+        self.assertIn("reviewer", result["reason"])
 
 
 if __name__ == "__main__":
