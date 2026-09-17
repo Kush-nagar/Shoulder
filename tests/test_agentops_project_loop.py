@@ -71,6 +71,7 @@ class FakeGitHub:
         self.ci: list[str] = [rollup(("check", "pass"))]
         self.merged: list[int] = []
         self.merge_refusal = ""
+        self.drafts: set[int] = set()
 
     def __call__(self, args: list[str], *, repo: str | None = None) -> Any:
         self.calls.append(list(args))
@@ -79,7 +80,13 @@ class FakeGitHub:
         if args[:2] == ["pr", "list"]:
             branch = args[args.index("--head") + 1]
             number = self.pulls.get(branch)
-            return completed(stdout=json.dumps([{"number": number}] if number else []))
+            found = (
+                [{"number": number, "isDraft": number in self.drafts}] if number else []
+            )
+            return completed(stdout=json.dumps(found))
+        if args[:2] == ["pr", "ready"]:
+            self.drafts.discard(int(args[2]))
+            return completed(stdout="ready")
         if args[:2] == ["pr", "create"]:
             branch = args[args.index("--head") + 1]
             number = self.pulls.setdefault(branch, self.next_number)
@@ -377,6 +384,121 @@ class TestRefusals(ProjectCase):
         self.dirty = ["x.py"]
         self.drive(max_tasks=1)
         self.assertEqual(self.removed, [])
+
+
+class TestTheGatesFailClosed(ProjectCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.dispatched = [self.ready(15)]
+        self.reconciles = {15}
+
+    def test_a_pull_request_reporting_no_checks_is_never_called_clean(self) -> None:
+        """Checks that have not registered yet look exactly like none failing."""
+        self.gh.ci = [json.dumps({"statusCheckRollup": [], "headRefOid": "d"})]
+        result = self.drive(max_tasks=1)
+        self.assertEqual(result["status"], project.BLOCKED_HUMAN)
+        self.assertFalse(self.gh.merged)
+
+    def test_checks_that_appear_late_are_waited_for_then_honoured(self) -> None:
+        self.gh.ci = [
+            json.dumps({"statusCheckRollup": [], "headRefOid": "d"}),
+            rollup(("quality", "pass")),
+        ]
+        result = self.drive(max_tasks=1)
+        self.assertTrue(result["merged"], result)
+
+    def test_an_empty_rollup_reads_as_pending_not_pass(self) -> None:
+        with mock.patch.object(project, "_gh", self.gh):
+            self.gh.ci = [json.dumps({"statusCheckRollup": [], "headRefOid": "d"})]
+            self.assertEqual(project.ci_state(1, repo="owner/repo")["state"], "pending")
+
+    def test_a_failed_fetch_stops_before_the_next_task_is_chosen(self) -> None:
+        def refusing_git(root: Path, args: list[str]) -> Any:
+            self.git_calls.append(list(args))
+            if args[:1] == ["fetch"]:
+                return completed(returncode=1, stdout="could not reach origin")
+            if args[:1] == ["status"]:
+                return completed(stdout="")
+            if args[:1] == ["rev-parse"]:
+                return completed(stdout="agentops/test")
+            return completed()
+
+        self.fake_git = refusing_git  # type: ignore[method-assign]
+        result = self.drive(max_tasks=1)
+        self.assertEqual(result["status"], project.BLOCKED_HUMAN)
+        self.assertIn("fetch origin/main", result["detail"])
+        self.assertEqual(self.removed, [])
+
+    def test_a_reused_draft_pull_request_is_marked_ready_before_merging(self) -> None:
+        self.gh.pulls["block-x-t1-fixture"] = 77
+        self.gh.drafts.add(77)
+        result = self.drive(max_tasks=1)
+        self.assertTrue(self.gh.issued("pr", "ready"))
+        self.assertEqual(self.gh.drafts, set())
+        self.assertTrue(result["merged"], result)
+
+
+class TestResumingAnInFlightTask(ProjectCase):
+    """A run that died after `ready_for_pr` must pick that task back up.
+
+    `run_once` correctly refuses to re-dispatch a task that is already waiting
+    for its pull request, and the loop used to read that refusal as a human
+    blocker -- so an interrupted run could never be resumed, which is the one
+    thing resume exists for.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.reconciles = {15}
+        self.ready(15)
+        project.save(
+            self.paths,
+            task_id=15,
+            branch="block-x-t1-fixture",
+            worktree=str(Path(self.tmp.name) / "agents" / "block-x-t1-fixture"),
+            pull_request=101,
+        )
+        leases_file = localstate.read(self.paths.leases, {"leases": {}})
+        leases_file["leases"] = {"15": {"task_id": 15, "state": "ready_for_pr"}}
+        localstate.write(self.paths.leases, leases_file)
+
+    def test_the_recorded_task_is_shipped_without_selecting_a_new_one(self) -> None:
+        self.dispatched = []  # run_once must not be reached at all
+        result = self.drive(max_tasks=1)
+        self.assertEqual(len(result["merged"]), 1)
+        self.assertEqual(result["merged"][0]["task_id"], 15)
+
+    def test_the_recorded_branch_and_pull_request_are_reused(self) -> None:
+        self.dispatched = []
+        self.gh.pulls["block-x-t1-fixture"] = 101
+        self.drive(max_tasks=1)
+        self.assertEqual(self.gh.merged, [101])
+        self.assertFalse(self.gh.issued("pr", "create"))
+
+    def context(self) -> Any:
+        from services.agentops import coordinator
+
+        ctx = coordinator.load_context(self.root)
+        ctx.tasks = local.load_leases(self.root, self.paths)
+        return ctx
+
+    def test_a_task_that_already_merged_is_not_resumed(self) -> None:
+        progress = state.read_json(state.Paths(self.root).progress)
+        progress["completed_tasks"] = sorted(
+            set(state.completed_tasks(progress)) | {15}
+        )
+        state.write_json(state.Paths(self.root).progress, progress)
+        self.assertIsNone(project.in_flight(self.context(), self.paths))
+
+    def test_a_task_that_is_not_ready_for_its_pull_request_is_not_resumed(self) -> None:
+        localstate.write(
+            self.paths.leases, {"leases": {"15": {"task_id": 15, "state": "assigned"}}}
+        )
+        self.assertIsNone(project.in_flight(self.context(), self.paths))
+
+    def test_a_vanished_worktree_is_not_resumed(self) -> None:
+        project.save(self.paths, worktree=str(self.root / "gone"))
+        self.assertIsNone(project.in_flight(self.context(), self.paths))
 
 
 class TestCommitGuards(ProjectCase):

@@ -157,16 +157,51 @@ RESET_PATTERN = re.compile(
 )
 
 
-def _exhaustion_text(run: Mapping[str, Any]) -> str:
-    """Everything a run said, in one lowercase blob to match against."""
-    parts = [str(run.get(key) or "") for key in ("last_action", "stderr", "reason")]
-    parts.append(str(run.get("stop_reason") or ""))
-    events = run.get("events")
-    if events:
-        try:
-            parts.append(json.dumps(events))
-        except (TypeError, ValueError):
-            pass
+# Where the harness itself speaks, as opposed to where it relays what a model
+# wrote. Only these are searched.
+RESULT_EVENT_TYPES = ("result", "done", "finish", "error", "summary")
+ERROR_FIELDS = ("error", "message", "detail", "reason", "subtype", "stop_reason")
+
+
+def _harness_error_text(run: Mapping[str, Any]) -> str:
+    """What the harness said about why it stopped, and nothing else.
+
+    Deliberately not `last_action`, and not every event. Those carry whatever
+    the model wrote and whatever a file it read contained, so a task whose own
+    diff or test output mentions a usage limit would have been read as an
+    exhausted account -- parking a healthy provider and skipping the repair the
+    task actually needed.
+
+    The cost of this narrowing is the opposite error: an allowance message that
+    appears only as assistant prose is treated as an ordinary failure and goes
+    through ordinary repair. That is the right way round. A missed failover
+    wastes one attempt; a false one takes a working provider out of service and
+    leaves a real defect unfixed.
+    """
+    parts = [str(run.get("stderr") or ""), str(run.get("stop_reason") or "")]
+    if run.get("outcome") == "harness_unavailable":
+        parts.append(str(run.get("reason") or ""))
+    for event in run.get("events") or []:
+        if not isinstance(event, Mapping):
+            continue
+        kind = str(event.get("type") or event.get("event") or "").lower()
+        is_error = bool(event.get("is_error")) or kind == "error"
+        subtype = str(event.get("subtype") or "").lower()
+        if kind not in RESULT_EVENT_TYPES and not is_error:
+            continue
+        # `result` is the final text, which on a successful run is the model's
+        # own prose. It is read only when the event says it is an error, where
+        # the harness has put its refusal instead.
+        fields = ERROR_FIELDS + (("result",) if is_error or "error" in subtype else ())
+        for field in fields:
+            value = event.get(field)
+            if isinstance(value, str):
+                parts.append(value)
+            elif isinstance(value, Mapping):
+                try:
+                    parts.append(json.dumps(value))
+                except (TypeError, ValueError):
+                    pass
     return " ".join(parts).lower()
 
 
@@ -181,7 +216,7 @@ def exhaustion(run: Mapping[str, Any]) -> dict[str, Any] | None:
     """
     if run.get("ok"):
         return None
-    text = _exhaustion_text(run)
+    text = _harness_error_text(run)
     marker = next((m for m in EXHAUSTION_MARKERS if m in text), None)
     if marker is None:
         return None
@@ -648,8 +683,9 @@ def run(
         "cost_known": cost_known,
         "last_action": last_action,
         # Kept on the record, not only in the log file: a provider that refuses
-        # for allowance reasons says so here and nowhere else, and the caller
-        # has to be able to tell that apart from a failing test.
+        # for allowance reasons says so here, and the caller has to be able to
+        # tell that apart from a failing test. This is the harness's own error
+        # channel, which is why it is trusted and `last_action` is not.
         "stderr": stderr[-4000:] if stderr else "",
         "stream": str(stream_path),
         "events": events[-5:],

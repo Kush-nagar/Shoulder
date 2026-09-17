@@ -46,8 +46,14 @@ from services.agentops import (
 SESSION_LIMIT = "You have hit your session limit. Your limit will reset later."
 
 
-def failed_run(text: str, **extra: Any) -> dict[str, Any]:
-    """A run record shaped like the one `executors.run` returns."""
+def failed_run(text: str = "", **extra: Any) -> dict[str, Any]:
+    """A run record shaped like the one `executors.run` returns.
+
+    `text` goes on stderr, which is the harness's own error channel. That is
+    deliberate: it is the channel the detector trusts, and a test that put the
+    message where a model's prose lands would be asserting the behaviour this
+    explicitly does not have.
+    """
     record: dict[str, Any] = {
         "ok": False,
         "outcome": "failed",
@@ -58,12 +64,17 @@ def failed_run(text: str, **extra: Any) -> dict[str, Any]:
         "provider": "anthropic",
         "returncode": 1,
         "turns": 1,
-        "last_action": text,
-        "stderr": "",
+        "last_action": "",
+        "stderr": text,
         "events": [],
     }
     record.update(extra)
     return record
+
+
+def model_said(text: str, **extra: Any) -> dict[str, Any]:
+    """A failed run where only the model's own output mentions something."""
+    return failed_run("", last_action=text, **extra)
 
 
 def assignment(lane: str) -> routing.Assignment:
@@ -81,22 +92,59 @@ def assignment(lane: str) -> routing.Assignment:
 class TestExhaustionIsRecognised(unittest.TestCase):
     """What counts as "the account ran out", and what deliberately does not."""
 
-    def test_a_session_limit_message_is_provider_exhaustion(self) -> None:
+    def test_a_session_limit_on_the_error_channel_is_provider_exhaustion(self) -> None:
         found = executors.exhaustion(failed_run(SESSION_LIMIT))
         self.assertIsNotNone(found)
         assert found is not None
         self.assertEqual(found["marker"], "session limit")
 
-    def test_exhaustion_is_read_from_stderr_as_well(self) -> None:
-        run = failed_run("", stderr="Error: usage limit reached for this account")
+    def test_an_error_result_event_is_read_too(self) -> None:
+        run = failed_run(
+            "",
+            events=[
+                {
+                    "type": "result",
+                    "subtype": "error_during_execution",
+                    "is_error": True,
+                    "result": "Claude usage limit reached for this account",
+                }
+            ],
+        )
         self.assertIsNotNone(executors.exhaustion(run))
+
+    def test_the_models_own_output_is_never_trusted_for_this(self) -> None:
+        """The task's own diff or test output may say anything at all.
+
+        Reading it as an exhausted account would park a healthy provider and
+        skip the repair the task actually needs, so only the harness's error
+        channel counts.
+        """
+        self.assertIsNone(executors.exhaustion(model_said(SESSION_LIMIT)))
+        self.assertIsNone(
+            executors.exhaustion(
+                model_said("I added a test for when the usage limit is exceeded")
+            )
+        )
+
+    def test_a_successful_result_event_is_not_searched(self) -> None:
+        run = failed_run(
+            "",
+            events=[
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "documented the quota exceeded path",
+                }
+            ],
+        )
+        self.assertIsNone(executors.exhaustion(run))
 
     def test_a_failing_test_suite_is_not_provider_exhaustion(self) -> None:
         run = failed_run("3 tests failed: assert 1 == 2 in the backoff helper")
         self.assertIsNone(executors.exhaustion(run))
 
     def test_a_timeout_is_not_provider_exhaustion(self) -> None:
-        run = failed_run("still editing", outcome="timeout")
+        run = failed_run("worker exceeded its wall clock", outcome="timeout")
         self.assertIsNone(executors.exhaustion(run))
 
     def test_a_successful_run_is_never_exhaustion(self) -> None:
@@ -410,6 +458,78 @@ class TestTheBudgetIsNotSpent(ClaudeFirstCase):
         )
         self.assertEqual(after.get("branch"), before.get("branch"))
         self.assertEqual(after.get("state"), before.get("state"))
+
+
+class TestAParkedTaskComesBack(ClaudeFirstCase):
+    """A provider stop must not be the end of the task.
+
+    Releasing it as `blocked` was: `blocked` is where exhausted attempts go,
+    the coordinator refuses a blocked lease until a human clears it, and the
+    task's worktree was stranded for good. Waiting for an allowance to refill
+    has to be a state the task returns from by itself.
+    """
+
+    def park(self) -> dict[str, Any]:
+        tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            tasks,
+            self.ctx.policy,
+            task_id=self.candidate.task.id,
+            owner="test",
+            branch="block-x-t1-fixture",
+            assignment={"lane": local.CLAUDE_LANE},
+            run_id="r1",
+        )
+        local._finish(
+            self.paths,
+            tasks,
+            self.ctx.policy,
+            self.candidate.task.id,
+            local.WAITING_PROVIDER,
+            once_key="r1",
+        )
+        return tasks
+
+    def test_the_lease_is_parked_rather_than_blocked(self) -> None:
+        tasks = self.park()
+        lease = tasks["leases"][str(self.candidate.task.id)]
+        self.assertEqual(lease["state"], leases.WAITING_PROVIDER)
+        self.assertNotIn(lease["state"], leases.TERMINAL_STATES)
+        self.assertNotIn(lease["state"], leases.ACTIVE_STATES)
+
+    def test_the_unused_attempt_is_handed_back(self) -> None:
+        tasks = self.park()
+        self.assertEqual(tasks["leases"][str(self.candidate.task.id)]["attempts"], 0)
+
+    def test_the_branch_and_assignment_survive_the_park(self) -> None:
+        lease = self.park()["leases"][str(self.candidate.task.id)]
+        self.assertEqual(lease["branch"], "block-x-t1-fixture")
+        self.assertEqual(lease["assignment"]["lane"], local.CLAUDE_LANE)
+
+    def test_the_coordinator_will_offer_the_task_again(self) -> None:
+        self.ctx.tasks = self.park()
+        again = coordinator.evaluate(self.ctx, self.candidate.task)
+        self.assertTrue(again.eligible, again.reasons)
+
+    def test_a_parked_task_is_still_dispatchable_locally(self) -> None:
+        self.assertEqual(local.settled_locally(self.park(), self.candidate.task.id), "")
+
+    def test_a_genuinely_blocked_task_is_still_refused(self) -> None:
+        """The park path must not soften the real one."""
+        tasks: dict[str, Any] = {"leases": {}}
+        leases.acquire(
+            tasks,
+            self.ctx.policy,
+            task_id=self.candidate.task.id,
+            owner="test",
+            branch="b",
+            assignment={"lane": local.CLAUDE_LANE},
+            run_id="r1",
+        )
+        leases.release(tasks, self.candidate.task.id, "blocked")
+        self.ctx.tasks = tasks
+        again = coordinator.evaluate(self.ctx, self.candidate.task)
+        self.assertFalse(again.eligible)
 
 
 class TestOnlyApprovedFallbacksRun(ClaudeFirstCase):

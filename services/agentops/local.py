@@ -1001,6 +1001,10 @@ REPAIRABLE = ("implementation_failed", "verification_failed", "timeout")
 # produce something that looks like reviewed production work.
 UNREVIEWED = "verification_complete_unreviewed"
 
+# The outcome for a task nothing was wrong with, which stopped because the
+# provider had nothing left to give. It is deliberately not `blocked`.
+WAITING_PROVIDER = "waiting_provider"
+
 # A task nobody may pick up again locally. `ready_for_pr` is finished as far as
 # this runtime is concerned and waits for a pull request to be merged; the
 # unreviewed state is a diagnostic result, not work to redo blindly.
@@ -1031,6 +1035,15 @@ def _finish(
         lease["heartbeat_at"] = localstate.now()
         save_leases(paths, tasks)
         return {"lease_state": state_name, "escalated": False}
+
+    if outcome == WAITING_PROVIDER:
+        # Not terminal. Releasing this as `blocked` stranded the task: the
+        # coordinator refuses a blocked lease until a human clears it, so a
+        # task parked for one usage window never came back and its worktree
+        # sat there forever.
+        leases.park(tasks, task_id, reason="provider allowance exhausted")
+        save_leases(paths, tasks)
+        return {"lease_state": leases.WAITING_PROVIDER, "escalated": False}
 
     if outcome in ("governance_refused", "blocked"):
         leases.release(tasks, task_id, "blocked")
@@ -1537,10 +1550,11 @@ def run_once(
         failovers.extend(attempted["failovers"])
         phases.append({"phase": "implementing", "outcome": run["outcome"]})
         if attempted["blocked"]:
-            # The work is intact in the worktree and the lease still names this
-            # task. Nothing is retried, because a retry cannot make an
-            # allowance refill sooner.
-            return finish("blocked", attempted["blocked"])
+            # The work is intact in the worktree and the task keeps its branch,
+            # its base commit and its attempt. Nothing is retried, because a
+            # retry cannot make an allowance refill sooner, and the lease is
+            # parked rather than blocked so the task comes back by itself.
+            return finish(WAITING_PROVIDER, attempted["blocked"])
 
         changed = changed_paths(root, worktree, base=base_sha, runner=runner)
         violations = governance.violations(changed)
@@ -1645,7 +1659,7 @@ def run_once(
             failovers.extend(repaired["failovers"])
             phases.append({"phase": "repairing", "outcome": run["outcome"]})
             if repaired["blocked"]:
-                return finish("blocked", repaired["blocked"])
+                return finish(WAITING_PROVIDER, repaired["blocked"])
 
             changed = changed_paths(root, worktree, base=base_sha, runner=runner)
             violations = governance.violations(changed)
@@ -1925,6 +1939,7 @@ __all__ = [
     "save_leases",
     "skill_line",
     "verify",
+    "WAITING_PROVIDER",
     "worktree_path",
     "worktree_root",
 ]

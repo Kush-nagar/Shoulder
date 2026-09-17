@@ -310,9 +310,24 @@ def ci_state(pull_request: int, *, repo: str) -> dict[str, Any]:
     if payload is None:
         return {"state": "unknown", "failing": [], "pending": [], "head": ""}
 
+    reported = payload.get("statusCheckRollup")
+    if not reported:
+        # No checks reported is not "no checks failed". A pull request whose
+        # workflows have not registered yet, and a truncated response, look
+        # identical from here, and calling either one clean would merge without
+        # any required check ever being observed. It reads as pending, so the
+        # loop waits and eventually asks a person.
+        return {
+            "state": "pending",
+            "failing": [],
+            "pending": ["(no checks reported yet)"],
+            "head": str(payload.get("headRefOid") or ""),
+            "merge_state": str(payload.get("mergeStateStatus") or ""),
+        }
+
     failing: list[dict[str, Any]] = []
     pending: list[str] = []
-    for check in payload.get("statusCheckRollup") or []:
+    for check in reported:
         name = str(check.get("name") or check.get("context") or "check")
         bucket = str(check.get("bucket") or "").lower()
         if not bucket:
@@ -393,11 +408,27 @@ def fetch_main(root: Path) -> None:
     done only when it is provably safe: on main, with nothing uncommitted, and
     only as a fast-forward.
     """
-    _git(root, ["fetch", "origin", "main"])
+    fetched = _git(root, ["fetch", "origin", "main"])
+    if fetched.returncode != 0:
+        raise Stop(
+            BLOCKED_HUMAN,
+            "could not fetch origin/main: "
+            + (fetched.stderr or fetched.stdout or "").strip()[:200],
+        )
     branch = (_git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout or "").strip()
     if branch != "main" or checkout_changes(root):
         return
-    _git(root, ["merge", "--ff-only", "origin/main"])
+    advanced = _git(root, ["merge", "--ff-only", "origin/main"])
+    if advanced.returncode != 0:
+        # Not recoverable from here without rewriting somebody's history, which
+        # is exactly what this module does not do. Selecting the next task from
+        # a stale main is how a dependent task starts against code main has not
+        # got, so it stops instead.
+        raise Stop(
+            BLOCKED_HUMAN,
+            "main could not be fast-forwarded: "
+            + (advanced.stderr or advanced.stdout or "").strip()[:200],
+        )
 
 
 # --------------------------------------------------------------------------
@@ -676,6 +707,41 @@ def ship(
 # --------------------------------------------------------------------------
 
 
+def in_flight(
+    ctx: coordinator.Context, paths: localstate.LocalPaths
+) -> dict[str, Any] | None:
+    """The task a previous run left finished and waiting, if there is one.
+
+    Without this, a run interrupted after `ready_for_pr` could not be resumed:
+    the next start called `run_once`, which correctly refuses to re-dispatch a
+    task that is already waiting for its pull request, and the loop read that
+    refusal as a human blocker. The breadcrumb plus the lease say which task it
+    is; `ship` is idempotent, so it picks the branch and pull request back up.
+    """
+    stored = localstate.read(paths.project, {})
+    raw = stored.get("task_id")
+    if raw is None:
+        return None
+    task_id = int(raw)
+    if task_id in state.completed_tasks(ctx.progress):
+        return None
+    if local.settled_locally(ctx.tasks, task_id) != "ready_for_pr":
+        return None
+    branch = str(stored.get("branch") or "")
+    worktree = Path(str(stored.get("worktree") or ""))
+    if not branch or not worktree.exists():
+        return None
+    return {
+        "dispatched": True,
+        "task_id": task_id,
+        "branch": branch,
+        "worktree": str(worktree),
+        "outcome": "ready_for_pr",
+        "detail": "resumed from the recorded project state",
+        "resumed": True,
+    }
+
+
 def _outstanding(ctx: coordinator.Context) -> list[int]:
     done = state.completed_tasks(ctx.progress)
     return [task_id for task_id in ctx.backlog.task_ids() if task_id not in done]
@@ -734,7 +800,7 @@ def run_project(
                 }
 
             save(paths, phase="selecting")
-            result = local.run_once(
+            result = in_flight(ctx, paths) or local.run_once(
                 root, paths, verification_kind=verification, review=True
             )
             if not result.get("dispatched"):
@@ -747,11 +813,11 @@ def run_project(
             task_id = int(result["task_id"])
             detail = str(result.get("detail") or "")
             if result.get("outcome") != "ready_for_pr":
-                status_name = (
-                    BLOCKED_WAITING_PROVIDER
-                    if BLOCKED_WAITING_PROVIDER in detail
-                    else BLOCKED_HUMAN
+                waiting = (
+                    result.get("outcome") == local.WAITING_PROVIDER
+                    or BLOCKED_WAITING_PROVIDER in detail
                 )
+                status_name = BLOCKED_WAITING_PROVIDER if waiting else BLOCKED_HUMAN
                 raise Stop(
                     status_name,
                     f"task {task_id} ended as {result.get('outcome')}: {detail}",

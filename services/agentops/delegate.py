@@ -114,13 +114,35 @@ def ensure_pull_request(
     it asks for a ready one instead. Same call, one flag.
     """
     existing = _gh(
-        ["pr", "list", "--head", branch, "--state", "open", "--json", "number"],
+        [
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "number,isDraft",
+        ],
         repo=repo,
     )
     if existing.returncode == 0:
         found = json.loads(existing.stdout or "[]")
         if found:
-            return int(found[0]["number"]), "pull request already open"
+            number = int(found[0]["number"])
+            if draft or not found[0].get("isDraft"):
+                return number, "pull request already open"
+            # The branch already has a draft -- from the Codex delegation path,
+            # or from an earlier run. A draft cannot merge, so returning it
+            # unchanged means waiting for every gate and then being refused at
+            # the last step. Ask for it to be marked ready instead.
+            promoted = _gh(["pr", "ready", str(number)], repo=repo)
+            if promoted.returncode != 0:
+                return None, (
+                    f"pull request {number} is a draft and could not be marked "
+                    f"ready: {promoted.stderr.strip()[:200]}"
+                )
+            return number, "existing draft pull request marked ready for review"
 
     create = [
         "pr",
