@@ -21,11 +21,12 @@ Cloud autonomy is unaffected and stays off. Nothing here pushes to
 | Resume after a crash | `./scripts/agentops-local.ps1 resume` |
 | Dashboard | `./scripts/agentops-local.ps1 dashboard` → <http://127.0.0.1:4317/> |
 | Smoke the whole path | `./scripts/agentops-local.ps1 dry-run` |
-| Provider | `./scripts/agentops-provider.ps1 claude` / `openrouter` / `status` |
+| Work the whole backlog | `./scripts/agentops-local.ps1 project -Verification gated` |
+| Provider | `./scripts/agentops-provider.ps1 claude` / `claude-first` / `openrouter` / `auto` / `status` |
 
 Each wrapper maps arguments onto `python -m services.agentops.cli`, which can be
-called directly: `run`, `serve`, `stop`, `resume`, `local-status`, `doctor`,
-`dry-run`, `provider`.
+called directly: `run`, `project`, `serve`, `stop`, `resume`, `local-status`,
+`doctor`, `dry-run`, `provider`.
 
 ## Two permissions, not one
 
@@ -87,11 +88,13 @@ still happens in the cloud on the pull request.
 Everything mutable is under ignored `.agentops/local/`:
 
 ```
-config.json   provider choice, resolved uv path, worktree root, role budgets
-runtime.json  coordinator pid and state
-workers.json  per-task worker records
-leases.json   the lease ledger this runtime writes
-events.jsonl  structured event stream
+config.json    provider choice, resolved uv path, worktree root, role budgets
+runtime.json   coordinator pid and state
+workers.json   per-task worker records
+leases.json    the lease ledger this runtime writes
+providers.json lane health this machine observed, including provider cooldowns
+project.json   where the project loop is: task, branch, worktree, pull request
+events.jsonl   structured event stream
 locks/        the infrastructure verification lock
 runs/<id>/    brief.md, stdout.jsonl, stderr.log, result.json
 ```
@@ -145,6 +148,36 @@ The provider setting constrains which lanes routing may choose:
 lane, and `auto` lets both compete on the existing policy priority. A selected
 provider that cannot run blocks the task rather than quietly falling back to
 the other one.
+
+### `claude-first`
+
+`claude-first` permits the same two lanes as `auto`, and Claude wins on policy
+priority for as long as it is healthy. The difference is what happens when the
+subscription allowance runs out in the middle of a task.
+
+Claude Code says so in words — "you have hit your session limit", "usage limit",
+and similar. That is a fact about the account, not about the code, so it is
+classified as **provider exhaustion** rather than `implementation_failed`:
+
+* the lane goes into cooldown locally, until the explicit reset instant the
+  harness printed, or otherwise for the five-hour usage window;
+* the **same** task continues immediately on an approved OpenRouter model
+  through OpenCode, keeping its branch, its worktree, its uncommitted edits,
+  its recorded base commit and its lease;
+* no implementation attempt and no repair cycle is spent, because a retry
+  cannot make an allowance refill sooner;
+* when the window passes, the cooldown expires by itself and Claude is
+  preferred again for the next task.
+
+If nothing approved can take over — no approved OpenRouter model, no OpenCode,
+no key — the work is left exactly as it is and the run stops with
+`BLOCKED_WAITING_PROVIDER`. It never falls back to an unapproved model, and an
+ordinary failing test is never mistaken for an exhausted account.
+
+The cooldown is written to ignored local state, not to tracked
+`ops/state/providers.json`: it is true of this machine, not of the repository.
+`./scripts/agentops-provider.ps1 status` shows any lane that is cooling down and
+when it returns.
 
 Non-Anthropic models are **not** pushed through Claude Code's Anthropic
 compatibility endpoint. That harness is tuned for one family's tool protocol,
@@ -209,6 +242,35 @@ tokens and cost -- the same task and harness for each, so the numbers compare.
 It is deliberately small. OpenRouter's Ori Eval is the larger tool for this
 (`.eval.ts` files run with Bun); it is documented here rather than depended on.
 
+## The project loop
+
+`./scripts/agentops-local.ps1 project -Verification gated` works the canonical
+backlog instead of one task. Per task it runs the ordinary local lifecycle to
+`ready_for_pr`, then commits anything the workers left, pushes the branch, opens
+or reuses the pull request, waits for the required checks, waits for the
+required review verdict, repairs what either one found in the task's own
+worktree, pushes the repair, re-checks, and merges only when every gate is
+clean. It then reconciles the merge into the progress ledger, fetches `main`,
+removes the finished worktree, and chooses the next eligible task. One task is
+in flight at a time, so a dependent task cannot start before its prerequisite
+has merged.
+
+It reuses `delegate.py`, `review.py` and `reconcile.py` rather than adding a
+second GitHub client, and it stops instead of improvising. There is no forced
+merge, no branch-protection bypass, no `reset`, no stash and no discarded local
+change anywhere in it — those are not implemented rather than guarded against.
+
+| Stop | Meaning |
+|---|---|
+| `PROJECT_COMPLETE` | every canonical task is complete |
+| `BLOCKED_LOCAL_CHECKOUT` | the coordinator's checkout has changes nobody accounted for; nothing is pushed |
+| `BLOCKED_WAITING_PROVIDER` | every permitted provider is out of allowance; the work is intact |
+| `BLOCKED_HUMAN` | a real engineering decision is needed, reported with the exact findings |
+
+Cloud autonomy stays off, `real_use_gate` stays false, and
+`max_parallel_writers` stays 1 throughout; the loop reads those and never
+writes them.
+
 ## Recovery
 
 A local process can die. On `resume`, each recorded worker is classified from
@@ -216,6 +278,12 @@ its pid, its worktree and its branch as `running`, `interrupted`, or `finished`.
 An interrupted worker keeps its worktree and branch — the partial implementation
 is in there — and its lease is reclaimed through the existing stale-lease path,
 which refuses to take a lease from an owner that is still running.
+
+`resume` also reports where the project loop was: the task, branch, worktree,
+pull request, the CI and review state it last saw, and any provider cooldown.
+Restarting `project` continues from there rather than redoing finished work,
+because every phase is re-derived from Git, GitHub and the lease ledger — the
+breadcrumb is an index into those facts, not a second copy of them.
 
 ## Worker command lines
 

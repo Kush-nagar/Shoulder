@@ -104,6 +104,18 @@ class LocalPaths:
         return self.dir / "approvals.json"
 
     @property
+    def providers(self) -> Path:
+        """Provider health this machine observed, in the same shape as the
+        tracked ledger so `state.provider_health` reads it unchanged."""
+        return self.dir / "providers.json"
+
+    @property
+    def project(self) -> Path:
+        """Where the project loop keeps its breadcrumb, so `resume` can find
+        the task, branch, worktree and pull request the last run was on."""
+        return self.dir / "project.json"
+
+    @property
     def events(self) -> Path:
         return self.dir / "events.jsonl"
 

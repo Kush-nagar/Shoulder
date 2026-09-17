@@ -17,6 +17,13 @@ from .state import now
 ACTIVE_STATES = ("assigned", "implementing", "verifying", "review", "ci", "repairing")
 TERMINAL_STATES = ("merged", "abandoned", "blocked")
 
+# Neither active nor terminal, and deliberately neither. The task is not being
+# worked on, so it must not look held; it is also not finished and not failed,
+# so it must not look blocked -- `blocked` is where exhausted attempts go, and
+# the coordinator refuses a blocked task until a human clears it. A task
+# waiting for a provider allowance to refill has to come back by itself.
+WAITING_PROVIDER = "waiting_provider"
+
 
 class LeaseConflict(Exception):
     """Another worker already holds a live lease on this task."""
@@ -163,6 +170,32 @@ def acquire(
     )
     leases[key] = lease
     return lease
+
+
+def park(
+    tasks: dict[str, Any], task_id: int, *, reason: str, reset_at: str = ""
+) -> dict[str, Any] | None:
+    """Set a lease down without ending the task.
+
+    Used when the provider ran out of allowance rather than the work going
+    wrong. The attempt is handed back, because it was never spent: no model
+    looked at this task on this attempt, so charging the ladder for it would
+    kill a perfectly good task after three empty subscriptions.
+
+    Everything that makes the work findable -- the branch, the assignment, the
+    recorded base commit -- stays on the lease.
+    """
+    lease = tasks.get("leases", {}).get(str(task_id))
+    if lease is None:
+        return None
+    lease["state"] = WAITING_PROVIDER
+    lease["parked_at"] = now()
+    lease["parked_reason"] = reason
+    if reset_at:
+        lease["provider_reset_at"] = reset_at
+    lease["attempts"] = max(0, int(lease.get("attempts", 0)) - 1)
+    parked: dict[str, Any] = lease
+    return parked
 
 
 def attach_worker(
