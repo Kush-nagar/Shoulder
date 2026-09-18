@@ -944,6 +944,10 @@ def verify(
     one may run at a time on this machine.
     """
     binary = uv or toolchain.resolve_uv(root, paths)
+    # The worktree has no `.tools` of its own -- it is machine-local and
+    # untracked -- so the script cannot find the pinned uv by relative path.
+    # It reads this override, which is the same one `agentops-local.ps1` takes.
+    child_env = {**os.environ, "SHOULDER_UV_PATH": str(binary)}
     if kind == "fast":
         commands = toolchain.fast_check_commands(binary)
     elif kind == "gated":
@@ -958,12 +962,16 @@ def verify(
         raise ValueError(f"unknown verification kind: {kind}")
 
     if not any(toolchain.needs_infra_lock(command) for command in commands):
-        result = toolchain.run_commands(worktree, commands, runner=runner)
+        result = toolchain.run_commands(
+            worktree, commands, runner=runner, env=child_env
+        )
         localstate.append_event(paths, "verification", kind=kind, ok=result["ok"])
         return {**result, "kind": kind, "locked": False}
 
     with toolchain.infra_lock(paths, owner=owner):
-        result = toolchain.run_commands(worktree, commands, runner=runner)
+        result = toolchain.run_commands(
+            worktree, commands, runner=runner, env=child_env
+        )
     localstate.append_event(
         paths, "verification", kind=kind, ok=result["ok"], locked=True
     )

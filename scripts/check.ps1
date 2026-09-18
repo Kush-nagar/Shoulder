@@ -1,6 +1,14 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$uv = if ($IsLinux -or $IsMacOS) { 'uv' } else { './.tools/uv.exe' }
+# `.tools` is machine-local and is not created in a git worktree, so the
+# pinned binary lives in the main checkout. The gated verification runs the
+# worktree's own copy of this script -- deliberately, so it checks the branch
+# under test -- and there `./.tools/uv.exe` does not exist. SHOULDER_UV_PATH is
+# the same override `agentops-local.ps1` already accepts.
+$uv = if ($env:SHOULDER_UV_PATH) { $env:SHOULDER_UV_PATH }
+      elseif ($IsLinux -or $IsMacOS) { 'uv' }
+      elseif (Test-Path './.tools/uv.exe') { './.tools/uv.exe' }
+      else { 'uv' }
 $pnpm = if ($IsLinux -or $IsMacOS) { 'pnpm' } else { 'pnpm.cmd' }
 function Invoke-Check([string]$program, [string[]]$arguments) {
     Write-Host "$program $($arguments -join ' ')"

@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -368,6 +368,7 @@ def run_commands(
     *,
     runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     timeout: int = 3600,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run checks in order, stopping at the first failure."""
     execute = runner or subprocess.run
@@ -382,6 +383,9 @@ def run_commands(
             timeout=timeout,
             encoding="utf-8",
             errors="replace",
+            # None means inherit, which is what every caller but the gated
+            # verification wants.
+            env=dict(env) if env is not None else None,
         )
         tail = ((result.stdout or "") + (result.stderr or "")).strip().splitlines()
         steps.append(

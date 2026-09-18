@@ -148,8 +148,20 @@ def _harness_model(model_id: str, family: str, lanes: dict[str, str]) -> str:
     """
     if family not in lanes:
         return model_id
-    slug = model_id.split("/", 1)[-1]
-    if family == "anthropic":
+    return _undot(model_id.split("/", 1)[-1], family)
+
+
+def _undot(slug: str, family: str) -> str:
+    """`claude-haiku-4.5` -> `claude-haiku-4-5`, and nothing else.
+
+    Only a bare Anthropic slug is touched. A namespaced id is left exactly as
+    it is: an Anthropic model reached through OpenRouter is addressed by
+    OpenRouter's own id, dot included, and dashing that would break a lane
+    this function is not being asked about. Independent review raised the
+    inverse risk -- that re-deriving ownership here could rewrite a slug as
+    though a different lane owned it -- and not re-deriving it is the answer.
+    """
+    if family == "anthropic" and "/" not in slug:
         return slug.replace(".", "-")
     return slug
 
@@ -283,13 +295,14 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 def models_from_state(state: dict[str, Any]) -> list[Model]:
     """Rebuild Model objects from stored state, skipping absent entries.
 
-    The harness slug is recomputed rather than read back. It is derived from
-    the id, and a ledger written before the derivation was correct still holds
-    the old value -- which is exactly how every local worker kept being
-    spawned with a model name Claude Code rejects, long after the translation
-    itself was fixed. Deriving it here means a stale or hand-edited state file
-    cannot reintroduce that, the same reason routing re-enforces family bans
-    instead of trusting what the catalogue recorded.
+    The stored harness slug is normalised on the way out. A ledger written
+    before the Anthropic translation existed still holds the spelling Claude
+    Code rejects, which is exactly how every local worker kept being spawned
+    with an unusable model name long after the translation itself was fixed.
+
+    Only the dotted version is corrected; lane ownership is not re-derived.
+    Re-deriving it would let this function rewrite a slug as though a
+    different lane owned the namespace than the one the router recorded.
     """
     fields = Model.__dataclass_fields__
     models = []
@@ -300,7 +313,7 @@ def models_from_state(state: dict[str, Any]) -> list[Model]:
         models.append(
             replace(
                 model,
-                harness_model=_harness_model(model.id, model.family, NAMESPACE_LANE),
+                harness_model=_undot(model.harness_model, model.family),
             )
         )
     return models

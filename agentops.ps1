@@ -113,8 +113,35 @@ function Invoke-AgentOps([string[]]$CliArgs) {
 
 # --- One coordinator at a time -------------------------------------------
 # One write-capable owner per checkout is the invariant the whole system rests
-# on. A second coordinator here would take a second lease and put two writers
-# in the same worktrees, so this refuses rather than racing.
+# on: a second coordinator takes a second lease and puts two writers in the
+# same worktrees.
+#
+# Reading the runtime record is not enough to enforce that, and independent
+# review caught it. Two launchers started close together both read it before
+# either child has written `running`, so both would start a coordinator and
+# the later runtime write would simply overwrite the earlier. The slot is
+# therefore claimed with an exclusive file handle, which the OS grants to
+# exactly one process and releases when that process dies -- no stale lock to
+# clean up, and no window between the check and the launch.
+$null = New-Item -ItemType Directory -Force -Path $localDir
+$lockPath = Join-Path $localDir 'launcher.lock'
+try {
+    $launcherLock = [IO.File]::Open(
+        $lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None
+    )
+} catch {
+    Write-Host 'Another .\agentops.ps1 already holds this checkout.' -ForegroundColor Yellow
+    $existing = Get-DashboardEndpoint
+    Write-Host "Dashboard: http://$($existing.Host):$($existing.Port)"
+    exit 0
+}
+# Held for the life of this process; the handle is what the next launcher
+# collides with.
+$null = $launcherLock
+
+# A coordinator started some other way -- `agentops-local.ps1 start`, or a
+# `cli project` run by hand -- holds no launcher lock, so the runtime record is
+# still worth reading. It is a courtesy check, not the guarantee above.
 $runtime = Get-Json $runtimeState
 if ($runtime -and $runtime.state -eq 'running' -and (Test-ProcessAlive ([int]$runtime.pid) $runtime.image)) {
     Write-Host "A Shoulder AgentOps coordinator is already running (pid $($runtime.pid))." -ForegroundColor Yellow
@@ -165,10 +192,22 @@ while ($true) {
     $state = Get-Json $projectState
     $status = if ($state) { $state.status } else { '' }
     $detail = if ($state) { $state.detail } else { '' }
+    $phase = if ($state) { $state.phase } else { '' }
 
     if ($status -eq 'PROJECT_COMPLETE') {
         Write-Host ''
         Write-Host 'PROJECT_COMPLETE — every canonical task is complete.' -ForegroundColor Green
+        exit 0
+    }
+
+    # `-MaxTasks n` is a bounded run that succeeded. `run_project` reports it as
+    # PROJECT_RUNNING with phase `paused`, deliberately, because a task limit
+    # is not a finished backlog -- and the restart branch below would have read
+    # that as a crash and worked the whole backlog anyway, one task at a time.
+    # Independent review caught it.
+    if ($phase -eq 'paused') {
+        Write-Host ''
+        Write-Host "Stopped as asked: $detail" -ForegroundColor Green
         exit 0
     }
 
