@@ -3,11 +3,14 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
+from services.api import judgment_routes
 from services.api.auth import authenticated_identity
 from services.api.main import app
 
@@ -168,11 +171,51 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(body["verdict"], "applied")
         self.assertEqual(response.headers["ETag"], '"1"')
 
-    def test_request_body_has_no_author_field_to_spoof(self) -> None:
-        """Author is always the session identity; there is nothing to inject."""
+    def test_a_spoofed_author_is_rejected_not_ignored(self) -> None:
+        """Task 15 requires a spoofed author to be rejected.
+
+        Pydantic ignores unknown fields by default, so this used to be
+        accepted with 201 and silently dropped. The author was still the
+        session's, but a client that believed it had set one was never told
+        otherwise, and the same silence hides a typo in a real field.
+        """
         response = self.client_for(self.coach).post(
             f"/v1/observations/{self.observation}/judgments",
             json={**self.payload(), "author_user_id": str(self.other_coach)},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_server_managed_fields_cannot_be_set_on_an_edit(self) -> None:
+        """Version, pointers and identity are server-managed on a patch too."""
+        created = (
+            self.client_for(self.coach)
+            .post(f"/v1/observations/{self.observation}/judgments", json=self.payload())
+            .json()
+        )
+        for field, value in (
+            ("version", 99),
+            ("author_user_id", str(self.other_coach)),
+            ("publication_status", "published"),
+            ("current_revision_id", str(uuid4())),
+        ):
+            with self.subTest(field=field):
+                response = self.client_for(self.coach).patch(
+                    f"/v1/judgments/{created['id']}",
+                    headers={"If-Match": '"1"'},
+                    json={
+                        "verdict": "applied",
+                        "comment_text": "Trying to set a server field.",
+                        "clip_start_ms": 1000,
+                        "clip_end_ms": 2000,
+                        field: value,
+                    },
+                )
+                self.assertEqual(response.status_code, 422, response.text)
+
+    def test_author_is_still_the_session_identity(self) -> None:
+        """The session decides the author, on a request that is accepted."""
+        response = self.client_for(self.coach).post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
         )
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()["author_user_id"], str(self.coach))
@@ -400,6 +443,45 @@ class JudgmentApiTests(DatabaseTestCase):
                 )
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json(), [])
+
+    def test_a_failed_snapshot_read_is_an_outage_not_a_conflict(self) -> None:
+        """A database failure must not be flattened into a 409 without one.
+
+        Doing so reports a recoverable conflict at the moment the client most
+        needs the snapshot, and hides an outage behind it.
+        """
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        ).json()
+        client.patch(
+            f"/v1/judgments/{created['id']}",
+            headers={"If-Match": '"1"'},
+            json={
+                "verdict": "opportunity",
+                "comment_text": "The edit that won.",
+                "clip_start_ms": 1000,
+                "clip_end_ms": 2000,
+            },
+        )
+
+        def unavailable_load(*args: object, **kwargs: object) -> None:
+            raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+        with mock.patch.object(
+            judgment_routes, "load_judgment_service", unavailable_load
+        ):
+            response = client.patch(
+                f"/v1/judgments/{created['id']}",
+                headers={"If-Match": '"1"'},
+                json={
+                    "verdict": "not_relevant",
+                    "comment_text": "The edit that lost.",
+                    "clip_start_ms": 1000,
+                    "clip_end_ms": 2000,
+                },
+            )
+        self.assertEqual(response.status_code, 503, response.text)
 
     def test_a_conflict_snapshot_is_not_served_to_another_team(self) -> None:
         """The recovery payload is still a read, decided by row-level security."""

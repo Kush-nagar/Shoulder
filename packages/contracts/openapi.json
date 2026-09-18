@@ -692,6 +692,7 @@
         "type": "object"
       },
       "JudgmentCreate": {
+        "additionalProperties": false,
         "properties": {
           "clip_end_ms": {
             "exclusiveMinimum": 0.0,
@@ -741,6 +742,7 @@
         "type": "object"
       },
       "JudgmentPatch": {
+        "additionalProperties": false,
         "description": "A full content snapshot: every edit replaces the whole draft.",
         "properties": {
           "clip_end_ms": {

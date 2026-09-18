@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 TeamRole = Literal["coach", "player"]
 GoalStatus = Literal["active", "achieved", "paused", "retired"]
@@ -387,11 +393,22 @@ class Observation(BaseModel):
 # `author_user_id` never appears on a request model: it is always the
 # authenticated session, never a client-supplied value. `version` on a patch
 # request is the `If-Match` header, not a body field.
+#
+# Both request models forbid extra fields, and independent review is why.
+# Pydantic ignores unknown fields by default, so a create carrying
+# `author_user_id` was accepted with 201 and quietly dropped. The security
+# property held -- the author still came from the session -- but Task 15 asks
+# for a spoofed author to be *rejected*, and a client that believes it set a
+# server-managed field deserves to be told it did not. Refusing the request
+# also catches a typo in a real field, which silent tolerance turns into a
+# save that appears to have worked.
 
 Verdict = Literal["applied", "opportunity", "not_relevant"]
 
 
 class JudgmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     goal_id: UUID
     verdict: Verdict
     comment_text: str | None = Field(default=None, min_length=1, max_length=400)
@@ -407,6 +424,8 @@ class JudgmentCreate(BaseModel):
 
 class JudgmentPatch(BaseModel):
     """A full content snapshot: every edit replaces the whole draft."""
+
+    model_config = ConfigDict(extra="forbid")
 
     verdict: Verdict
     comment_text: str | None = Field(default=None, min_length=1, max_length=400)

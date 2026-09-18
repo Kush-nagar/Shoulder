@@ -89,17 +89,25 @@ def _conflict(user_id: str, judgment_id: UUID) -> Problem:
     transaction is already aborted by the time this runs, so the snapshot is
     read fresh, under the same row-level security as any other read: a caller
     who may no longer read this judgment is told only that it conflicted.
+
+    A database failure here is not a conflict without a snapshot. It used to
+    be caught and flattened into one, which independent review pointed out
+    masks an outage as a recoverable conflict at the exact moment the client
+    needs the snapshot to recover. The failure propagates and the route
+    answers 503; only a genuinely absent row -- hidden by row-level security
+    -- omits the extension.
     """
-    detail = "This judgment changed since it was loaded."
-    try:
-        with user_transaction(user_id) as connection:
-            current = load_judgment_service(connection, judgment_id)
-    except DBAPIError:
-        current = None
+    with user_transaction(user_id) as connection:
+        current = load_judgment_service(connection, judgment_id)
     extensions = (
         {"current": Judgment(**current).model_dump(mode="json")} if current else None
     )
-    return Problem(409, detail, "judgment-version-conflict", extensions=extensions)
+    return Problem(
+        409,
+        "This judgment changed since it was loaded.",
+        "judgment-version-conflict",
+        extensions=extensions,
+    )
 
 
 @router.post(
@@ -176,7 +184,15 @@ def edit_judgment(
                 request.clip_end_ms,
             )
     except StaleJudgment:
-        raise _conflict(user_id, judgment_id) from None
+        # Built in its own step: an exception raised inside an `except` block
+        # is not caught by that statement's other handlers, so a database
+        # failure while reading the snapshot would leave this route with an
+        # unhandled error rather than the 503 it owes.
+        try:
+            conflict = _conflict(user_id, judgment_id)
+        except DBAPIError:
+            raise unavailable() from None
+        raise conflict from None
     except DBAPIError:
         raise unavailable() from None
     _etag(response, result["version"])
