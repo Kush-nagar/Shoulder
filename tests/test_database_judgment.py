@@ -437,6 +437,68 @@ class JudgmentIsolationTests(IsolationHarness):
         )
         self.assertEqual([r.version for r in revisions], [1, 2])
 
+    def test_a_retry_of_an_accepted_edit_is_idempotent(self) -> None:
+        """A client that lost the response retries with the version it knew.
+
+        That version is now one behind, because its first attempt succeeded.
+        Comparing versions before content answered the retry with a conflict,
+        so an at-least-once client could never make the write idempotent --
+        while `docs/04-api.md` requires an idempotent replay not to increment.
+        Distinct from the no-op test above, which resubmits against the
+        version that is still current.
+        """
+        created = self.judgment_write_as(self.world.a.coach)
+        edited = self.judgment_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=1,
+            verdict="opportunity",
+            comment_text="The edit that landed.",
+        )
+        self.assertEqual(edited.version, 2)
+
+        # The same request again, still naming version 1.
+        replayed = self.judgment_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=1,
+            verdict="opportunity",
+            comment_text="The edit that landed.",
+        )
+        self.assertEqual(replayed.version, 2)
+        revisions = self.admin_read(
+            "SELECT version FROM app.judgment_revision WHERE judgment_id = :id",
+            id=created.id,
+        )
+        self.assertEqual([r.version for r in revisions], [1, 2])
+
+    def test_a_stale_edit_with_different_content_still_conflicts(self) -> None:
+        """The precondition still does its job where an update could be lost."""
+        created = self.judgment_write_as(self.world.a.coach)
+        self.judgment_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=1,
+            verdict="opportunity",
+            comment_text="The edit that landed.",
+        )
+        state = self.refused_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=1,
+            verdict="not_relevant",
+            comment_text="Written against version 1, and different.",
+        )
+        self.assertEqual(state, STALE_VERSION)
+
     def test_rollback_after_a_rejected_edit_leaves_no_revision_gap(self) -> None:
         """A failed edit (invalid bounds) must not consume a version number."""
         created = self.judgment_write_as(self.world.a.coach)

@@ -288,10 +288,22 @@ def upgrade() -> None:
                     USING ERRCODE = 'invalid_parameter_value';
             END IF;
 
-            IF v_judgment.version IS DISTINCT FROM p_expected_version THEN
-                RAISE EXCEPTION 'stale version' USING ERRCODE = '40001';
-            END IF;
-
+            -- Content first, version second. `docs/04-api.md` requires that
+            -- "no-op or idempotent replay does not increment", and those are
+            -- two different requests: a save of unchanged content against the
+            -- current version, and a retry of an edit that already succeeded
+            -- whose response the client never received. The second arrives
+            -- with the version it was written against, which is now one
+            -- behind, and comparing versions first answered it with a
+            -- conflict -- so an at-least-once client could never make that
+            -- write idempotent.
+            --
+            -- Checking version first is also unnecessary here. Optimistic
+            -- concurrency exists to stop a lost update, and if the submitted
+            -- content is already exactly the current revision there is no
+            -- update to lose: the state the caller asked for is the state
+            -- that exists. A stale write whose content *differs* still
+            -- conflicts, which is the case the precondition is for.
             SELECT * INTO v_latest
             FROM app.judgment_revision
             WHERE judgment_id = v_judgment.id AND version = v_judgment.version;
@@ -300,8 +312,14 @@ def upgrade() -> None:
                AND v_latest.comment_text IS NOT DISTINCT FROM p_comment_text
                AND v_latest.clip_start_ms = p_clip_start_ms
                AND v_latest.clip_end_ms = p_clip_end_ms THEN
-                -- No-op/replayed save: no new revision, no version change.
+                -- No new revision and no version change, whether this is a
+                -- no-op against the current version or a replay of the edit
+                -- that produced it.
                 RETURN v_judgment;
+            END IF;
+
+            IF v_judgment.version IS DISTINCT FROM p_expected_version THEN
+                RAISE EXCEPTION 'stale version' USING ERRCODE = '40001';
             END IF;
 
             UPDATE app.judgment
