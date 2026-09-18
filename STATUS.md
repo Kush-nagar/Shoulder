@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `664ef812d02adaef2e91ca5089eca894c5b2d53a` (PR #31) |
+| Last verified `main` | `95cc6ae` (PR #33; carries PR #31 before it) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
 | Current block | Block 04. Task 14 merged; Task 15 implemented and verified on this branch, awaiting merge; Task 16 not started. |
 | Current worker / branch | Task 15 coach judgments / `block-04-t15-coach-judgments` |
-| Open PRs | #32 Task 15 coach judgments (this branch); #33 AgentOps ledger and clean-checkout repair |
+| Open PRs | #32 Task 15 coach judgments (this branch). #31 and #33 are merged; #34 was withdrawn after review showed the fix inert. |
 | Database revision | `0008_coach_judgments` on this branch, applied and downgraded against a local Postgres 17.6; `main` is on `0007_manual_observations`; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-17 on `block-04-t15-coach-judgments` at `dec5698`: 1293 Python tests passed against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff format, ruff lint and mypy clean; contracts regenerated with no drift; Node suites, production build and Chromium/Firefox/WebKit smoke pass. CI `quality` green on this head. Three independent review rounds, eleven findings, all answered and resolved. |
+| Last full verification | 2026-09-17 on `block-04-t15-coach-judgments`, rebased onto `95cc6ae`: 1301 Python tests passed against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff format, ruff lint and mypy clean; contracts regenerated with no drift; Node suites, production build and Chromium/Firefox/WebKit smoke pass. CI `quality` green. Five independent review rounds, seventeen findings, all answered and resolved. |
 | Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Merge PR #32, then PR #33, then reconcile and let the coordinator select Task 16. The local runtime needs no owner action: `.\agentops.ps1` starts it. The cloud loop still does - add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 - and `AUTONOMY_ENABLED` stays false until then. |
+| Next action | Merge PR #32, then reconcile and let the coordinator select Task 16. The local runtime needs no owner action: `.\agentops.ps1` starts it. The cloud loop still does - add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 - and `AUTONOMY_ENABLED` stays false until then. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.

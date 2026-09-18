@@ -288,22 +288,24 @@ def upgrade() -> None:
                     USING ERRCODE = 'invalid_parameter_value';
             END IF;
 
-            -- Content first, version second. `docs/04-api.md` requires that
-            -- "no-op or idempotent replay does not increment", and those are
-            -- two different requests: a save of unchanged content against the
-            -- current version, and a retry of an edit that already succeeded
-            -- whose response the client never received. The second arrives
-            -- with the version it was written against, which is now one
-            -- behind, and comparing versions first answered it with a
-            -- conflict -- so an at-least-once client could never make that
-            -- write idempotent.
+            -- `docs/04-api.md` requires that "no-op or idempotent replay does
+            -- not increment", and those are two different requests: a save of
+            -- unchanged content against the current version, and a retry of
+            -- an edit that already succeeded whose response the client never
+            -- received. The retry arrives naming the version it was written
+            -- against, which is now exactly one behind, so comparing versions
+            -- first answered it with a conflict and an at-least-once client
+            -- could never make that write idempotent.
             --
-            -- Checking version first is also unnecessary here. Optimistic
-            -- concurrency exists to stop a lost update, and if the submitted
-            -- content is already exactly the current revision there is no
-            -- update to lose: the state the caller asked for is the state
-            -- that exists. A stale write whose content *differs* still
-            -- conflicts, which is the case the precondition is for.
+            -- Both are recognised, and nothing beyond them. An earlier
+            -- version of this accepted any stale version whose content
+            -- happened to match the current revision, which review showed
+            -- goes too far: after 1=A, 2=B, 3=A, a client still holding
+            -- version 1 and submitting A would have been told its write
+            -- applied as authored, when in truth the judgment had moved twice
+            -- and it had seen neither change. That is the conflict recovery
+            -- the precondition exists to trigger, skipped because two
+            -- revisions coincided. An older version conflicts.
             SELECT * INTO v_latest
             FROM app.judgment_revision
             WHERE judgment_id = v_judgment.id AND version = v_judgment.version;
@@ -311,10 +313,13 @@ def upgrade() -> None:
             IF v_latest.verdict = p_verdict
                AND v_latest.comment_text IS NOT DISTINCT FROM p_comment_text
                AND v_latest.clip_start_ms = p_clip_start_ms
-               AND v_latest.clip_end_ms = p_clip_end_ms THEN
-                -- No new revision and no version change, whether this is a
-                -- no-op against the current version or a replay of the edit
-                -- that produced it.
+               AND v_latest.clip_end_ms = p_clip_end_ms
+               AND p_expected_version IN (
+                   v_judgment.version, v_judgment.version - 1
+               ) THEN
+                -- No new revision and no version change: either a no-op
+                -- against the current version, or a replay of the edit that
+                -- produced it.
                 RETURN v_judgment;
             END IF;
 

@@ -403,6 +403,13 @@ class Observation(BaseModel):
 # also catches a typo in a real field, which silent tolerance turns into a
 # save that appears to have worked.
 
+# `clip_*_ms` are bounded to a PostgreSQL `integer`, which is what
+# `private.write_judgment_revision` declares them as. Without the ceiling a
+# value like 2147483648 passed Pydantic and failed while binding the function,
+# and the route reported that as 503 -- an outage, for what is a caller's
+# out-of-range field.
+MAX_INT32 = 2147483647
+
 Verdict = Literal["applied", "opportunity", "not_relevant"]
 
 
@@ -412,8 +419,8 @@ class JudgmentCreate(BaseModel):
     goal_id: UUID
     verdict: Verdict
     comment_text: str | None = Field(default=None, min_length=1, max_length=400)
-    clip_start_ms: int = Field(ge=0)
-    clip_end_ms: int = Field(gt=0)
+    clip_start_ms: int = Field(ge=0, le=MAX_INT32)
+    clip_end_ms: int = Field(gt=0, le=MAX_INT32)
 
     @model_validator(mode="after")
     def ordered_bounds(self) -> Self:
@@ -429,8 +436,8 @@ class JudgmentPatch(BaseModel):
 
     verdict: Verdict
     comment_text: str | None = Field(default=None, min_length=1, max_length=400)
-    clip_start_ms: int = Field(ge=0)
-    clip_end_ms: int = Field(gt=0)
+    clip_start_ms: int = Field(ge=0, le=MAX_INT32)
+    clip_end_ms: int = Field(gt=0, le=MAX_INT32)
 
     @model_validator(mode="after")
     def ordered_bounds(self) -> Self:

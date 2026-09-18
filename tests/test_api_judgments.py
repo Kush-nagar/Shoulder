@@ -531,6 +531,19 @@ class JudgmentApiTests(DatabaseTestCase):
         )
         self.assertEqual(response.status_code, 404, response.text)
 
+    def test_an_out_of_range_offset_is_the_caller_s_error_not_an_outage(self) -> None:
+        """A PostgreSQL `integer` ceiling, enforced where the caller can see it.
+
+        Unbounded, 2147483648 passed validation and failed while binding the
+        write function, which the route reported as 503 -- an outage, for an
+        out-of-range field.
+        """
+        response = self.client_for(self.coach).post(
+            f"/v1/observations/{self.observation}/judgments",
+            json=self.payload(clip_start_ms=0, clip_end_ms=2147483648),
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_not_relevant_verdict_can_be_created_and_read_back(self) -> None:
         response = self.client_for(self.coach).post(
             f"/v1/observations/{self.observation}/judgments",

@@ -476,6 +476,48 @@ class JudgmentIsolationTests(IsolationHarness):
         )
         self.assertEqual([r.version for r in revisions], [1, 2])
 
+    def test_an_older_version_conflicts_even_when_content_coincides(self) -> None:
+        """1=A, 2=B, 3=A: a client still on version 1 has seen neither change.
+
+        Telling it the write applied would skip the conflict recovery the
+        precondition exists for, because two revisions happened to coincide.
+        The replay exemption covers the immediately preceding version only.
+        """
+        created = self.judgment_write_as(self.world.a.coach)
+        # Each edit names the version it actually saw.
+        self.judgment_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=1,
+            verdict="opportunity",
+            comment_text="B.",
+        )
+        third = self.judgment_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=2,
+            verdict="applied",
+            comment_text="Nice first touch.",
+        )
+        self.assertEqual(third.version, 3)
+
+        # Version 1's content is byte-for-byte version 3's, and it must
+        # still conflict.
+        state = self.refused_write_as(
+            self.world.a.coach,
+            judgment_id=created.id,
+            observation_id=None,
+            goal_id=None,
+            expected_version=1,
+            verdict="applied",
+            comment_text="Nice first touch.",
+        )
+        self.assertEqual(state, STALE_VERSION)
+
     def test_a_stale_edit_with_different_content_still_conflicts(self) -> None:
         """The precondition still does its job where an update could be lost."""
         created = self.judgment_write_as(self.world.a.coach)

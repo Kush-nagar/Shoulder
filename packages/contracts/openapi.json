@@ -696,10 +696,12 @@
         "properties": {
           "clip_end_ms": {
             "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
             "title": "Clip End Ms",
             "type": "integer"
           },
           "clip_start_ms": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Clip Start Ms",
             "type": "integer"
@@ -747,10 +749,12 @@
         "properties": {
           "clip_end_ms": {
             "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
             "title": "Clip End Ms",
             "type": "integer"
           },
           "clip_start_ms": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Clip Start Ms",
             "type": "integer"
