@@ -204,6 +204,16 @@ def checkout_changes(root: Path) -> list[str]:
     return [line[3:].strip() for line in (result.stdout or "").splitlines() if line]
 
 
+# The two files `reconcile` maintains. Named exactly, not by prefix: a new
+# file appearing under `ops/state` is not automatically the orchestrator's to
+# leave lying in the checkout.
+LEDGER_PATHS = ("ops/state/progress.json", "ops/state/tasks.json")
+
+
+def _is_ledger(path: str) -> bool:
+    return path.replace("\\", "/").strip('"') in LEDGER_PATHS
+
+
 def require_clean_checkout(root: Path) -> None:
     """Refuse to run against a checkout somebody is in the middle of editing.
 
@@ -211,8 +221,17 @@ def require_clean_checkout(root: Path) -> None:
     local work is how the unexplained local work gets lost, and there is no
     version of "tidy it up automatically" that is safe -- which is why nothing
     here stashes, resets or discards anything.
+
+    The orchestrator's own ledger is the exception, and without it the loop
+    could never finish two tasks in a row. `reconcile` writes
+    `ops/state/progress.json` and `tasks.json` exactly when a task newly
+    completes, which is the moment the loop wants to pick up the next one; the
+    following iteration then found its own bookkeeping sitting in the checkout
+    and stopped as BLOCKED_LOCAL_CHECKOUT. The guard exists to protect work
+    nobody can account for, and these two files are accounted for by
+    definition. Every other path still stops it.
     """
-    changes = checkout_changes(root)
+    changes = [path for path in checkout_changes(root) if not _is_ledger(path)]
     if changes:
         raise Stop(
             BLOCKED_LOCAL_CHECKOUT,

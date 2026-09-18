@@ -340,6 +340,24 @@ class TestRefusals(ProjectCase):
         self.assertFalse([c for c in self.git_calls if c[:1] == ["push"]])
         self.assertFalse(self.gh.merged)
 
+    def test_the_loop_is_not_stopped_by_its_own_ledger(self) -> None:
+        """`reconcile` writes these two files as a task completes.
+
+        That is the moment the loop wants the next task, and it used to find
+        its own bookkeeping in the checkout and stop as
+        BLOCKED_LOCAL_CHECKOUT, so it could never finish two in a row.
+        """
+        self.dirty = ["ops/state/progress.json", "ops/state/tasks.json"]
+        result = self.drive(max_tasks=1)
+        self.assertNotEqual(result["status"], project.BLOCKED_LOCAL_CHECKOUT)
+
+    def test_the_ledger_exemption_does_not_cover_the_rest_of_ops_state(self) -> None:
+        """Only the two files the orchestrator maintains are accounted for."""
+        self.dirty = ["ops/state/progress.json", "ops/policy.json"]
+        result = self.drive(max_tasks=1)
+        self.assertEqual(result["status"], project.BLOCKED_LOCAL_CHECKOUT)
+        self.assertEqual(result["changes"], ["ops/policy.json"])
+
     def test_nothing_resets_stashes_or_force_pushes(self) -> None:
         self.drive(max_tasks=1)
         flat = [" ".join(call) for call in self.git_calls]
