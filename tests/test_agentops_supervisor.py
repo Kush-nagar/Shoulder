@@ -238,6 +238,8 @@ def graphql(
     reviews: list[dict[str, Any]] | list[str],
     *,
     head: str = HEAD,
+    comments: list[dict[str, Any]] | None = None,
+    comments_total: int | None = None,
 ) -> str:
     nodes = [
         {
@@ -258,6 +260,14 @@ def graphql(
                         "headRefOid": head,
                         "reviewThreads": {"nodes": threads},
                         "reviews": {"nodes": nodes},
+                        "comments": {
+                            "nodes": comments or [],
+                            "totalCount": (
+                                comments_total
+                                if comments_total is not None
+                                else len(comments or [])
+                            ),
+                        },
                     }
                 }
             }
@@ -300,11 +310,21 @@ class TestReviewVerdict(unittest.TestCase):
     """The merge gate. It decides, deterministically, without a model."""
 
     def verdict_for(
-        self, stdout: str, code: int = 0, *, wait: bool = False
+        self,
+        stdout: str,
+        code: int = 0,
+        *,
+        wait: bool = False,
+        reviewer: str | None = None,
     ) -> dict[str, Any]:
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=code, stdout=stdout)
-            return review.verdict("o/r", 42, require_submitted_review=wait)
+            return review.verdict(
+                "o/r",
+                42,
+                require_submitted_review=wait,
+                reviewer_login=reviewer,
+            )
 
     def test_a_clean_review_passes(self) -> None:
         result = self.verdict_for(graphql([], ["APPROVED"]))
@@ -333,6 +353,71 @@ class TestReviewVerdict(unittest.TestCase):
         """
         result = self.verdict_for(graphql([thread(outdated=True)], []))
         self.assertEqual(result["verdict"], "pass")
+
+    def test_a_clean_review_comment_counts_as_having_reviewed_the_head(self) -> None:
+        """The defect that deadlocked PR #32 for ten hours.
+
+        Codex submits a review only when it has suggestions. A clean pass is a
+        comment naming the commit it read, so `reviewed_head` stayed false for
+        a review that had genuinely happened and the gate waited for a
+        submitted review that was never coming. It could only ever pass when
+        the reviewer found problems.
+        """
+        clean = {
+            "author": {"login": "reviewer"},
+            "body": (
+                "Codex Review: Didn't find any major issues. "
+                f"**Reviewed commit:** `{HEAD[:10]}`"
+            ),
+        }
+        result = self.verdict_for(
+            graphql([], [], comments=[clean]), wait=True, reviewer="reviewer"
+        )
+        self.assertTrue(result["reviewed_head"])
+        self.assertEqual(result["verdict"], "pass")
+
+    def test_a_clean_comment_from_anybody_else_does_not_count(self) -> None:
+        """Otherwise a passing remark satisfies the wait for the real reviewer."""
+        impostor = {
+            "author": {"login": "chatgpt-codex-connector-evil"},
+            "body": f"Codex Review: looks fine. **Reviewed commit:** `{HEAD}`",
+        }
+        result = self.verdict_for(
+            graphql([], [], comments=[impostor]), wait=True, reviewer="reviewer"
+        )
+        self.assertFalse(result["reviewed_head"])
+        self.assertEqual(result["verdict"], "pending")
+
+    def test_a_clean_comment_about_an_earlier_commit_does_not_count(self) -> None:
+        """A review of the commit before the repair is not a review of this one."""
+        stale = {
+            "author": {"login": "reviewer"},
+            "body": "Codex Review: fine. **Reviewed commit:** `deadbeefcafe`",
+        }
+        result = self.verdict_for(
+            graphql([], [], comments=[stale]), wait=True, reviewer="reviewer"
+        )
+        self.assertFalse(result["reviewed_head"])
+        self.assertEqual(result["verdict"], "pending")
+
+    def test_a_clean_comment_does_not_clear_an_unresolved_finding(self) -> None:
+        """Findings are counted from threads; this only answers "did it look"."""
+        clean = {
+            "author": {"login": "reviewer"},
+            "body": f"Codex Review: fine. **Reviewed commit:** `{HEAD}`",
+        }
+        result = self.verdict_for(
+            graphql([thread()], [], comments=[clean]), wait=True, reviewer="reviewer"
+        )
+        self.assertEqual(result["verdict"], "changes_requested")
+
+    def test_too_many_comments_to_read_fails_closed(self) -> None:
+        """A truncated window is a silent truncation, so it blocks."""
+        result = self.verdict_for(
+            graphql([], [], comments=[], comments_total=10_000), wait=True
+        )
+        self.assertEqual(result["verdict"], "unknown")
+        self.assertFalse(result["ok"])
 
     def test_an_unreadable_review_state_fails_closed(self) -> None:
         """Merging on a question mark is the outcome worth avoiding."""

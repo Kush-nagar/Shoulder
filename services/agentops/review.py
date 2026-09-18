@@ -15,6 +15,7 @@ avoiding.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any
 
@@ -42,10 +43,25 @@ query($owner: String!, $name: String!, $number: Int!) {
           commit { oid }
         }
       }
+      comments(last: 50) {
+        totalCount
+        nodes {
+          author { login }
+          body
+        }
+      }
     }
   }
 }
 """
+
+# How a reviewer that found nothing says so. Codex submits a review only when
+# it has suggestions; a clean pass is an ordinary comment naming the commit it
+# read ("**Reviewed commit:** `8af36134b4`"), and its own help text says as
+# much: "If Codex has suggestions, it will comment; otherwise it will react".
+# Without reading that, a clean review is indistinguishable from no review and
+# the gate waits for a submitted review that is never coming.
+REVIEWED_COMMIT = re.compile(r"reviewed commit[^0-9a-f]{0,12}([0-9a-f]{7,40})", re.I)
 
 # A review in one of these states is a remark, not a judgment, and GitHub
 # records one for every inline-comment batch. Treating it as a verdict would
@@ -94,6 +110,9 @@ def latest_review_states(reviews: list[dict[str, Any]]) -> dict[str, str]:
 
 THREAD_WINDOW = 100
 REVIEW_WINDOW = 50
+# The clean-review comment is read from this window, so it truncates the same
+# way and fails closed the same way.
+COMMENT_WINDOW = 50
 
 
 def _is_reviewer(review: dict[str, Any], reviewer_login: str | None) -> bool:
@@ -112,6 +131,31 @@ def _is_reviewer(review: dict[str, Any], reviewer_login: str | None) -> bool:
     author = str((review.get("author") or {}).get("login") or "").lower()
     expected = reviewer_login.lower().removesuffix("[bot]")
     return author in (expected, f"{expected}[bot]")
+
+
+def _commented_on_head(
+    comments: list[dict[str, Any]], head: str, reviewer_login: str | None
+) -> bool:
+    """Whether the chosen reviewer said, in a comment, which commit it read.
+
+    The same question the review check asks -- has this reviewer looked at
+    this commit -- answered from the other place this reviewer puts it. It is
+    still that reviewer only, and the commit it names must be this head, so a
+    passing remark from anybody else, or about an earlier commit, counts for
+    nothing. Findings are not read from here: unresolved threads and a
+    changes-requested review are counted separately and still block.
+    """
+    if not head:
+        return False
+    for comment in comments:
+        if not _is_reviewer(comment, reviewer_login):
+            continue
+        found = REVIEWED_COMMIT.search(str(comment.get("body") or ""))
+        # An abbreviated sha is a prefix of the full one, and only a prefix
+        # of this head will do.
+        if found and head.startswith(found.group(1).lower()):
+            return True
+    return False
 
 
 def verdict(
@@ -168,14 +212,21 @@ def verdict(
     # itself worth stopping for.
     threads_total = int(pr["reviewThreads"].get("totalCount") or 0)
     reviews_total = int(pr["reviews"].get("totalCount") or 0)
-    if threads_total > THREAD_WINDOW or reviews_total > REVIEW_WINDOW:
+    comments_total = int((pr.get("comments") or {}).get("totalCount") or 0)
+    if (
+        threads_total > THREAD_WINDOW
+        or reviews_total > REVIEW_WINDOW
+        or comments_total > COMMENT_WINDOW
+    ):
         return {
             "ok": False,
             "verdict": "unknown",
             "blocking": 1,
             "reason": (
-                f"{threads_total} threads and {reviews_total} reviews exceed the "
-                f"{THREAD_WINDOW}/{REVIEW_WINDOW} window this can read; "
+                f"{threads_total} threads, {reviews_total} reviews and "
+                f"{comments_total} comments exceed the "
+                f"{THREAD_WINDOW}/{REVIEW_WINDOW}/{COMMENT_WINDOW} window this "
+                "can read; "
                 "refusing to call it clean"
             ),
             "findings": [],
@@ -202,6 +253,7 @@ def verdict(
         )
 
     reviews = pr["reviews"]["nodes"]
+    comments = (pr.get("comments") or {}).get("nodes") or []
     states = latest_review_states(reviews)
     changes_requested = sum(1 for s in states.values() if s == "CHANGES_REQUESTED")
 
@@ -216,7 +268,7 @@ def verdict(
         str((review.get("commit") or {}).get("oid") or "") == head
         and _is_reviewer(review, reviewer_login)
         for review in reviews
-    )
+    ) or _commented_on_head(comments, head, reviewer_login)
 
     blocking = len(findings) + changes_requested
     result: dict[str, Any] = {
