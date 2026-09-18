@@ -340,6 +340,50 @@ class TestRefusals(ProjectCase):
         self.assertFalse([c for c in self.git_calls if c[:1] == ["push"]])
         self.assertFalse(self.gh.merged)
 
+    def test_the_loop_is_not_stopped_by_its_own_ledger(self) -> None:
+        """`reconcile` writes these two files as a task completes.
+
+        That is the moment the loop wants the next task, and it used to find
+        its own bookkeeping in the checkout and stop as
+        BLOCKED_LOCAL_CHECKOUT, so it could never finish two in a row.
+        """
+        project.record_ledger(self.paths, self.root)
+        self.dirty = ["ops/state/progress.json", "ops/state/tasks.json"]
+        result = self.drive(max_tasks=1)
+        self.assertNotEqual(result["status"], project.BLOCKED_LOCAL_CHECKOUT)
+
+    def test_a_ledger_nobody_recorded_writing_still_stops_the_loop(self) -> None:
+        """Exempt by content, never by name.
+
+        `progress.json` is read as the truth about which tasks are done, so an
+        uncommitted edit adding a task to `completed_tasks` would make the loop
+        skip it and merge its dependent. Nothing recorded writing these bytes,
+        so they are not accounted for.
+        """
+        self.dirty = ["ops/state/progress.json"]
+        result = self.drive(max_tasks=1)
+        self.assertEqual(result["status"], project.BLOCKED_LOCAL_CHECKOUT)
+        self.assertEqual(result["changes"], ["ops/state/progress.json"])
+
+    def test_a_ledger_edited_after_the_loop_wrote_it_stops_the_loop(self) -> None:
+        """The recorded digest is of the bytes, so a later edit is caught."""
+        project.record_ledger(self.paths, self.root)
+        ledger = self.root / "ops" / "state" / "progress.json"
+        ledger.write_text(
+            json.dumps({"completed_tasks": [15, 16], "gates": {}}), encoding="utf-8"
+        )
+        self.dirty = ["ops/state/progress.json"]
+        result = self.drive(max_tasks=1)
+        self.assertEqual(result["status"], project.BLOCKED_LOCAL_CHECKOUT)
+
+    def test_the_ledger_exemption_does_not_cover_the_rest_of_ops_state(self) -> None:
+        """Only the two files the orchestrator maintains are accounted for."""
+        project.record_ledger(self.paths, self.root)
+        self.dirty = ["ops/state/progress.json", "ops/policy.json"]
+        result = self.drive(max_tasks=1)
+        self.assertEqual(result["status"], project.BLOCKED_LOCAL_CHECKOUT)
+        self.assertEqual(result["changes"], ["ops/policy.json"])
+
     def test_nothing_resets_stashes_or_force_pushes(self) -> None:
         self.drive(max_tasks=1)
         flat = [" ".join(call) for call in self.git_calls]
@@ -614,3 +658,60 @@ class TestResume(ProjectCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPostMergeFastForward(unittest.TestCase):
+    """`main` must advance after a merge, ledger or no ledger.
+
+    Exempting the ledger in the start-up guard alone was not enough, and
+    independent review caught it: `fetch_main` asked the same checkout a
+    different question, saw the ledger `reconcile` had just written, and
+    silently declined to fast-forward. Worktrees are cut from `HEAD`, so the
+    next task would have been branched from pre-merge code -- the exact
+    failure `fetch_main`'s own comment says it exists to prevent.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "repo"
+        (self.root / "ops" / "state").mkdir(parents=True)
+        for name in ("progress.json", "tasks.json"):
+            (self.root / "ops" / "state" / name).write_text("{}\n", encoding="utf-8")
+        self.paths = localstate.ensure(localstate.LocalPaths(self.root))
+
+    def run_fetch(
+        self, dirty: list[str], branch: str = "main", *, recorded: bool = True
+    ) -> list[list[str]]:
+        calls: list[list[str]] = []
+        if recorded:
+            project.record_ledger(self.paths, self.root)
+
+        def fake_git(root: Path, args: list[str]) -> Any:
+            calls.append(list(args))
+            if args[:1] == ["status"]:
+                return completed(stdout="".join(f" M {p}\n" for p in dirty))
+            if args[:1] == ["rev-parse"]:
+                return completed(stdout=f"{branch}\n")
+            return completed()
+
+        with mock.patch.object(project, "_git", fake_git):
+            project.fetch_main(self.root, self.paths)
+        return calls
+
+    def test_a_dirty_ledger_does_not_stop_the_fast_forward(self) -> None:
+        calls = self.run_fetch(["ops/state/progress.json", "ops/state/tasks.json"])
+        self.assertIn(["merge", "--ff-only", "origin/main"], calls)
+
+    def test_a_ledger_nobody_recorded_writing_stops_the_fast_forward(self) -> None:
+        """Both callers ask the same question, so both fail closed."""
+        calls = self.run_fetch(["ops/state/progress.json"], recorded=False)
+        self.assertNotIn(["merge", "--ff-only", "origin/main"], calls)
+
+    def test_unaccounted_changes_still_stop_it(self) -> None:
+        calls = self.run_fetch(["services/api/half-done.py"])
+        self.assertNotIn(["merge", "--ff-only", "origin/main"], calls)
+
+    def test_it_does_not_fast_forward_off_main(self) -> None:
+        calls = self.run_fetch([], branch="block-04-t16-drafts")
+        self.assertNotIn(["merge", "--ff-only", "origin/main"], calls)
