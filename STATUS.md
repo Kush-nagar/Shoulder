@@ -18,7 +18,7 @@ against Git and GitHub before editing anything.
 | Last full verification | 2026-09-17 on `block-04-t15-coach-judgments` at `dec5698`: 1293 Python tests passed against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff format, ruff lint and mypy clean; contracts regenerated with no drift; Node suites, production build and Chromium/Firefox/WebKit smoke pass. CI `quality` green on this head. Three independent review rounds, eleven findings, all answered and resolved. |
 | Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Merge PR #32, then PR #33, then reconcile and let the coordinator select Task 16. The local runtime needs no owner action: `.gentops.ps1` starts it. The cloud loop still does - add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 - and `AUTONOMY_ENABLED` stays false until then. |
+| Next action | Merge PR #32, then PR #33, then reconcile and let the coordinator select Task 16. The local runtime needs no owner action: `.\agentops.ps1` starts it. The cloud loop still does - add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 - and `AUTONOMY_ENABLED` stays false until then. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
@@ -144,7 +144,9 @@ block, not inside it.
   SECURITY DEFINER write path, with SELECT-only grants for the runtime role.
   Task 16 has not started.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: `D:\Shoulder`, branch `block-04-t14-manual-clip-marking`; one writer.
+- Checkout: `D:\Shoulder` sits on `main`; Task 15 is written in its own
+  worktree, `D:\Shoulder-agents\block-04-t15-coach-judgments`, on branch
+  `block-04-t15-coach-judgments`. One writer per checkout.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
 - Last verified: 2026-09-08; Task 5 local migration cycle, 75 database tests, 6 auth browser tests and full check passed. Hosted isolation was independently verified. All review verification blockers are resolved; see `docs/task-5-verification.md`.
