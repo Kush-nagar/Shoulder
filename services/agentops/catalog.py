@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -130,10 +130,40 @@ def _harness_model(model_id: str, family: str, lanes: dict[str, str]) -> str:
     API both take a bare slug, because the provider is implied. The OpenRouter
     lane routes by namespaced id, so stripping the namespace there would leave
     a model name that identifies nothing.
+
+    Anthropic needs one more step, and until 2026-09-17 not taking it meant no
+    local worker could start at all. The catalogue spells a version with a dot
+    (`anthropic/claude-haiku-4.5`); Claude Code spells it with a dash. Handed
+    the dotted slug the CLI exits immediately with
+
+        [claude-code:unrecognized_model] {"model":"claude-haiku-4.5"}
+
+    which the runtime recorded as an implementation failure, escalated twice
+    on, and then dead-ended as BLOCKED_PROVIDER -- twice, on Tasks 15 and 16.
+    Probed against the installed CLI: every dotted slug is rejected and every
+    dashed one (`claude-haiku-4-5`, `claude-sonnet-4-5`, `claude-opus-4-5`,
+    `claude-fable-5-1`) is accepted, as are the already-undotted `claude-*-5`.
+    Translating is therefore the whole fix, and an alias like `haiku` is not:
+    it would silently run a different tier than the router chose and recorded.
     """
-    if family in lanes:
-        return model_id.split("/", 1)[-1]
-    return model_id
+    if family not in lanes:
+        return model_id
+    return _undot(model_id.split("/", 1)[-1], family)
+
+
+def _undot(slug: str, family: str) -> str:
+    """`claude-haiku-4.5` -> `claude-haiku-4-5`, and nothing else.
+
+    Only a bare Anthropic slug is touched. A namespaced id is left exactly as
+    it is: an Anthropic model reached through OpenRouter is addressed by
+    OpenRouter's own id, dot included, and dashing that would break a lane
+    this function is not being asked about. Independent review raised the
+    inverse risk -- that re-deriving ownership here could rewrite a slug as
+    though a different lane owned it -- and not re-deriving it is the answer.
+    """
+    if family == "anthropic" and "/" not in slug:
+        return slug.replace(".", "-")
+    return slug
 
 
 def normalise(
@@ -263,13 +293,29 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 
 def models_from_state(state: dict[str, Any]) -> list[Model]:
-    """Rebuild Model objects from stored state, skipping absent entries."""
+    """Rebuild Model objects from stored state, skipping absent entries.
+
+    The stored harness slug is normalised on the way out. A ledger written
+    before the Anthropic translation existed still holds the spelling Claude
+    Code rejects, which is exactly how every local worker kept being spawned
+    with an unusable model name long after the translation itself was fixed.
+
+    Only the dotted version is corrected; lane ownership is not re-derived.
+    Re-deriving it would let this function rewrite a slug as though a
+    different lane owned the namespace than the one the router recorded.
+    """
     fields = Model.__dataclass_fields__
     models = []
     for record in state.get("models", {}).values():
         if record.get("absent"):
             continue
-        models.append(Model(**{k: record[k] for k in fields if k in record}))
+        model = Model(**{k: record[k] for k in fields if k in record})
+        models.append(
+            replace(
+                model,
+                harness_model=_undot(model.harness_model, model.family),
+            )
+        )
     return models
 
 

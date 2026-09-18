@@ -864,19 +864,27 @@ class TestSquashMergeCompletion(unittest.TestCase):
             run.return_value = mock.Mock(returncode=1, stdout="")
             self.assertIsNone(reconcile.pull_request_merged("block-04-t14"))
 
-    def test_reconcile_consults_both_signals(self) -> None:
+    def test_a_merged_pull_request_is_the_only_completion_signal(self) -> None:
+        """Ancestry is not a second signal, because it cannot be one.
+
+        A fast-forward-merged branch and a branch created from main that was
+        never committed to are the same shape in the ancestry graph: both are
+        ancestors of main with no commits of their own. Reading ancestry as
+        proof of a merge completed tasks whose work had not been written.
+        """
         from services.agentops import reconcile
 
         source = Path(reconcile.__file__).read_text(encoding="utf-8")
-        self.assertIn("branch_is_merged(root, str(branch))", source)
         self.assertIn("pull_request_merged(str(branch), repo=repo", source)
-
-    def test_completion_records_which_signal_proved_it(self) -> None:
-        from services.agentops import reconcile
-
-        source = Path(reconcile.__file__).read_text(encoding="utf-8")
-        self.assertIn("squash or rebase merged", source)
-        self.assertIn("ancestor of main", source)
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("#", "def ")) or not stripped:
+                continue
+            self.assertNotIn(
+                "branch_is_merged(root",
+                stripped,
+                "ancestry must not be consulted as completion evidence",
+            )
 
     def test_only_a_merge_into_main_completes_a_task(self) -> None:
         """A branch retargeted to staging and merged there has not landed.

@@ -115,12 +115,42 @@ That is the emergency stop. It needs no commit and no source change. Workers
 already running finish their current step and stop; nothing new is dispatched.
 The watchdog keeps its read-only sweep and will not restart work.
 
+## Running it locally
+
+```
+cd D:\Shoulder
+.\agentops.ps1
+```
+
+That is the whole normal workflow. It brings the read-only dashboard up, prints
+its URL, authorises local execution on this machine, says what the last run
+left behind, and then works the canonical backlog until it finishes or
+something needs a person.
+
+`agentops.ps1` is the deterministic half of the system and holds no
+engineering judgement: it starts processes, notices whether they are alive,
+decides whether a stop is worth another pass, and leaves the checkpoint alone
+so the next pass continues a task rather than restarting it. Which task runs,
+which model writes it, and what blocks are all decided by the coordinator in
+`services/agentops`.
+
+It refuses to start a second coordinator while one is alive, because one
+write-capable owner per checkout is the invariant the worktree safety rests on.
+A stop named `BLOCKED_HUMAN` or `BLOCKED_LOCAL_CHECKOUT` is printed and left
+alone; only a provider that is out of allowance, or a coordinator that died
+without recording a stop, is retried.
+
+Useful switches: `-DashboardOnly` brings the view up and exits, `-MaxTasks n`
+stops after n merged tasks, `-Verification fast` skips the gated suites, and
+`-Port` moves the dashboard. `.\scripts\agentops-local.ps1 stop` stops a run.
+
 ## Running it by hand
 
 All commands are safe except `dispatch`, which refuses while autonomy is off.
 
 ```
 python -m services.agentops.cli status      # ledger, health, qualified models
+python -m services.agentops.cli enable-local     # authorise local execution here
 python -m services.agentops.cli plan        # dry-run the next task selection
 python -m services.agentops.cli discover    # refresh the model catalogue
 python -m services.agentops.cli health --probe   # lift lanes whose secret exists

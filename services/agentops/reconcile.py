@@ -5,9 +5,23 @@ a pull request, a human or a check merges it, and then nothing marks the task
 complete or releases its lease: the next coordinator run sees the same task
 still outstanding and still held, and the backlog never advances.
 
-Completion is decided from Git, not from a message. A task is complete when
-the branch its lease names has become an ancestor of the merge target, which
-is true exactly when the branch has been merged.
+Completion is decided from evidence, not from a message: a task is complete
+when the pull request for its canonical branch has been merged into the merge
+target.
+
+Ancestry used to count as a second signal and cannot. A branch that was merged
+by fast-forward and a branch that was created from main and never committed to
+are both, identically, ancestors of main with no commits of their own; nothing
+in the ancestry graph separates them. Reading ancestry as proof of a merge
+therefore completed tasks whose work had never been written -- `block-04-t15`
+and `block-04-t16` were both pre-created empty and both reported done, while
+Task 15's implementation sat uncommitted in its worktree.
+
+A merged pull request is the only signal that survives that. It is also the
+only one the repository's own governance permits: `main` is protected, so work
+lands through a pull request or it does not land. When the query cannot be
+answered the task stays outstanding, which costs one re-examination and cannot
+invent a completion.
 """
 
 from __future__ import annotations
@@ -89,7 +103,12 @@ def _from_repository(pull_request: dict[str, Any], repo: str) -> bool:
 
 
 def branch_is_merged(root: Path, branch: str, base: str = "origin/main") -> bool:
-    """Whether every commit on `branch` is already contained in `base`."""
+    """Whether every commit on `branch` is already contained in `base`.
+
+    Not evidence that a task's work merged, and deliberately not used as such:
+    a branch created from `base` and never committed to satisfies this exactly
+    as a fast-forward-merged branch does. See the module docstring.
+    """
     for ref in (f"origin/{branch}", branch):
         exists = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", ref],
@@ -219,9 +238,10 @@ def _reconcile_unleased(
         # It also proves the head repository, which a branch name cannot.
         if pull_request_merged(branch, repo=repo, base="main"):
             how = "pull request for the canonical task branch was merged into main"
-        elif branch_is_merged(root, branch):
-            how = "canonical task branch is an ancestor of main"
         else:
+            # No ancestry fallback. An unleased task's branch is very often one
+            # the coordinator pre-created and never committed to, and that is
+            # indistinguishable from a fast-forward merge by ancestry alone.
             continue
         # A lease may still exist in a non-terminal state -- an expired one the
         # loop above skipped, or one released as blocked before the work in
@@ -247,15 +267,13 @@ def reconcile(root: Path, *, repo: str | None = None) -> dict[str, Any]:
         task_id = int(lease.get("task_id", key))
         if not branch:
             continue
-        # Either signal is enough: a fast-forward merge shows up as ancestry, a
-        # squash or rebase merge only as a merged pull request.
-        merged = branch_is_merged(root, str(branch))
-        how = "branch is an ancestor of main"
-        if not merged and pull_request_merged(str(branch), repo=repo, base="main"):
-            merged = True
-            how = "pull request was squash or rebase merged into main"
-        if not merged:
+        # A held task is the dangerous one to get wrong: its branch exists and
+        # is checked out in a worktree, so if it was created empty the ancestry
+        # signal reports a merge for work that is still being written. Only a
+        # merged pull request counts.
+        if not pull_request_merged(str(branch), repo=repo, base="main"):
             continue
+        how = "pull request for the leased branch was merged into main"
 
         leases.release(ctx.tasks, task_id, "merged")
         _record_completion(ctx, task_id, str(branch), how)
