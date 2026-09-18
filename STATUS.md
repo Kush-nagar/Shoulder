@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `175d71a8489fed1874a1070e4fc1cd6aaaf99142` |
+| Last verified `main` | `664ef812d02adaef2e91ca5089eca894c5b2d53a` (PR #31) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
-| Current block | Block 04 complete through Task 14. Autonomy infrastructure upgrade in flight on its own branch; no product task is started from it. |
-| Current worker / branch | AgentOps cloud supervisor upgrade / `agentops-cloud-supervisor` |
-| Open PRs | autonomy infrastructure (this branch) |
-| Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-14 on `agentops-cloud-supervisor` at `7ca44c8`: `scripts/check.ps1` passed end to end - 764 Python tests (288 skipped, all Docker or remote dependent), 410 of them AgentOps; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. PR #24 `quality` and `verdict` green; two independent review rounds, 19 findings, all answered and resolved. |
+| Current block | Block 04. Task 14 merged; Task 15 implemented and verified on this branch, awaiting merge; Task 16 not started. |
+| Current worker / branch | Task 15 coach judgments / `block-04-t15-coach-judgments` |
+| Open PRs | #32 Task 15 coach judgments (this branch); #33 AgentOps ledger and clean-checkout repair |
+| Database revision | `0008_coach_judgments` on this branch, applied and downgraded against a local Postgres 17.6; `main` is on `0007_manual_observations`; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | 2026-09-17 on `block-04-t15-coach-judgments` at `dec5698`: 1293 Python tests passed against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff format, ruff lint and mypy clean; contracts regenerated with no drift; Node suites, production build and Chromium/Firefox/WebKit smoke pass. CI `quality` green on this head. Three independent review rounds, eleven findings, all answered and resolved. |
 | Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Owner action required first: add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 and the loop cannot run. Then merge PR #24 and set `AUTONOMY_ENABLED=true`. The coordinator selects Task 15 by itself; do not dispatch it by hand. |
+| Next action | Merge PR #32, then PR #33, then reconcile and let the coordinator select Task 16. The local runtime needs no owner action: `.gentops.ps1` starts it. The cloud loop still does - add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 - and `AUTONOMY_ENABLED` stays false until then. |
 
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
@@ -137,8 +137,12 @@ block, not inside it.
 
 ## Current state
 
-- Current phase: Phase C — Coach review. Task 14 is implemented on PR #21 and
-  awaits review and merge. Task 15 has not started.
+- Current phase: Phase C — Coach review. Task 14 is merged (PR #21). Task 15 —
+  coach judgments — is implemented and verified on
+  `block-04-t15-coach-judgments` and awaits merge on PR #32: migration 0008
+  adds `app.judgment` and the immutable `app.judgment_revision` behind one
+  SECURITY DEFINER write path, with SELECT-only grants for the runtime role.
+  Task 16 has not started.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
 - Checkout: `D:\Shoulder`, branch `block-04-t14-manual-clip-marking`; one writer.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
