@@ -166,7 +166,7 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(body["author_user_id"], str(self.coach))
         self.assertEqual(body["publication_status"], "draft")
         self.assertEqual(body["verdict"], "applied")
-        self.assertEqual(response.headers["ETag"], "1")
+        self.assertEqual(response.headers["ETag"], '"1"')
 
     def test_request_body_has_no_author_field_to_spoof(self) -> None:
         """Author is always the session identity; there is nothing to inject."""
@@ -226,7 +226,7 @@ class JudgmentApiTests(DatabaseTestCase):
         body = response.json()
         self.assertEqual(body["version"], 2)
         self.assertEqual(body["verdict"], "opportunity")
-        self.assertEqual(response.headers["ETag"], "2")
+        self.assertEqual(response.headers["ETag"], '"2"')
 
     def test_no_op_replay_does_not_advance_the_version(self) -> None:
         client = self.client_for(self.coach)
@@ -317,6 +317,90 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(current["clip_end_ms"], 2400)
         self.assertEqual(current["id"], created["id"])
 
+    def test_the_etag_is_a_quoted_entity_tag_and_round_trips(self) -> None:
+        """An HTTP entity-tag is quoted, and a correct client echoes it back.
+
+        Sent bare, a client that echoed `If-Match: "1"` exactly as HTTP
+        requires was rejected with 400 — the precondition failing on the
+        clients that implement it properly.
+        """
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        )
+        self.assertEqual(created.headers["ETag"], '"1"')
+
+        edited = client.patch(
+            f"/v1/judgments/{created.json()['id']}",
+            headers={"If-Match": created.headers["ETag"]},
+            json={
+                "verdict": "opportunity",
+                "comment_text": "Echoed the tag back.",
+                "clip_start_ms": 1000,
+                "clip_end_ms": 2000,
+            },
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.headers["ETag"], '"2"')
+
+    def test_a_wildcard_or_weak_precondition_is_refused(self) -> None:
+        """`*` cannot establish which version an edit was written against."""
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        ).json()
+        for header in ("*", 'W/"1"'):
+            with self.subTest(if_match=header):
+                response = client.patch(
+                    f"/v1/judgments/{created['id']}",
+                    headers={"If-Match": header},
+                    json={
+                        "verdict": "applied",
+                        "comment_text": "Should not apply.",
+                        "clip_start_ms": 1000,
+                        "clip_end_ms": 2000,
+                    },
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+
+    def test_revision_history_is_coach_only(self) -> None:
+        """`docs/03-schema.md` makes the history coach-only.
+
+        The player policy on `judgment_revision` grants the one revision a
+        judgment publishes, so an endpoint trusting row-level security alone
+        would begin answering this route for players the moment Task 17 can
+        publish. The service states the coach predicate itself instead.
+        """
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        ).json()
+        client.patch(
+            f"/v1/judgments/{created['id']}",
+            headers={"If-Match": '"1"'},
+            json={
+                "verdict": "opportunity",
+                "comment_text": "A second draft.",
+                "clip_start_ms": 1000,
+                "clip_end_ms": 2000,
+            },
+        )
+
+        coach_history = client.get(f"/v1/judgments/{created['id']}/revisions")
+        self.assertEqual(coach_history.status_code, 200, coach_history.text)
+        self.assertEqual([r["version"] for r in coach_history.json()], [1, 2])
+
+        for label, actor in (
+            ("the player", self.player_account),
+            ("another team's coach", self.other_coach),
+        ):
+            with self.subTest(actor=label):
+                response = self.client_for(actor).get(
+                    f"/v1/judgments/{created['id']}/revisions"
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), [])
+
     def test_a_conflict_snapshot_is_not_served_to_another_team(self) -> None:
         """The recovery payload is still a read, decided by row-level security."""
         created = (
@@ -364,25 +448,6 @@ class JudgmentApiTests(DatabaseTestCase):
             f"/v1/observations/{self.observation}/judgments", json=self.payload()
         )
         self.assertEqual(response.status_code, 404, response.text)
-
-    def test_revision_history_is_coach_only(self) -> None:
-        created = (
-            self.client_for(self.coach)
-            .post(f"/v1/observations/{self.observation}/judgments", json=self.payload())
-            .json()
-        )
-        coach_history = self.client_for(self.coach).get(
-            f"/v1/judgments/{created['id']}/revisions"
-        )
-        self.assertEqual(coach_history.status_code, 200, coach_history.text)
-        self.assertEqual(len(coach_history.json()), 1)
-        self.assertEqual(coach_history.json()[0]["version"], 1)
-
-        player_history = self.client_for(self.player_account).get(
-            f"/v1/judgments/{created['id']}/revisions"
-        )
-        self.assertEqual(player_history.status_code, 200, player_history.text)
-        self.assertEqual(player_history.json(), [])
 
     def test_not_relevant_verdict_can_be_created_and_read_back(self) -> None:
         response = self.client_for(self.coach).post(

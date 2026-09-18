@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.exc import DBAPIError
 
 from services.api.auth import authenticated_identity
@@ -26,7 +26,59 @@ router = APIRouter(prefix="/v1")
 
 
 def _etag(response: Response, version: int) -> None:
-    response.headers["ETag"] = str(version)
+    """An entity-tag is a quoted string, so send one.
+
+    It used to be sent bare. A client that correctly echoed it back as
+    `If-Match: "3"` was then rejected with 400 by the parser below, which is
+    the version precondition failing on the exact clients that implement HTTP
+    properly.
+    """
+    response.headers["ETag"] = f'"{version}"'
+
+
+def if_match_version(request: Request) -> int:
+    """The version the request's `If-Match` names.
+
+    Read from the raw headers rather than declared as a typed parameter, so
+    that FastAPI does not also publish an inferred one. Declared optional it
+    reached the contract as optional, which let a generated client omit the
+    precondition this endpoint is built around; declared required, FastAPI
+    answers a missing header with its own 422 instead of the 428 the
+    specification asks for. Reading it here keeps both: the route documents a
+    single required header through `openapi_extra`, and the runtime answers
+    428 itself.
+    """
+    return _expected_version(request.headers.get("If-Match"))
+
+
+def _expected_version(if_match: str | None) -> int:
+    """The version an `If-Match` names, quoted or bare.
+
+    `*` is refused rather than accepted as "any": this endpoint exists to
+    reject an edit that did not see the current version, and a wildcard
+    precondition is the one thing that cannot establish that. A weak
+    validator (`W/"3"`) is refused for the same reason -- weak comparison is
+    not a basis for deciding whether a write is safe.
+    """
+    if if_match is None:
+        raise Problem(
+            428,
+            "An If-Match header with the current version is required.",
+            "precondition-required",
+            "Precondition required",
+        )
+    token = if_match.strip()
+    if token == "*" or token.startswith("W/"):
+        raise Problem(400, "If-Match must name an exact version.")
+    if len(token) >= 2 and token.startswith('"') and token.endswith('"'):
+        token = token[1:-1]
+    try:
+        version = int(token)
+    except ValueError:
+        raise Problem(400, "If-Match must be a positive version number.") from None
+    if version <= 0:
+        raise Problem(400, "If-Match must be a positive version number.")
+    return version
 
 
 def _conflict(user_id: str, judgment_id: UUID) -> Problem:
@@ -83,27 +135,35 @@ def create_judgment(
     "/judgments/{judgment_id}",
     response_model=Judgment,
     dependencies=PRIVATE,
+    # The header is declared required in the generated contract while the
+    # runtime still answers a missing one with 428 rather than FastAPI's 422.
+    # Typed as optional it was published as optional, so a generated client
+    # could omit the precondition and still satisfy the contract -- which is
+    # the mandatory `If-Match` this endpoint is built around, absent from the
+    # only description of the API anyone codes against.
+    openapi_extra={
+        "parameters": [
+            {
+                "in": "header",
+                "name": "If-Match",
+                "required": True,
+                "schema": {"type": "string"},
+                "description": (
+                    "The judgment version this edit was written against, as "
+                    "returned by ETag. Quoted or bare; `*` and weak "
+                    "validators are refused."
+                ),
+            }
+        ]
+    },
 )
 def edit_judgment(
     judgment_id: UUID,
     request: JudgmentPatch,
     response: Response,
     user_id: Annotated[str, Depends(authenticated_identity)],
-    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    expected_version: Annotated[int, Depends(if_match_version)] = 0,
 ) -> Judgment:
-    if if_match is None:
-        raise Problem(
-            428,
-            "An If-Match header with the current version is required.",
-            "precondition-required",
-            "Precondition required",
-        )
-    try:
-        expected_version = int(if_match)
-        if expected_version <= 0:
-            raise ValueError
-    except ValueError:
-        raise Problem(400, "If-Match must be a positive version number.") from None
     try:
         with user_transaction(user_id) as connection:
             result = edit_judgment_service(

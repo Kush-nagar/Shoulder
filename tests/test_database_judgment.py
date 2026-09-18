@@ -1,6 +1,8 @@
 """Task 15 judgment/revision schema, grants, and runtime-role isolation."""
 
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -345,35 +347,90 @@ class JudgmentIsolationTests(IsolationHarness):
     def test_concurrent_edits_serialize_and_the_second_sees_the_new_version(
         self,
     ) -> None:
-        """Two overlapping edits never both succeed against version 1."""
+        """Two genuinely overlapping edits never both succeed against version 1.
+
+        The second writer starts while the first still holds the row and has
+        not committed, so it blocks on `FOR UPDATE` and only then reads the
+        version. That is the behaviour the write path relies on, and it is
+        the reason the check is inside the function rather than in the
+        caller.
+
+        An earlier version of this test committed the first transaction
+        before opening the second, which independent review pointed out made
+        it a second copy of the sequential stale-version test: the writers
+        never overlapped and `FOR UPDATE` was never exercised.
+        """
         created = self.judgment_write_as(self.world.a.coach)
+        second_state: list[str | None] = []
+        second_started = threading.Event()
+
+        def second_writer() -> None:
+            second_started.set()
+            second_state.append(
+                self.refused_write_as(
+                    self.world.a.coach,
+                    judgment_id=created.id,
+                    observation_id=None,
+                    goal_id=None,
+                    expected_version=1,
+                    comment_text="Loser.",
+                )
+            )
+
         first_conn = self.runtime.connect()
         first_txn = first_conn.begin()
-        self.as_user(first_conn, self.world.a.coach)
-        first_conn.execute(
-            text(WRITE_SQL),
-            {
-                "judgment_id": created.id,
-                "observation_id": None,
-                "goal_id": None,
-                "expected_version": 1,
-                "verdict": "applied",
-                "comment_text": "Winner.",
-                "clip_start_ms": 1000,
-                "clip_end_ms": 2000,
-            },
-        )
-        first_txn.commit()
-        first_conn.close()
-        state = self.refused_write_as(
-            self.world.a.coach,
-            judgment_id=created.id,
-            observation_id=None,
-            goal_id=None,
-            expected_version=1,
-            comment_text="Loser.",
-        )
-        self.assertEqual(state, STALE_VERSION)
+        try:
+            self.as_user(first_conn, self.world.a.coach)
+            first_conn.execute(
+                text(WRITE_SQL),
+                {
+                    "judgment_id": created.id,
+                    "observation_id": None,
+                    "goal_id": None,
+                    "expected_version": 1,
+                    "verdict": "applied",
+                    "comment_text": "Winner.",
+                    "clip_start_ms": 1000,
+                    "clip_end_ms": 2000,
+                },
+            )
+            # The row is held and uncommitted. The second writer must now be
+            # waiting on the lock rather than deciding anything.
+            thread = threading.Thread(target=second_writer, daemon=True)
+            thread.start()
+            self.assertTrue(second_started.wait(timeout=5))
+            blocked = self.admin_read(
+                """
+                SELECT count(*) AS waiting FROM pg_stat_activity
+                WHERE wait_event_type = 'Lock' AND state = 'active'
+                  AND query ILIKE '%write_judgment_revision%'
+                """
+            )
+            for _ in range(50):
+                if int(blocked[0].waiting) > 0:
+                    break
+                time.sleep(0.1)
+                blocked = self.admin_read(
+                    """
+                    SELECT count(*) AS waiting FROM pg_stat_activity
+                    WHERE wait_event_type = 'Lock' AND state = 'active'
+                      AND query ILIKE '%write_judgment_revision%'
+                    """
+                )
+            self.assertGreater(
+                int(blocked[0].waiting),
+                0,
+                "the second writer must block on the held row, not proceed",
+            )
+            first_txn.commit()
+        finally:
+            if first_txn.is_active:
+                first_txn.rollback()
+            first_conn.close()
+
+        thread.join(timeout=15)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(second_state, [STALE_VERSION])
         revisions = self.admin_read(
             "SELECT version FROM app.judgment_revision WHERE judgment_id = :id",
             id=created.id,

@@ -2113,19 +2113,12 @@
             }
           },
           {
+            "description": "The judgment version this edit was written against, as returned by ETag. Quoted or bare; `*` and weak validators are refused.",
             "in": "header",
             "name": "If-Match",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "If-Match"
+              "type": "string"
             }
           }
         ],

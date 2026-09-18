@@ -195,14 +195,31 @@ def load_judgment(connection: Connection, judgment_id: UUID) -> dict[str, Any] |
 
 
 def list_revisions(connection: Connection, judgment_id: UUID) -> Sequence[Any]:
-    """Immutable revision history. RLS restricts this to the coaching team."""
+    """Immutable revision history, for the coaching team only.
+
+    The coach predicate is stated here rather than left to row-level
+    security, and independent review is why. `judgment_revision` carries a
+    second SELECT policy for players, granting them the one revision their
+    judgment currently publishes. That policy is correct and unreachable
+    today, because nothing can publish before Task 17 -- but the moment Task
+    17 lands, an endpoint relying on RLS alone would start answering a
+    player's call to this route with a revision row: raw author id, the
+    coach's draft comment, exact clip bounds. `docs/03-schema.md` makes this
+    history coach-only, and a player's evidence comes from the published
+    pointer through its own DTO, never from here.
+
+    So the route is narrowed to what it is documented to be. A player gets an
+    empty history rather than a filtered one, which tells them nothing about
+    how many drafts exist.
+    """
     return connection.execute(
         text("""
-            SELECT id, judgment_id, version, author_user_id, verdict,
-                   comment_text, clip_start_ms, clip_end_ms, created_at
-            FROM app.judgment_revision
-            WHERE judgment_id = :judgment_id
-            ORDER BY version
+            SELECT r.id, r.judgment_id, r.version, r.author_user_id, r.verdict,
+                   r.comment_text, r.clip_start_ms, r.clip_end_ms, r.created_at
+            FROM app.judgment_revision r
+            WHERE r.judgment_id = :judgment_id
+              AND private.is_judgment_coach(:judgment_id)
+            ORDER BY r.version
         """),
         {"judgment_id": str(judgment_id)},
     ).all()

@@ -1489,8 +1489,9 @@ export interface operations {
     edit_judgment_v1_judgments__judgment_id__patch: {
         parameters: {
             query?: never;
-            header?: {
-                "If-Match"?: string | null;
+            header: {
+                /** @description The judgment version this edit was written against, as returned by ETag. Quoted or bare; `*` and weak validators are refused. */
+                "If-Match": string;
             };
             path: {
                 judgment_id: string;
