@@ -54,12 +54,17 @@ function Get-Json([string]$Path) {
     try { Get-Content $Path -Raw | ConvertFrom-Json } catch { $null }
 }
 
-function Test-ProcessAlive([int]$Pid, [string]$Image) {
+# `$ProcessId`, not `$Pid`: `$PID` is a read-only automatic variable and
+# PowerShell variable names are case-insensitive, so binding that parameter
+# fails with "Cannot overwrite variable Pid" -- which, under this script's
+# `ErrorActionPreference = 'Stop'`, aborted the launcher on exactly the path
+# the guard exists for, the one where a live coordinator was found.
+function Test-ProcessAlive([int]$ProcessId, [string]$Image) {
     # Same question localstate.process_alive answers, and for the same reason:
     # a pid on its own can have been reused, and treating an unrelated process
     # as the coordinator would refuse to start forever.
-    if (-not $Pid -or $Pid -le 0) { return $false }
-    $process = Get-Process -Id $Pid -ErrorAction SilentlyContinue
+    if (-not $ProcessId -or $ProcessId -le 0) { return $false }
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if (-not $process) { return $false }
     if ($Image) { return $process.ProcessName -like "*$([IO.Path]::GetFileNameWithoutExtension($Image))*" }
     return $true
