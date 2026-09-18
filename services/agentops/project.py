@@ -28,6 +28,7 @@ whose problem it is:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -214,7 +215,72 @@ def _is_ledger(path: str) -> bool:
     return path.replace("\\", "/").strip('"') in LEDGER_PATHS
 
 
-def require_clean_checkout(root: Path) -> None:
+def ledger_digests(root: Path) -> dict[str, str]:
+    """What the ledger files hold right now, by content."""
+    digests: dict[str, str] = {}
+    for relative in LEDGER_PATHS:
+        path = root / relative
+        if path.exists():
+            digests[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return digests
+
+
+def record_ledger(paths: localstate.LocalPaths, root: Path) -> dict[str, str]:
+    """Remember the ledger this loop just wrote, so it can recognise it later."""
+    digests = ledger_digests(root)
+    localstate.write(paths.dir / "ledger.json", {"digests": digests})
+    return digests
+
+
+def unaccounted_changes(
+    root: Path, paths: localstate.LocalPaths | None = None
+) -> list[str]:
+    """Uncommitted paths nobody has accounted for.
+
+    One helper for both callers, because they must agree. The guard that
+    refuses to start and the fast-forward that has to happen after a merge
+    were asking two different questions of the same checkout: exempting the
+    ledger in the guard alone let the loop run on, while `fetch_main` still
+    saw a dirty tree, silently declined to fast-forward, and left local `main`
+    behind the merge that had just landed. Worktrees are cut from `HEAD`, so
+    the next task would have been branched from pre-merge code -- the exact
+    failure `fetch_main` says it exists to prevent.
+
+    A ledger file is exempt by content, never by name, and independent review
+    is why. `progress.json` is read as the truth about which tasks are done:
+    `reconcile` keeps already-completed entries without re-proving their pull
+    requests merged, and `coordinator.load_context` selects the next task from
+    them. Exempting the path alone would therefore let somebody's uncommitted
+    edit -- a task hand-added to `completed_tasks` -- pass as reconciler
+    output, and the loop would skip that task and merge its dependent. That is
+    the same "a completion nothing proved" failure this session removed from
+    `reconcile`, arriving through a different door.
+
+    So only the bytes this loop recorded writing are accounted for. With no
+    record, nothing is exempt: the default fails closed.
+    """
+    accounted = (localstate.read(paths.dir / "ledger.json", {}) if paths else {}).get(
+        "digests"
+    ) or {}
+    current = ledger_digests(root)
+    return [
+        path
+        for path in checkout_changes(root)
+        if not (
+            _is_ledger(path)
+            and accounted.get(_ledger_key(path))
+            and accounted.get(_ledger_key(path)) == current.get(_ledger_key(path))
+        )
+    ]
+
+
+def _ledger_key(path: str) -> str:
+    return path.replace("\\", "/").strip('"')
+
+
+def require_clean_checkout(
+    root: Path, paths: localstate.LocalPaths | None = None
+) -> None:
     """Refuse to run against a checkout somebody is in the middle of editing.
 
     The loop pushes branches and fetches main. Doing that around unexplained
@@ -231,7 +297,7 @@ def require_clean_checkout(root: Path) -> None:
     nobody can account for, and these two files are accounted for by
     definition. Every other path still stops it.
     """
-    changes = [path for path in checkout_changes(root) if not _is_ledger(path)]
+    changes = unaccounted_changes(root, paths)
     if changes:
         raise Stop(
             BLOCKED_LOCAL_CHECKOUT,
@@ -422,7 +488,7 @@ def merge_pull_request(pull_request: int, *, repo: str) -> dict[str, Any]:
     return {"merged": True}
 
 
-def fetch_main(root: Path) -> None:
+def fetch_main(root: Path, paths: localstate.LocalPaths | None = None) -> None:
     """Bring `origin/main` up to date without touching the working tree.
 
     A fetch moves no files and loses nothing. Fast-forwarding the checkout is
@@ -437,7 +503,11 @@ def fetch_main(root: Path) -> None:
             + (fetched.stderr or fetched.stdout or "").strip()[:200],
         )
     branch = (_git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout or "").strip()
-    if branch != "main" or checkout_changes(root):
+    # The ledger does not count here either. It is dirty precisely after a
+    # merge, which is precisely when this has to fast-forward: declining left
+    # local `main` behind the merge that had just landed, and worktrees are
+    # cut from `HEAD`, so the next task would start from pre-merge code.
+    if branch != "main" or unaccounted_changes(root, paths):
         return
     advanced = _git(root, ["merge", "--ff-only", "origin/main"])
     if advanced.returncode != 0:
@@ -822,12 +892,13 @@ def run_project(
         authorized, why = local.local_authorized(config)
         if not authorized:
             raise Stop(BLOCKED_HUMAN, why)
-        require_clean_checkout(root)
+        require_clean_checkout(root, paths)
         target = repository(root, repo)
 
         while True:
-            require_clean_checkout(root)
+            require_clean_checkout(root, paths)
             reconcile_mod.reconcile(root, repo=target)
+            record_ledger(paths, root)
 
             ctx = coordinator.load_context(root)
             ctx.tasks = local.load_leases(root, paths)
@@ -889,7 +960,8 @@ def run_project(
 
             save(paths, phase="reconciling")
             reconcile_mod.reconcile(root, repo=target)
-            fetch_main(root)
+            record_ledger(paths, root)
+            fetch_main(root, paths)
 
             # Proof, not assumption. If the merge did not reach the ledger the
             # next pass would select the same task again and redo work that has
