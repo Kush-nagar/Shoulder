@@ -288,24 +288,34 @@ def upgrade() -> None:
                     USING ERRCODE = 'invalid_parameter_value';
             END IF;
 
-            -- `docs/04-api.md` requires that "no-op or idempotent replay does
-            -- not increment", and those are two different requests: a save of
-            -- unchanged content against the current version, and a retry of
-            -- an edit that already succeeded whose response the client never
-            -- received. The retry arrives naming the version it was written
-            -- against, which is now exactly one behind, so comparing versions
-            -- first answered it with a conflict and an at-least-once client
-            -- could never make that write idempotent.
+            -- The version is checked first, and a stale one conflicts even
+            -- when the submitted content matches what is already there.
             --
-            -- Both are recognised, and nothing beyond them. An earlier
-            -- version of this accepted any stale version whose content
-            -- happened to match the current revision, which review showed
-            -- goes too far: after 1=A, 2=B, 3=A, a client still holding
-            -- version 1 and submitting A would have been told its write
-            -- applied as authored, when in truth the judgment had moved twice
-            -- and it had seen neither change. That is the conflict recovery
-            -- the precondition exists to trigger, skipped because two
-            -- revisions coincided. An older version conflicts.
+            -- This went back and forth under review, so the reasoning is
+            -- recorded. `docs/04-api.md` requires that "no-op or idempotent
+            -- replay does not increment", and a retry of an edit that already
+            -- landed arrives naming the version it was written against, one
+            -- behind. Exempting that version looked like the way to make such
+            -- a retry idempotent -- but content equality cannot prove that
+            -- two requests are the same request. Two concurrent edits from
+            -- one coach's two devices, both against version 1 with the same
+            -- snapshot, are indistinguishable from a retry: the second would
+            -- have been told it wrote version 2 when it had in fact raced and
+            -- lost, and `If-Match` recovery would never have fired. Proving
+            -- identity needs an idempotency key, which this task's schema
+            -- does not have and its specification does not ask for.
+            --
+            -- The requirement is satisfied without one. It says a replay must
+            -- not *increment*, not that it must answer 200: a stale retry
+            -- gets 409 carrying the current snapshot, no revision is
+            -- appended, and the client compares that snapshot with what it
+            -- sent and sees its own edit already applied. That is recovery
+            -- rather than a silent success, and it is what `docs/05-ui.md`
+            -- asks the coach-facing side to do with a conflict.
+            IF v_judgment.version IS DISTINCT FROM p_expected_version THEN
+                RAISE EXCEPTION 'stale version' USING ERRCODE = '40001';
+            END IF;
+
             SELECT * INTO v_latest
             FROM app.judgment_revision
             WHERE judgment_id = v_judgment.id AND version = v_judgment.version;
@@ -313,18 +323,10 @@ def upgrade() -> None:
             IF v_latest.verdict = p_verdict
                AND v_latest.comment_text IS NOT DISTINCT FROM p_comment_text
                AND v_latest.clip_start_ms = p_clip_start_ms
-               AND v_latest.clip_end_ms = p_clip_end_ms
-               AND p_expected_version IN (
-                   v_judgment.version, v_judgment.version - 1
-               ) THEN
-                -- No new revision and no version change: either a no-op
-                -- against the current version, or a replay of the edit that
-                -- produced it.
+               AND v_latest.clip_end_ms = p_clip_end_ms THEN
+                -- A save of unchanged content against the current version:
+                -- no new revision, no version change.
                 RETURN v_judgment;
-            END IF;
-
-            IF v_judgment.version IS DISTINCT FROM p_expected_version THEN
-                RAISE EXCEPTION 'stale version' USING ERRCODE = '40001';
             END IF;
 
             UPDATE app.judgment

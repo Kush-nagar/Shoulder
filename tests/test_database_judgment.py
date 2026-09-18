@@ -437,15 +437,17 @@ class JudgmentIsolationTests(IsolationHarness):
         )
         self.assertEqual([r.version for r in revisions], [1, 2])
 
-    def test_a_retry_of_an_accepted_edit_is_idempotent(self) -> None:
-        """A client that lost the response retries with the version it knew.
+    def test_a_retry_of_an_accepted_edit_conflicts_without_incrementing(self) -> None:
+        """A lost-response retry is recovered from, not silently accepted.
 
-        That version is now one behind, because its first attempt succeeded.
-        Comparing versions before content answered the retry with a conflict,
-        so an at-least-once client could never make the write idempotent --
-        while `docs/04-api.md` requires an idempotent replay not to increment.
-        Distinct from the no-op test above, which resubmits against the
-        version that is still current.
+        `docs/04-api.md` requires a replay not to *increment*, and this does
+        not: the retry is refused and no revision is appended. It is not
+        accepted as a success, because content equality cannot prove that two
+        requests are the same request -- two devices editing from version 1
+        with identical content look exactly like a retry, and the second
+        would have been told it wrote a version it had in fact raced for. The
+        409 carries the current snapshot, so the client compares and sees its
+        own edit already applied.
         """
         created = self.judgment_write_as(self.world.a.coach)
         edited = self.judgment_write_as(
@@ -460,7 +462,7 @@ class JudgmentIsolationTests(IsolationHarness):
         self.assertEqual(edited.version, 2)
 
         # The same request again, still naming version 1.
-        replayed = self.judgment_write_as(
+        state = self.refused_write_as(
             self.world.a.coach,
             judgment_id=created.id,
             observation_id=None,
@@ -469,7 +471,7 @@ class JudgmentIsolationTests(IsolationHarness):
             verdict="opportunity",
             comment_text="The edit that landed.",
         )
-        self.assertEqual(replayed.version, 2)
+        self.assertEqual(state, STALE_VERSION)
         revisions = self.admin_read(
             "SELECT version FROM app.judgment_revision WHERE judgment_id = :id",
             id=created.id,
