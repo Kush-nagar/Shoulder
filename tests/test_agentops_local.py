@@ -375,6 +375,13 @@ class TestWorktrees(unittest.TestCase):
         self.config = localstate.load_config(self.paths)
         self.config["worktree_root"] = str(Path(self.tmp.name) / "agents")
 
+    def base(self) -> str:
+        """The default branch this fixture's `git init` created."""
+        return git(self.root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    def head_of(self, path: Path) -> str:
+        return git(path, "rev-parse", "HEAD").stdout.strip()
+
     def test_each_task_gets_its_own_directory_on_its_own_branch(self) -> None:
         one = local.worktree_path(self.root, self.config, "task-a")
         two = local.worktree_path(self.root, self.config, "task-b")
@@ -408,6 +415,58 @@ class TestWorktrees(unittest.TestCase):
         again = local.create_worktree(self.root, "task-a", path)
         self.assertFalse(again["created"])
         self.assertTrue((path / "partial.py").exists())
+
+    def test_a_stale_empty_worktree_is_advanced_to_the_base(self) -> None:
+        """The coordinator pre-creates these, and a failed run leaves them.
+
+        Reusing one unchanged starts the task from whatever `main` was when it
+        was made. For Task 16 that was a checkout with none of Task 15 in it.
+        """
+        path = local.worktree_path(self.root, self.config, "task-a")
+        local.create_worktree(self.root, "task-a", path)
+        stale = self.head_of(path)
+
+        (self.root / "landed.py").write_text("main moved on\n", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "main moved on")
+
+        again = local.create_worktree(self.root, "task-a", path, base=self.base())
+        self.assertFalse(again["created"])
+        self.assertTrue(again["advanced"])
+        self.assertNotEqual(self.head_of(path), stale)
+        self.assertTrue((path / "landed.py").exists())
+
+    def test_a_worktree_holding_work_is_never_advanced(self) -> None:
+        """Reuse exists to protect an interrupted worker; that comes first."""
+        path = local.worktree_path(self.root, self.config, "task-a")
+        local.create_worktree(self.root, "task-a", path)
+        (path / "partial.py").write_text("half done\n", encoding="utf-8")
+
+        (self.root / "landed.py").write_text("main moved on\n", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "main moved on")
+
+        again = local.create_worktree(self.root, "task-a", path, base=self.base())
+        self.assertFalse(again["advanced"])
+        self.assertTrue((path / "partial.py").exists())
+        self.assertFalse((path / "landed.py").exists())
+
+    def test_a_worktree_with_its_own_commit_is_never_advanced(self) -> None:
+        """A committed partial implementation is work too."""
+        path = local.worktree_path(self.root, self.config, "task-a")
+        local.create_worktree(self.root, "task-a", path)
+        (path / "partial.py").write_text("committed work\n", encoding="utf-8")
+        git(path, "add", "-A")
+        git(path, "commit", "-qm", "worker progress")
+        own = self.head_of(path)
+
+        (self.root / "landed.py").write_text("main moved on\n", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "main moved on")
+
+        again = local.create_worktree(self.root, "task-a", path, base=self.base())
+        self.assertFalse(again["advanced"])
+        self.assertEqual(self.head_of(path), own)
 
     def test_worktrees_live_outside_the_repository(self) -> None:
         path = local.worktree_path(self.root, {}, "task-a")

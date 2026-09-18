@@ -162,6 +162,34 @@ def head_sha(path: Path, *, runner: Runner | None = None) -> str:
     return (result.stdout or "").strip() if result.returncode == 0 else ""
 
 
+def _advance_empty_worktree(
+    root: Path, path: Path, base: str, *, runner: Runner | None = None
+) -> bool:
+    """Fast-forward a reused worktree that holds nothing yet.
+
+    Reuse exists to protect an interrupted worker's partial implementation,
+    and it must keep doing that. But the coordinator also pre-creates a task
+    branch and its worktree before any work happens, and a run that failed
+    early leaves that behind pointing at whatever `main` was then. Reusing it
+    unchanged starts the task from a stale base -- for Task 16 that meant a
+    checkout without Task 15's API in it at all.
+
+    So a worktree is advanced only when there is provably nothing to lose:
+    the tree is clean and the branch has no commit of its own. Anything else
+    is left exactly as it was found.
+    """
+    dirty = _git(path, ["status", "--porcelain", "-uall"], runner=runner)
+    if dirty.returncode != 0 or (dirty.stdout or "").strip():
+        return False
+    # Asked of the worktree, whose HEAD is the branch in question. A non-zero
+    # count is a commit this branch has and `base` does not, which is work.
+    ahead = _git(path, ["rev-list", "--count", f"{base}..HEAD"], runner=runner)
+    if ahead.returncode != 0 or (ahead.stdout or "").strip() not in ("0", ""):
+        return False
+    advanced = _git(path, ["merge", "--ff-only", base], runner=runner)
+    return advanced.returncode == 0
+
+
 def create_worktree(
     root: Path,
     branch: str,
@@ -178,11 +206,13 @@ def create_worktree(
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
+        advanced = _advance_empty_worktree(root, path, base, runner=runner)
         return {
             "created": False,
             "path": str(path),
             "branch": branch,
             "base_sha": head_sha(path, runner=runner),
+            "advanced": advanced,
         }
 
     existing = _git(root, ["rev-parse", "--verify", branch], runner=runner)
