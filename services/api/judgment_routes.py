@@ -24,6 +24,11 @@ from services.api.schemas import (
 
 router = APIRouter(prefix="/v1")
 
+# `judgment.version` is a `bigint`, and so is the write function's
+# `p_expected_version`. A version past this ceiling is a caller's bad header,
+# not a database failure, so it is rejected before any transaction opens.
+MAX_INT64 = 9223372036854775807
+
 
 def _etag(response: Response, version: int) -> None:
     """An entity-tag is a quoted string, so send one.
@@ -59,6 +64,12 @@ def _expected_version(if_match: str | None) -> int:
     precondition is the one thing that cannot establish that. A weak
     validator (`W/"3"`) is refused for the same reason -- weak comparison is
     not a basis for deciding whether a write is safe.
+
+    The upper bound is the write function's own `bigint`. Without it a Python
+    integer above that ceiling parsed happily here and failed while binding
+    the parameter, which the route reported as 503 -- an outage, for a header
+    the caller chose. Same defect as the unbounded clip offsets, on the field
+    next to them.
     """
     if if_match is None:
         raise Problem(
@@ -76,7 +87,7 @@ def _expected_version(if_match: str | None) -> int:
         version = int(token)
     except ValueError:
         raise Problem(400, "If-Match must be a positive version number.") from None
-    if version <= 0:
+    if version <= 0 or version > MAX_INT64:
         raise Problem(400, "If-Match must be a positive version number.")
     return version
 

@@ -387,12 +387,16 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(edited.headers["ETag"], '"2"')
 
     def test_a_wildcard_or_weak_precondition_is_refused(self) -> None:
-        """`*` cannot establish which version an edit was written against."""
+        """Each of these is the caller's error, answered before any write.
+
+        The last is past the write function's `bigint`: unbounded it parsed
+        here and failed while binding, which the route reported as a 503.
+        """
         client = self.client_for(self.coach)
         created = client.post(
             f"/v1/observations/{self.observation}/judgments", json=self.payload()
         ).json()
-        for header in ("*", 'W/"1"'):
+        for header in ("*", 'W/"1"', "9223372036854775808"):
             with self.subTest(if_match=header):
                 response = client.patch(
                     f"/v1/judgments/{created['id']}",
