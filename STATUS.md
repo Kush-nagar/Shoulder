@@ -9,17 +9,27 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `175d71a8489fed1874a1070e4fc1cd6aaaf99142` |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
-| Current block | Block 04 complete through Task 14. Autonomy infrastructure upgrade in flight on its own branch; no product task is started from it. |
-| Current worker / branch | AgentOps cloud supervisor upgrade / `agentops-cloud-supervisor` |
-| Open PRs | autonomy infrastructure (this branch) |
+| Last verified `main` | `95cc6ae` |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8); Block 02 (Tasks 8-10, PR #10, status sync PR #11); Block 03 (Tasks 11-13, PR #13); Block 04 Task 14 (PR #21) |
+| Current block | Block 04. Task 15 is implemented and waiting in PR #32. No later product task is started. |
+| Current worker / branch | AgentOps three-writer upgrade / `agentops/verdict-sees-clean-review` |
+| Open PRs | #35 local Codex lane and concurrent execution (auto-merge armed); #32 Task 15 (blocked on a stale `verdict`, which #35 fixes); #27 live bootstrap hotfix from 2026-09-15, superseded by PRs #28-#33 and not rebased |
 | Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-14 on `agentops-cloud-supervisor` at `7ca44c8`: `scripts/check.ps1` passed end to end - 764 Python tests (288 skipped, all Docker or remote dependent), 410 of them AgentOps; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. PR #24 `quality` and `verdict` green; two independent review rounds, 19 findings, all answered and resolved. |
+| Last full verification | 2026-09-19 on `agentops/verdict-sees-clean-review`: `scripts/check.ps1` end to end, exit 0 - 1334 Python tests (289 skipped, all Docker or remote dependent), of which 976 are AgentOps'; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. Evidence index: `docs/agentops-three-writer-verification.md`. |
 | Blockers | none that require a human before Task 23 |
-| Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Owner action required first: add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 and the loop cannot run. Then merge PR #24 and set `AUTONOMY_ENABLED=true`. The coordinator selects Task 15 by itself; do not dispatch it by hand. |
+| Bootstrap blocker | none; every owner action is complete |
+| Next action | Land #35, then update #32 from `main` so its `verdict` re-runs against the fix and merges. Task 16 then needs its stale `blocked` lease cleared: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the new Codex lane fixes. The coordinator selects tasks by itself; do not dispatch by hand. |
 
+### Concurrency and routing, as of 2026-09-19
+
+`max_parallel_writers` is 3 and shared-ledger writes are locked, so three
+writable workers are safe. The canonical backlog cannot use them: Tasks 15 to
+22 are a strict chain, each waiting on the one before, so the scheduler
+correctly runs one writer. Every one of those tasks is either frontend or
+carries a security, destructive or migration risk, so all of them route to the
+local Codex lane; Claude writes none of the remainder and the whole chain sits
+on one subscription window. Tasks 23 and later cannot start at all:
+`gates.real_use_gate` is false and only a human sets it.
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
 
