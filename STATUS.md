@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `6cf1c5d` (PR #36; carries #35, #33 and #31 before it) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
-| Current block | Block 04. Task 14 merged; Task 15 implemented and verified on this branch, awaiting merge; Task 16 not started. |
-| Current worker / branch | Task 15 coach judgments / `block-04-t15-coach-judgments` |
-| Open PRs | #32 Task 15 coach judgments (this branch). #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and is far behind a much-changed `main`; it needs a rebase and its own verification before it can land. #31, #33, #35 and #36 are merged; #34 was withdrawn after review showed the fix inert. |
-| Database revision | `0008_coach_judgments` on this branch, applied and downgraded against a local Postgres 17.6; `main` is on `0007_manual_observations`; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | Task 15, 2026-09-17 on this branch at `46984d4` and after: 1303 Python tests against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff, mypy, contracts, Node suites, production build and Chromium/Firefox/WebKit smoke all clean. Six independent review rounds, nineteen findings, all resolved. Merged `main` on 2026-09-19 brings the AgentOps three-writer work; its own evidence index is `docs/agentops-three-writer-verification.md`. |
+| Last verified `main` | `5ec99a9` (PR #40; carries #32, #35 to #39 before it) |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14 (PR #21) and 15 (PR #32) |
+| Current block | Block 04. Task 15 merged and reconciled. Task 16 is implemented on its branch by the local Codex lane and is being taken through verification and review by the loop. |
+| Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
+| Open PRs | #38 this record; #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and far behind a much-changed `main`; it needs a rebase and its own verification before it can land |
+| Database revision | `0008_coach_judgments` on `main`; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | Task 15, on its branch at `46984d4` and after: 1303 Python tests against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, migration 0008 downgraded to base and cleanly re-upgraded, six independent review rounds with nineteen findings all resolved; then reviewed independently by DeepSeek in CI and merged. The AgentOps work carries its own index at `docs/agentops-three-writer-verification.md`, last run green at 1398 tests. |
 | Blockers | none that require a human before Task 23 |
-| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it any more - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Merge PR #32 once its independent review lands, then reconcile and let the coordinator select Task 16. Task 16 first needs its stale `blocked` lease cleared in `.agentops/local/leases.json`: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the local Codex lane now takes at `xhigh`. The local runtime needs no owner action; `.\agentops.ps1` starts it. |
+| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
+| Next action | None by hand. The loop is running and selects tasks itself; it carries Task 16 through verification, review, CI and merge, then Task 17. Tasks 23 and later stop until a human sets `gates.real_use_gate`. |
 
 ### Concurrency and routing, as of 2026-09-19
 
