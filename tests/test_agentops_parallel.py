@@ -1070,6 +1070,63 @@ class TestTheReviewerIsNeverTheWriter(unittest.TestCase):
         self.assertEqual(filtered["mechanism"], "workflow-dispatch")
 
 
+class TestALargePromptStillStartsTheHarness(unittest.TestCase):
+    """A review prompt is far past what a Windows command line can hold.
+
+    `review_prompt` embeds up to 60000 characters of diff and Windows caps a
+    command line at 32767, so passing it as an argument fails outright with
+    "[WinError 206] The filename or extension is too long" -- before the
+    harness starts, on every platform-native run. The loop reached the review
+    step for Task 16 and died exactly there.
+    """
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.paths = localstate.ensure(localstate.LocalPaths(Path(self.dir.name)))
+
+    def spawn_with(self, executor: Any, prompt: str) -> dict[str, Any]:
+        seen: dict[str, Any] = {}
+
+        def popen(command: list[str], **kwargs: Any) -> FakeProcess:
+            seen["argv"] = list(command)
+            handle = kwargs.get("stdin")
+            seen["stdin"] = handle.read().decode("utf-8") if handle else None
+            return FakeProcess(CODEX_OK)
+
+        with mock.patch("shutil.which", return_value="/bin/harness"):
+            executors.run(
+                executor,
+                self.paths,
+                prompt=prompt,
+                model="m",
+                role="review",
+                worktree=Path(self.dir.name),
+                budget={"max_turns": 5, "timeout_seconds": 60},
+                popen=popen,
+            )
+        return seen
+
+    def test_neither_subscription_lane_puts_a_diff_on_the_command_line(
+        self,
+    ) -> None:
+        prompt = "review this diff: " + ("x" * 60000)
+        for executor in (
+            executors.ClaudeCliExecutor(),
+            executors.CodexCliExecutor(),
+        ):
+            with self.subTest(executor.name):
+                seen = self.spawn_with(executor, prompt)
+                self.assertEqual(seen["stdin"], prompt)
+                self.assertLess(len(" ".join(seen["argv"])), 32767)
+
+    def test_the_prompt_file_does_not_outlive_the_run(self) -> None:
+        """It is the unredacted text; the redacted copy is what is kept."""
+        self.spawn_with(executors.CodexCliExecutor(), "short prompt")
+        leftover = list(Path(self.dir.name).rglob("prompt.txt"))
+        self.assertEqual(leftover, [])
+
+
 class TestTheCapIsReadNotHardCoded(unittest.TestCase):
     def test_the_loop_reads_the_cap_from_policy(self) -> None:
         self.assertEqual(project.writer_cap(REPO_ROOT), 3)

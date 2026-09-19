@@ -310,12 +310,17 @@ class ClaudeCliExecutor:
 
     name = "claude-cli"
     provider = "anthropic"
-    # Left on argv, which is how this lane has always run. It shares the
-    # Windows command-line ceiling described on the protocol, so a very large
-    # review prompt will fail here until this lane is moved to stdin too --
-    # that is a change to a working, well-covered path and wants its own
-    # verification against the installed CLI rather than being assumed.
-    prompt_on_stdin = False
+    # Moved to stdin on 2026-09-19, after the ceiling on the protocol stopped
+    # being theoretical: the loop reached the review step for Task 16 and died
+    # spawning this lane with "[WinError 206] The filename or extension is too
+    # long", because a review prompt carries up to 60000 characters of diff
+    # against a 32767-character command line.
+    #
+    # Verified against the installed CLI rather than assumed, which is what
+    # this comment previously said the change would need: piping a prompt into
+    # `claude -p --output-format stream-json --verbose` returns it as an
+    # ordinary successful result.
+    prompt_on_stdin = True
 
     def __init__(self, binary: str | None = None) -> None:
         self.binary = binary or CLAUDE_BINARY
@@ -375,9 +380,11 @@ class ClaudeCliExecutor:
         budget: Mapping[str, int],
         prompt: str,
     ) -> list[str]:
-        # The prompt goes last and no variadic flag precedes it. `--add-dir`
-        # used to: it ate the prompt, and the worker started with nothing to do.
-        return [*self.argv(model, role, worktree, budget), prompt]
+        # The prompt is absent from argv deliberately; it arrives on stdin.
+        # When it was passed here, no variadic flag was allowed to precede it:
+        # `--add-dir` once did, ate the prompt, and the worker started with
+        # nothing to do.
+        return self.argv(model, role, worktree, budget)
 
 
 class OpenCodeExecutor:
