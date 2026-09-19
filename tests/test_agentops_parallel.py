@@ -521,9 +521,36 @@ class TestTheCodexExecutor(unittest.TestCase):
         self.assertNotIn("OPENROUTER_API_KEY", env)
         self.assertNotIn("ANTHROPIC_API_KEY", env)
 
-    def test_the_recorded_process_image_is_codex(self) -> None:
-        image = executors.worker_image(executors.CodexCliExecutor())
-        self.assertIn("codex", image)
+    def test_the_recorded_image_is_what_windows_actually_spawns(self) -> None:
+        """A live worker must not read as dead, or its lease is up for grabs.
+
+        `codex` and `opencode` install as npm `.CMD` shims, and Windows runs a
+        shim through `cmd.exe` -- so the pid recorded for a Codex worker
+        belongs to cmd. Recording "codex.exe" made `process_alive` answer False
+        for a worker that was busy reading the task brief, and a lease whose
+        owner looks gone is a lease another writer may take.
+        """
+        executor = executors.CodexCliExecutor(binary="codex")
+        with (
+            mock.patch("sys.platform", "win32"),
+            mock.patch("shutil.which", return_value="C:/npm/codex.CMD"),
+        ):
+            self.assertEqual(executors.worker_image(executor), "cmd.exe")
+
+    def test_a_real_executable_is_reported_as_itself(self) -> None:
+        """Claude Code installs a genuine .exe, which is why it escaped this."""
+        executor = executors.ClaudeCliExecutor(binary="claude")
+        with (
+            mock.patch("sys.platform", "win32"),
+            mock.patch("shutil.which", return_value="C:/bin/claude.EXE"),
+        ):
+            self.assertEqual(executors.worker_image(executor), "claude.exe")
+
+    def test_no_shim_indirection_off_windows(self) -> None:
+        with mock.patch("sys.platform", "linux"):
+            self.assertEqual(
+                executors.worker_image(executors.CodexCliExecutor()), "codex"
+            )
 
     def test_availability_reports_all_three_harnesses(self) -> None:
         with installed_harnesses(claude=True, opencode=False, codex=True):
