@@ -67,8 +67,9 @@ nothing, so this was established rather than assumed.
 
 ## Defects this work found
 
-Five, all fixed here. Three came from an independent Codex review of `d5fd09a`,
-run through the new lane; two from running three writers for real.
+Nine, all fixed here. Three came from an independent Codex review of `d5fd09a`
+run through the new lane, two from running three writers for real, and two more
+from running the review gate itself against a real pull request.
 
 | Found by | Defect |
 |---|---|
@@ -77,6 +78,8 @@ run through the new lane; two from running three writers for real.
 | Codex review | Resume depended on a note the coordinator wrote after a worker had already finished, so a coordinator killed in that gap stranded a finished branch with a held lease |
 | Parallel smoke | The stdin prompt file was unlinked before the child exited; Windows refuses to delete a file another process holds open, so the run died over a temporary file |
 | Parallel smoke | The ledger lock is not reentrant, so a caller that took it and then called a locking helper waited 30s for itself and then blamed another worker |
+| Running the gate | **The review gate could accept a self-review.** Choosing an independent reviewer means excluding the writer's family, and the lease recording the writer lives in ignored local state the workflow cannot see -- so it recomputed the writer from current routing. On Task 15 that guess said Codex had written a branch Claude wrote, judged Anthropic independent, and nominated Claude to review its own work |
+| Running the gate | The job that chooses the reviewer held only `contents: read`, so it could not read the writer marker it now depends on, and refused with a bare exit code -- its answer goes to a redirected file and `set -e` aborted the step before anything printed the reason |
 
 Two further latent defects were fixed on the way: argv[0] was spawned
 unresolved, and Windows `CreateProcess` only appends `.exe`, so the npm `.CMD`
@@ -86,6 +89,25 @@ a 32767-character Windows command line, so every review on this platform died
 before the harness started. Codex now takes its prompt on stdin. The other two
 lanes still use argv and say so — moving them wants its own verification
 against their CLIs.
+
+## How the reviewer is kept independent
+
+The writer is established, never guessed. A pull request records the lane that
+wrote it as a marker in its body, so the answer travels with the branch; the
+reviewer command reads the lease first, that marker second, and **refuses**
+when it has neither. An unknown writer means no reviewer can be shown to be
+independent of it, and a guess is what produced the self-review above.
+
+It also declines lanes the caller cannot start. `codex_local` runs `codex exec`
+against a subscription no Actions runner has and has no step in the review
+workflow, so choosing it there would report success having reviewed nothing and
+leave the verdict waiting for a review that could never arrive. Asked only for
+lanes it can run, CI picks DeepSeek to review Claude's work and Claude to review
+Codex's.
+
+A pull request opened before this existed carries no marker, so it refuses until
+one is added -- which is the fail-closed direction, and is what happened to PR
+#32. Its marker was set from the lease, which records Claude as the writer.
 
 ## What this does not establish
 
@@ -101,3 +123,13 @@ against their CLIs.
 - **Tasks 23 and later cannot start.** `ops/policy.json` `gates.real_use_gate`
   is false and only a human sets it, because it attests to real coach and
   player use. The autonomous ceiling is Task 22.
+- **The Codex GitHub connector is not connected.** Every `@codex` request on PR
+  #32 was answered with "create a Codex account and connect to github", so the
+  `codex_cloud` lane cannot review anything despite its recorded 2026-09-13
+  qualification. Nothing depends on it: the reviewer selection above routes
+  around it. Reconnecting it is only needed to get Codex Cloud reviews
+  specifically.
+- **The OpenRouter review path had never executed before this.** Earlier runs
+  that reported a successful review had only posted an `@codex` comment. Its
+  endpoint was checked directly instead: `https://openrouter.ai/api` plus the
+  SDK's `/v1/messages` answers 200 with the qualified DeepSeek model.

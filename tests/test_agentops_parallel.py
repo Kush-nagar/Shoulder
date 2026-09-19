@@ -521,9 +521,36 @@ class TestTheCodexExecutor(unittest.TestCase):
         self.assertNotIn("OPENROUTER_API_KEY", env)
         self.assertNotIn("ANTHROPIC_API_KEY", env)
 
-    def test_the_recorded_process_image_is_codex(self) -> None:
-        image = executors.worker_image(executors.CodexCliExecutor())
-        self.assertIn("codex", image)
+    def test_the_recorded_image_is_what_windows_actually_spawns(self) -> None:
+        """A live worker must not read as dead, or its lease is up for grabs.
+
+        `codex` and `opencode` install as npm `.CMD` shims, and Windows runs a
+        shim through `cmd.exe` -- so the pid recorded for a Codex worker
+        belongs to cmd. Recording "codex.exe" made `process_alive` answer False
+        for a worker that was busy reading the task brief, and a lease whose
+        owner looks gone is a lease another writer may take.
+        """
+        executor = executors.CodexCliExecutor(binary="codex")
+        with (
+            mock.patch("sys.platform", "win32"),
+            mock.patch("shutil.which", return_value="C:/npm/codex.CMD"),
+        ):
+            self.assertEqual(executors.worker_image(executor), "cmd.exe")
+
+    def test_a_real_executable_is_reported_as_itself(self) -> None:
+        """Claude Code installs a genuine .exe, which is why it escaped this."""
+        executor = executors.ClaudeCliExecutor(binary="claude")
+        with (
+            mock.patch("sys.platform", "win32"),
+            mock.patch("shutil.which", return_value="C:/bin/claude.EXE"),
+        ):
+            self.assertEqual(executors.worker_image(executor), "claude.exe")
+
+    def test_no_shim_indirection_off_windows(self) -> None:
+        with mock.patch("sys.platform", "linux"):
+            self.assertEqual(
+                executors.worker_image(executors.CodexCliExecutor()), "codex"
+            )
 
     def test_availability_reports_all_three_harnesses(self) -> None:
         with installed_harnesses(claude=True, opencode=False, codex=True):
@@ -1041,6 +1068,63 @@ class TestTheReviewerIsNeverTheWriter(unittest.TestCase):
         filtered = choose("local-cli")
         self.assertEqual(filtered["lane"], "openrouter")
         self.assertEqual(filtered["mechanism"], "workflow-dispatch")
+
+
+class TestALargePromptStillStartsTheHarness(unittest.TestCase):
+    """A review prompt is far past what a Windows command line can hold.
+
+    `review_prompt` embeds up to 60000 characters of diff and Windows caps a
+    command line at 32767, so passing it as an argument fails outright with
+    "[WinError 206] The filename or extension is too long" -- before the
+    harness starts, on every platform-native run. The loop reached the review
+    step for Task 16 and died exactly there.
+    """
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.paths = localstate.ensure(localstate.LocalPaths(Path(self.dir.name)))
+
+    def spawn_with(self, executor: Any, prompt: str) -> dict[str, Any]:
+        seen: dict[str, Any] = {}
+
+        def popen(command: list[str], **kwargs: Any) -> FakeProcess:
+            seen["argv"] = list(command)
+            handle = kwargs.get("stdin")
+            seen["stdin"] = handle.read().decode("utf-8") if handle else None
+            return FakeProcess(CODEX_OK)
+
+        with mock.patch("shutil.which", return_value="/bin/harness"):
+            executors.run(
+                executor,
+                self.paths,
+                prompt=prompt,
+                model="m",
+                role="review",
+                worktree=Path(self.dir.name),
+                budget={"max_turns": 5, "timeout_seconds": 60},
+                popen=popen,
+            )
+        return seen
+
+    def test_neither_subscription_lane_puts_a_diff_on_the_command_line(
+        self,
+    ) -> None:
+        prompt = "review this diff: " + ("x" * 60000)
+        for executor in (
+            executors.ClaudeCliExecutor(),
+            executors.CodexCliExecutor(),
+        ):
+            with self.subTest(executor.name):
+                seen = self.spawn_with(executor, prompt)
+                self.assertEqual(seen["stdin"], prompt)
+                self.assertLess(len(" ".join(seen["argv"])), 32767)
+
+    def test_the_prompt_file_does_not_outlive_the_run(self) -> None:
+        """It is the unredacted text; the redacted copy is what is kept."""
+        self.spawn_with(executors.CodexCliExecutor(), "short prompt")
+        leftover = list(Path(self.dir.name).rglob("prompt.txt"))
+        self.assertEqual(leftover, [])
 
 
 class TestTheCapIsReadNotHardCoded(unittest.TestCase):

@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `6cf1c5d` (PR #36; carries #35, #33 and #31 before it) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14-15 merged, Task 16 implemented and verified on this branch. |
-| Current block | Block 04. Task 16 is implemented, and its load-bearing browser suite has been run: `scripts/check-marking.ps1` against real Auth, Postgres and MinIO, 9 of 9 passing in Chromium, Firefox and WebKit, including "five judgment drafts survive a lost response, reload, and stale edit without loss". Awaiting independent review and merge. |
+| Last verified `main` | `9d3ba52` (PR #41; carries #32 and #35 to #40 before it) |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14 (PR #21) and 15 (PR #32) |
+| Current block | Block 04. Task 15 merged and reconciled. Task 16 is implemented on this branch by the local Codex lane and is in review as PR #42. |
 | Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
-| Open PRs | #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work and requires its own rebase and verification. Task 16 has no PR yet. |
-| Database revision | `0009_draft_recovery` on this branch; local Postgres 17.6 applied it and passed the database/RLS suite. `Shoulder Dev` is still on `0005_video_ingest`. |
-| Last full verification | Task 16, 2026-09-19: draft recovery passed 9/9 real browser tests across Chromium, Firefox, and WebKit, including lost create and edit responses plus a genuine stale conflict; `scripts/check.ps1` passed lint, types, 44 web unit tests, 1,397 Python tests (338 DB-dependent skips in that standalone run), generated-contract drift, production build, bundle scan, and 3/3 browser smoke tests. The earlier full Postgres 17.6 database/RLS run passed with 2 documented unrelated skips. |
+| Open PRs | #42 Task 16 (this branch), reviewed by Claude because Codex wrote it; #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and far behind a much-changed `main`; it needs a rebase and its own verification before it can land |
+| Database revision | `0009_draft_recovery` on this branch; `main` is on `0008_coach_judgments`; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | Task 16, 2026-09-19 on this branch: `scripts/check-marking.ps1` against real Auth, Postgres and MinIO, 9 of 9 in Chromium, Firefox and WebKit, including "five judgment drafts survive a lost response, reload, and stale edit without loss" -- run twice, the second time with assertions strengthened to check each clip's bounds rather than only that five list items exist. `scripts/check.ps1` end to end, exit 0. Task 15 and the AgentOps work carry their own records; the latter is indexed at `docs/agentops-three-writer-verification.md`. |
 | Blockers | none that require a human before Task 23. See the standing CI gap below: it predates this task and does not block it. |
-| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it any more - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | None by hand. Task 16 goes through independent review, CI and merge, then the loop selects Task 17. |
+| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
+| Next action | None by hand. Task 16 goes through independent review, CI and merge, then the loop selects Task 17. Tasks 23 and later stop until a human sets `gates.real_use_gate`. |
 
 ### Concurrency and routing, as of 2026-09-19
 
