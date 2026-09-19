@@ -145,6 +145,18 @@ class JudgmentApiTests(DatabaseTestCase):
                 )
             )
 
+    def retire_goal(self, goal_id: UUID) -> None:
+        """Close a goal, so the player may be given a new active one."""
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("""
+                    UPDATE app.development_goal
+                    SET status = 'retired', closed_at = now()
+                    WHERE id = :goal
+                """),
+                {"goal": goal_id},
+            )
+
     def client_for(self, user_id: UUID) -> TestClient:
         app.dependency_overrides[authenticated_identity] = lambda: str(user_id)
         return TestClient(app)
@@ -176,14 +188,57 @@ class JudgmentApiTests(DatabaseTestCase):
         created = client.post(
             f"/v1/observations/{self.observation}/judgments", json=self.payload()
         )
-        loaded = client.get(f"/v1/observations/{self.observation}/judgment")
+        loaded = client.get(
+            f"/v1/observations/{self.observation}/judgment?goal_id={self.goal}"
+        )
         self.assertEqual(loaded.status_code, 200, loaded.text)
         self.assertEqual(loaded.json(), created.json())
         self.assertEqual(loaded.headers["ETag"], '"1"')
 
-    def test_missing_observation_judgment_is_an_empty_success(self) -> None:
+    def test_a_judgment_is_loaded_for_the_goal_that_was_asked_about(self) -> None:
+        """One observation can carry a judgment per goal, and did.
+
+        `app.judgment` is unique on (observation_id, goal_id), so a player who
+        changes goals keeps the earlier judgment alongside the new one. A
+        lookup keyed on the observation alone matched both, raised
+        MultipleResultsFound, and the route turned that into a 503 -- the
+        coach's draft simply never came back.
+        """
+        client = self.client_for(self.coach)
+        first = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        )
+        self.assertEqual(first.status_code, 201, first.text)
+
+        # A player has one active goal at a time, so a second one only exists
+        # once the first is closed. That is the path this defect was on: the
+        # judgment against the retired goal stays, and the new goal gets its
+        # own.
+        self.retire_goal(self.goal)
+        second_goal = self.admin_insert_goal(self.player, self.coach)
+        second = client.post(
+            f"/v1/observations/{self.observation}/judgments",
+            json=self.payload(goal_id=str(second_goal), comment_text="Second goal."),
+        )
+        self.assertEqual(second.status_code, 201, second.text)
+
+        for goal, created in ((self.goal, first), (second_goal, second)):
+            loaded = client.get(
+                f"/v1/observations/{self.observation}/judgment?goal_id={goal}"
+            )
+            self.assertEqual(loaded.status_code, 200, loaded.text)
+            self.assertEqual(loaded.json(), created.json())
+
+    def test_a_judgment_lookup_without_a_goal_is_refused(self) -> None:
+        """The goal is part of the question, not an optional narrowing."""
         response = self.client_for(self.coach).get(
             f"/v1/observations/{self.observation}/judgment"
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_missing_observation_judgment_is_an_empty_success(self) -> None:
+        response = self.client_for(self.coach).get(
+            f"/v1/observations/{self.observation}/judgment?goal_id={self.goal}"
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIsNone(response.json())
@@ -193,7 +248,7 @@ class JudgmentApiTests(DatabaseTestCase):
             f"/v1/observations/{self.observation}/judgments", json=self.payload()
         )
         response = self.client_for(self.player_account).get(
-            f"/v1/observations/{self.observation}/judgment"
+            f"/v1/observations/{self.observation}/judgment?goal_id={self.goal}"
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIsNone(response.json())
