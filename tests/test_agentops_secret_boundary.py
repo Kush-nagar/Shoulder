@@ -241,11 +241,20 @@ class TestStandardErrorIsInsideTheBoundary(SecretBoundaryCase):
 class TestTheWorkerStillGetsWhatItNeeds(SecretBoundaryCase):
     def test_the_prompt_the_worker_receives_is_not_redacted(self) -> None:
         """Redacting the live prompt would break the work; only the stored
-        copy is scrubbed."""
+        copy is scrubbed.
+
+        Read from stdin rather than argv since 2026-09-19: a review prompt
+        carries up to 60000 characters of diff and Windows caps a command line
+        at 32767, so every review on that platform died before the harness
+        started. The property is unchanged -- what the worker is handed is
+        exactly what was written -- only the channel moved.
+        """
         seen: dict[str, Any] = {}
 
         def popen(command, **kwargs):  # type: ignore[no-untyped-def]
             seen["command"] = command
+            handle = kwargs.get("stdin")
+            seen["stdin"] = handle.read().decode("utf-8") if handle else None
             return FakeProcess([json.dumps({"type": "result", "subtype": "success"})])
 
         prompt = "implement the thing exactly as written"
@@ -260,7 +269,10 @@ class TestTheWorkerStillGetsWhatItNeeds(SecretBoundaryCase):
                 budget={"max_turns": 5, "timeout_seconds": 60},
                 popen=popen,
             )
-        self.assertEqual(seen["command"][-1], prompt)
+        self.assertEqual(seen["stdin"], prompt)
+        # And it is not smuggled onto the command line as well, where the
+        # length ceiling would still apply.
+        self.assertNotIn(prompt, seen["command"])
 
     def test_the_openrouter_worker_still_receives_its_credential(self) -> None:
         with mock.patch.dict(os.environ, SECRETS):
