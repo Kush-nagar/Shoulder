@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 TeamRole = Literal["coach", "player"]
 GoalStatus = Literal["active", "achieved", "paused", "retired"]
@@ -379,4 +385,94 @@ class Observation(BaseModel):
     source: Literal["coach_manual"]
     event_type: str | None
     created_by: UUID
+    created_at: datetime
+
+
+# --- Coach judgments and revisions --------------------------------------------
+#
+# `author_user_id` never appears on a request model: it is always the
+# authenticated session, never a client-supplied value. `version` on a patch
+# request is the `If-Match` header, not a body field.
+#
+# Both request models forbid extra fields, and independent review is why.
+# Pydantic ignores unknown fields by default, so a create carrying
+# `author_user_id` was accepted with 201 and quietly dropped. The security
+# property held -- the author still came from the session -- but Task 15 asks
+# for a spoofed author to be *rejected*, and a client that believes it set a
+# server-managed field deserves to be told it did not. Refusing the request
+# also catches a typo in a real field, which silent tolerance turns into a
+# save that appears to have worked.
+
+# `clip_*_ms` are bounded to a PostgreSQL `integer`, which is what
+# `private.write_judgment_revision` declares them as. Without the ceiling a
+# value like 2147483648 passed Pydantic and failed while binding the function,
+# and the route reported that as 503 -- an outage, for what is a caller's
+# out-of-range field.
+MAX_INT32 = 2147483647
+
+Verdict = Literal["applied", "opportunity", "not_relevant"]
+
+
+class JudgmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal_id: UUID
+    verdict: Verdict
+    comment_text: str | None = Field(default=None, min_length=1, max_length=400)
+    clip_start_ms: int = Field(ge=0, le=MAX_INT32)
+    clip_end_ms: int = Field(gt=0, le=MAX_INT32)
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> Self:
+        if self.clip_end_ms <= self.clip_start_ms:
+            raise ValueError("clip_end_ms must be greater than clip_start_ms")
+        return self
+
+
+class JudgmentPatch(BaseModel):
+    """A full content snapshot: every edit replaces the whole draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Verdict
+    comment_text: str | None = Field(default=None, min_length=1, max_length=400)
+    clip_start_ms: int = Field(ge=0, le=MAX_INT32)
+    clip_end_ms: int = Field(gt=0, le=MAX_INT32)
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> Self:
+        if self.clip_end_ms <= self.clip_start_ms:
+            raise ValueError("clip_end_ms must be greater than clip_start_ms")
+        return self
+
+
+PublicationStatus = Literal["draft", "published", "withdrawn"]
+
+
+class Judgment(BaseModel):
+    id: UUID
+    observation_id: UUID
+    goal_id: UUID
+    author_user_id: UUID
+    version: int
+    publication_status: PublicationStatus
+    current_revision_id: UUID | None
+    published_at: datetime | None
+    updated_at: datetime
+    created_at: datetime
+    verdict: Verdict
+    comment_text: str | None
+    clip_start_ms: int
+    clip_end_ms: int
+
+
+class JudgmentRevision(BaseModel):
+    id: UUID
+    judgment_id: UUID
+    version: int
+    author_user_id: UUID
+    verdict: Verdict
+    comment_text: str | None
+    clip_start_ms: int
+    clip_end_ms: int
     created_at: datetime

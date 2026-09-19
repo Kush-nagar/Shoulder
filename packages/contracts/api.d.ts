@@ -117,6 +117,40 @@ export interface paths {
         patch: operations["update_goal_v1_goals__goal_id__patch"];
         trace?: never;
     };
+    "/v1/judgments/{judgment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Edit Judgment */
+        patch: operations["edit_judgment_v1_judgments__judgment_id__patch"];
+        trace?: never;
+    };
+    "/v1/judgments/{judgment_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Revisions */
+        get: operations["list_revisions_v1_judgments__judgment_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me": {
         parameters: {
             query?: never;
@@ -128,6 +162,23 @@ export interface paths {
         get: operations["me_v1_me_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/observations/{observation_id}/judgments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Judgment */
+        post: operations["create_judgment_v1_observations__observation_id__judgments_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -698,6 +749,133 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /** Judgment */
+        Judgment: {
+            /**
+             * Author User Id
+             * Format: uuid
+             */
+            author_user_id: string;
+            /** Clip End Ms */
+            clip_end_ms: number;
+            /** Clip Start Ms */
+            clip_start_ms: number;
+            /** Comment Text */
+            comment_text: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            /**
+             * Goal Id
+             * Format: uuid
+             */
+            goal_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Observation Id
+             * Format: uuid
+             */
+            observation_id: string;
+            /**
+             * Publication Status
+             * @enum {string}
+             */
+            publication_status: "draft" | "published" | "withdrawn";
+            /** Published At */
+            published_at: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity" | "not_relevant";
+            /** Version */
+            version: number;
+        };
+        /** JudgmentCreate */
+        JudgmentCreate: {
+            /** Clip End Ms */
+            clip_end_ms: number;
+            /** Clip Start Ms */
+            clip_start_ms: number;
+            /** Comment Text */
+            comment_text?: string | null;
+            /**
+             * Goal Id
+             * Format: uuid
+             */
+            goal_id: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity" | "not_relevant";
+        };
+        /**
+         * JudgmentPatch
+         * @description A full content snapshot: every edit replaces the whole draft.
+         */
+        JudgmentPatch: {
+            /** Clip End Ms */
+            clip_end_ms: number;
+            /** Clip Start Ms */
+            clip_start_ms: number;
+            /** Comment Text */
+            comment_text?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity" | "not_relevant";
+        };
+        /** JudgmentRevision */
+        JudgmentRevision: {
+            /**
+             * Author User Id
+             * Format: uuid
+             */
+            author_user_id: string;
+            /** Clip End Ms */
+            clip_end_ms: number;
+            /** Clip Start Ms */
+            clip_start_ms: number;
+            /** Comment Text */
+            comment_text: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Judgment Id
+             * Format: uuid
+             */
+            judgment_id: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity" | "not_relevant";
+            /** Version */
+            version: number;
         };
         /** LinkedPlayer */
         LinkedPlayer: {
@@ -1308,6 +1486,75 @@ export interface operations {
             };
         };
     };
+    edit_judgment_v1_judgments__judgment_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The judgment version this edit was written against, as returned by ETag. Quoted or bare; `*` and weak validators are refused. */
+                "If-Match": string;
+            };
+            path: {
+                judgment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JudgmentPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Judgment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_revisions_v1_judgments__judgment_id__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                judgment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgmentRevision"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_v1_me_get: {
         parameters: {
             query?: never;
@@ -1324,6 +1571,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    create_judgment_v1_observations__observation_id__judgments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                observation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JudgmentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Judgment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

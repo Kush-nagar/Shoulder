@@ -574,6 +574,291 @@
         "title": "InviteResult",
         "type": "object"
       },
+      "Judgment": {
+        "properties": {
+          "author_user_id": {
+            "format": "uuid",
+            "title": "Author User Id",
+            "type": "string"
+          },
+          "clip_end_ms": {
+            "title": "Clip End Ms",
+            "type": "integer"
+          },
+          "clip_start_ms": {
+            "title": "Clip Start Ms",
+            "type": "integer"
+          },
+          "comment_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Text"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_revision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Revision Id"
+          },
+          "goal_id": {
+            "format": "uuid",
+            "title": "Goal Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "observation_id": {
+            "format": "uuid",
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "publication_status": {
+            "enum": [
+              "draft",
+              "published",
+              "withdrawn"
+            ],
+            "title": "Publication Status",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity",
+              "not_relevant"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "observation_id",
+          "goal_id",
+          "author_user_id",
+          "version",
+          "publication_status",
+          "current_revision_id",
+          "published_at",
+          "updated_at",
+          "created_at",
+          "verdict",
+          "comment_text",
+          "clip_start_ms",
+          "clip_end_ms"
+        ],
+        "title": "Judgment",
+        "type": "object"
+      },
+      "JudgmentCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_end_ms": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Clip End Ms",
+            "type": "integer"
+          },
+          "clip_start_ms": {
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Clip Start Ms",
+            "type": "integer"
+          },
+          "comment_text": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Text"
+          },
+          "goal_id": {
+            "format": "uuid",
+            "title": "Goal Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity",
+              "not_relevant"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "goal_id",
+          "verdict",
+          "clip_start_ms",
+          "clip_end_ms"
+        ],
+        "title": "JudgmentCreate",
+        "type": "object"
+      },
+      "JudgmentPatch": {
+        "additionalProperties": false,
+        "description": "A full content snapshot: every edit replaces the whole draft.",
+        "properties": {
+          "clip_end_ms": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Clip End Ms",
+            "type": "integer"
+          },
+          "clip_start_ms": {
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Clip Start Ms",
+            "type": "integer"
+          },
+          "comment_text": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Text"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity",
+              "not_relevant"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "clip_start_ms",
+          "clip_end_ms"
+        ],
+        "title": "JudgmentPatch",
+        "type": "object"
+      },
+      "JudgmentRevision": {
+        "properties": {
+          "author_user_id": {
+            "format": "uuid",
+            "title": "Author User Id",
+            "type": "string"
+          },
+          "clip_end_ms": {
+            "title": "Clip End Ms",
+            "type": "integer"
+          },
+          "clip_start_ms": {
+            "title": "Clip Start Ms",
+            "type": "integer"
+          },
+          "comment_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Text"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "judgment_id": {
+            "format": "uuid",
+            "title": "Judgment Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity",
+              "not_relevant"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "judgment_id",
+          "version",
+          "author_user_id",
+          "verdict",
+          "comment_text",
+          "clip_start_ms",
+          "clip_end_ms",
+          "created_at"
+        ],
+        "title": "JudgmentRevision",
+        "type": "object"
+      },
       "LinkedPlayer": {
         "properties": {
           "id": {
@@ -1819,6 +2104,119 @@
         "summary": "Update Goal"
       }
     },
+    "/v1/judgments/{judgment_id}": {
+      "patch": {
+        "operationId": "edit_judgment_v1_judgments__judgment_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The judgment version this edit was written against, as returned by ETag. Quoted or bare; `*` and weak validators are refused.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JudgmentPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Judgment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit Judgment"
+      }
+    },
+    "/v1/judgments/{judgment_id}/revisions": {
+      "get": {
+        "operationId": "list_revisions_v1_judgments__judgment_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JudgmentRevision"
+                  },
+                  "title": "Response List Revisions V1 Judgments  Judgment Id  Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Revisions"
+      }
+    },
     "/v1/me": {
       "get": {
         "operationId": "me_v1_me_get",
@@ -1840,6 +2238,61 @@
           }
         ],
         "summary": "Me"
+      }
+    },
+    "/v1/observations/{observation_id}/judgments": {
+      "post": {
+        "operationId": "create_judgment_v1_observations__observation_id__judgments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Observation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JudgmentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Judgment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Judgment"
       }
     },
     "/v1/players/{player_id}": {
