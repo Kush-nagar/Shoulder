@@ -151,6 +151,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/judgments/{judgment_id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw */
+        post: operations["withdraw_v1_judgments__judgment_id__withdraw_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me": {
         parameters: {
             query?: never;
@@ -162,6 +179,40 @@ export interface paths {
         get: operations["me_v1_me_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/goals/{goal_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Player Evidence */
+        get: operations["player_evidence_v1_me_goals__goal_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/judgments/{judgment_id}/clip-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Player Clip Url */
+        post: operations["player_clip_url_v1_me_judgments__judgment_id__clip_url_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -274,6 +325,74 @@ export interface paths {
          * @description Link an account to a roster row. Delivery is a later task, not this one.
          */
         post: operations["invite_player_v1_players__player_id__invite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/review-publications/{publication_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Publication */
+        get: operations["get_publication_v1_review_publications__publication_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/review-publications/{publication_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancel_v1_review_publications__publication_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/review-publications/{publication_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry */
+        post: operations["retry_v1_review_publications__publication_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/reviews/{game_id}/{player_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Review */
+        post: operations["publish_review_v1_reviews__game_id___player_id__publish_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -593,6 +712,72 @@ export interface components {
             /** Position */
             position: string | null;
         };
+        /** ClipUrl */
+        ClipUrl: {
+            /** Expires In */
+            expires_in: number;
+            /**
+             * Published Revision Id
+             * Format: uuid
+             */
+            published_revision_id: string;
+            /** Url */
+            url: string;
+        };
+        /** ClipUrlRequest */
+        ClipUrlRequest: {
+            /**
+             * Expected Published Revision Id
+             * Format: uuid
+             */
+            expected_published_revision_id: string;
+        };
+        /** EvidenceItem */
+        EvidenceItem: {
+            /** Clip Duration Ms */
+            clip_duration_ms: number;
+            /** Coach Display Name */
+            coach_display_name: string;
+            /** Comment */
+            comment: string;
+            /**
+             * Judgment Id
+             * Format: uuid
+             */
+            judgment_id: string;
+            /**
+             * Published Revision Id
+             * Format: uuid
+             */
+            published_revision_id: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity";
+            /**
+             * Verdict Copy
+             * @enum {string}
+             */
+            verdict_copy: "You did this." | "Chance to do this.";
+        };
+        /** EvidenceSet */
+        EvidenceSet: {
+            /** Game Label */
+            game_label: string;
+            /** Items */
+            items: components["schemas"]["EvidenceItem"][];
+            /**
+             * Publication Id
+             * Format: uuid
+             */
+            publication_id: string;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+        };
         /** Game */
         Game: {
             /**
@@ -785,6 +970,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Current Clip Id */
+            current_clip_id: string | null;
+            /** Current Publication Id */
+            current_publication_id: string | null;
             /** Current Revision Id */
             current_revision_id: string | null;
             /**
@@ -1025,6 +1214,122 @@ export interface components {
             jersey_number?: number | null;
             /** Position */
             position?: string | null;
+        };
+        /** ReviewPublication */
+        ReviewPublication: {
+            /** Cancelled At */
+            cancelled_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** First Terminal Failure At */
+            first_terminal_failure_at: string | null;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /**
+             * Goal Id
+             * Format: uuid
+             */
+            goal_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Items */
+            items: components["schemas"]["ReviewPublicationItem"][];
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Private Exports Expires At */
+            private_exports_expires_at: string | null;
+            /** Published At */
+            published_at: string | null;
+            /** Replaces Publication Id */
+            replaces_publication_id: string | null;
+            /**
+             * Requested By
+             * Format: uuid
+             */
+            requested_by: string;
+            /** Requested Count */
+            requested_count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "exporting" | "published" | "failed" | "cancelled" | "superseded" | "withdrawn";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ReviewPublicationItem */
+        ReviewPublicationItem: {
+            /** Clip End Ms */
+            clip_end_ms: number;
+            /** Clip Start Ms */
+            clip_start_ms: number;
+            /**
+             * Clip Status
+             * @enum {string}
+             */
+            clip_status: "pending" | "ready" | "failed" | "deleted";
+            /** Comment Text */
+            comment_text: string;
+            /** Evidence Clip Id */
+            evidence_clip_id: string | null;
+            /**
+             * Judgment Id
+             * Format: uuid
+             */
+            judgment_id: string;
+            /**
+             * Judgment Revision Id
+             * Format: uuid
+             */
+            judgment_revision_id: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Requested Clip Version */
+            requested_clip_version: number;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity" | "not_relevant";
+            /** Version */
+            version: number;
+        };
+        /** ReviewPublicationItemRequest */
+        ReviewPublicationItemRequest: {
+            /**
+             * Judgment Id
+             * Format: uuid
+             */
+            judgment_id: string;
+            /** Version */
+            version: number;
+        };
+        /** ReviewPublicationRequest */
+        ReviewPublicationRequest: {
+            /**
+             * Goal Id
+             * Format: uuid
+             */
+            goal_id: string;
+            /** Items */
+            items: components["schemas"]["ReviewPublicationItemRequest"][];
+            /** Replaces Publication Id */
+            replaces_publication_id?: string | null;
         };
         /**
          * RosterPlayer
@@ -1574,6 +1879,35 @@ export interface operations {
             };
         };
     };
+    withdraw_v1_judgments__judgment_id__withdraw_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                judgment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_v1_me_get: {
         parameters: {
             query?: never;
@@ -1590,6 +1924,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    player_evidence_v1_me_goals__goal_id__evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                goal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSet"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_clip_url_v1_me_judgments__judgment_id__clip_url_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                judgment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClipUrlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipUrl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1816,6 +2216,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InviteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_publication_v1_review_publications__publication_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publication_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPublication"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_v1_review_publications__publication_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publication_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPublication"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_v1_review_publications__publication_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publication_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPublication"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_review_v1_reviews__game_id___player_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                game_id: string;
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewPublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPublication"];
                 };
             };
             /** @description Validation Error */

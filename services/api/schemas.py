@@ -457,7 +457,9 @@ class Judgment(BaseModel):
     author_user_id: UUID
     version: int
     publication_status: PublicationStatus
+    current_publication_id: UUID | None
     current_revision_id: UUID | None
+    current_clip_id: UUID | None
     published_at: datetime | None
     updated_at: datetime
     created_at: datetime
@@ -477,3 +479,92 @@ class JudgmentRevision(BaseModel):
     clip_start_ms: int
     clip_end_ms: int
     created_at: datetime
+
+
+# --- Player-only clip publication -------------------------------------------
+
+
+class ReviewPublicationItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    judgment_id: UUID
+    version: int = Field(gt=0)
+
+
+class ReviewPublicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal_id: UUID
+    replaces_publication_id: UUID | None = None
+    items: list[ReviewPublicationItemRequest] = Field(min_length=3, max_length=6)
+
+    @model_validator(mode="after")
+    def distinct_judgments(self) -> Self:
+        if len({item.judgment_id for item in self.items}) != len(self.items):
+            raise ValueError("publication items must name distinct judgments")
+        return self
+
+
+ReviewPublicationStatus = Literal[
+    "exporting", "published", "failed", "cancelled", "superseded", "withdrawn"
+]
+
+
+class ReviewPublicationItem(BaseModel):
+    judgment_id: UUID
+    judgment_revision_id: UUID
+    ordinal: int
+    requested_clip_version: int
+    evidence_clip_id: UUID | None
+    clip_status: Literal["pending", "ready", "failed", "deleted"]
+    version: int
+    verdict: Verdict
+    comment_text: str
+    clip_start_ms: int
+    clip_end_ms: int
+
+
+class ReviewPublication(BaseModel):
+    id: UUID
+    game_id: UUID
+    player_id: UUID
+    goal_id: UUID
+    requested_by: UUID
+    status: ReviewPublicationStatus
+    replaces_publication_id: UUID | None
+    requested_count: int
+    first_terminal_failure_at: datetime | None
+    cancelled_at: datetime | None
+    private_exports_expires_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+    items: list[ReviewPublicationItem]
+
+
+class EvidenceItem(BaseModel):
+    judgment_id: UUID
+    published_revision_id: UUID
+    verdict: Literal["applied", "opportunity"]
+    verdict_copy: Literal["You did this.", "Chance to do this."]
+    comment: str
+    clip_duration_ms: int
+    coach_display_name: str
+
+
+class EvidenceSet(BaseModel):
+    publication_id: UUID
+    game_label: str
+    published_at: datetime
+    items: list[EvidenceItem]
+
+
+class ClipUrlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_published_revision_id: UUID
+
+
+class ClipUrl(BaseModel):
+    url: str
+    expires_in: int
+    published_revision_id: UUID

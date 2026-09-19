@@ -98,6 +98,20 @@ class PartPlanTests(unittest.TestCase):
                 with self.assertRaises(storage.StorageError):
                     storage.original_key(uuid.uuid4(), extension)
 
+    def test_evidence_key_is_derived_only_from_server_ids_and_version(self) -> None:
+        judgment_id = uuid.UUID("11111111-2222-3333-4444-555555555555")
+        self.assertEqual(
+            storage.evidence_key(judgment_id, 7),
+            f"clips/{judgment_id}/7.mp4",
+        )
+        for version in (0, -1):
+            with self.subTest(version=version), self.assertRaises(storage.StorageError):
+                storage.evidence_key(judgment_id, version)
+
+    def test_player_signing_lifetime_is_capped_at_five_minutes(self) -> None:
+        self.assertEqual(storage.PLAYER_GET_URL_SECONDS, 300)
+        self.assertLessEqual(storage.PLAYER_GET_URL_SECONDS, storage.GET_URL_SECONDS)
+
 
 class DeclaredMediaTests(unittest.TestCase):
     """The extension is validated; the browser's type is only a hint.

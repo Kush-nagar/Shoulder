@@ -24,6 +24,7 @@ Safety rules this module exists to keep (`docs/10-security-privacy.md`):
   ffmpeg output, storage key, or signed URL is ever stored or logged.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -99,6 +100,7 @@ VIDEO_CRF = "23"
 VIDEO_PRESET = "veryfast"
 AUDIO_BITRATE = "128k"
 PLAYBACK_CONTENT_TYPE = "video/mp4"
+CLIP_DURATION_TOLERANCE_MS = 100
 
 # --- Bounds. A file outside these is refused rather than processed: an hours
 # long or absurdly large input is either a mistake or an attack on worker time.
@@ -389,6 +391,112 @@ def transcode(source: str, destination: str, media: Probe, report: Progress) -> 
         destination,
     ]
     _encode(argv, media.duration_ms, report)
+
+
+def _seconds(milliseconds: int) -> str:
+    return f"{milliseconds / 1000:.3f}"
+
+
+def clip_command(
+    source: str,
+    destination: str,
+    start_ms: int,
+    end_ms: int,
+    has_audio: bool,
+) -> list[str]:
+    """Exact-boundary re-encode command for one isolated player clip."""
+    if start_ms < 0 or end_ms <= start_ms:
+        raise MediaError("The requested clip boundaries are invalid.")
+    audio = (
+        [
+            "-map",
+            "0:a:0?",
+            "-c:a",
+            "aac",
+            "-b:a",
+            AUDIO_BITRATE,
+            "-ac",
+            "2",
+            "-ar",
+            AUDIO_SAMPLE_RATE,
+        ]
+        if has_audio
+        else ["-an"]
+    )
+    return [
+        _tool("ffmpeg"),
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-threads",
+        ENCODE_THREADS,
+        "-i",
+        source,
+        # Output-side seek decodes up to the selected frame. Input-side seek
+        # could start at an earlier keyframe and expose unapproved context.
+        "-ss",
+        _seconds(start_ms),
+        "-t",
+        _seconds(end_ms - start_ms),
+        "-map",
+        "0:v:0",
+        *audio,
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
+        "-c:v",
+        "libx264",
+        "-preset",
+        VIDEO_PRESET,
+        "-crf",
+        VIDEO_CRF,
+        "-profile:v",
+        "high",
+        "-bf",
+        NO_B_FRAMES,
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        destination,
+    ]
+
+
+def export_clip(
+    source: str,
+    destination: str,
+    start_ms: int,
+    end_ms: int,
+    report: Progress,
+) -> Probe:
+    """Re-encode and verify an isolated clip at the requested boundaries."""
+    source_probe = probe(source)
+    if end_ms > source_probe.duration_ms + CLIP_DURATION_TOLERANCE_MS:
+        raise MediaError("The requested clip boundaries are invalid.")
+    argv = clip_command(source, destination, start_ms, end_ms, source_probe.has_audio)
+    _run_with_heartbeat(
+        argv,
+        max(MIN_ENCODE_TIMEOUT_SECONDS, (end_ms - start_ms) // 1000 * 6),
+        report,
+    )
+    result = probe(destination)
+    expected = end_ms - start_ms
+    if abs(result.duration_ms - expected) > CLIP_DURATION_TOLERANCE_MS:
+        raise MediaError("Shoulder could not preserve the selected clip boundaries.")
+    return result
+
+
+def file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _out_time_fraction(line: str, duration_ms: int) -> float | None:
@@ -797,6 +905,114 @@ def thumbnail_job(job: jobs.Job, keep_going: Progress) -> None:
         raise
 
 
+def clip_export_job(job: jobs.Job, keep_going: Progress) -> None:
+    """Export one revision-pinned object and attach it through fenced SQL."""
+    with jobs.transaction() as connection:
+        export = connection.execute(
+            text("SELECT * FROM private.clip_export_input(:job_id, :worker_id)"),
+            {"job_id": str(job.id), "worker_id": job.locked_by},
+        ).one_or_none()
+    if export is None:
+        return
+
+    uploaded = False
+    try:
+        with _workspace() as directory:
+            source = str(Path(directory) / "coach-playback.mp4")
+            output = str(Path(directory) / "evidence.mp4")
+            try:
+                storage.download_object(export.source_key, source, report=keep_going)
+            except storage.TransferAborted:
+                raise Cancelled from None
+            if not keep_going(0.05):
+                raise Cancelled
+            result = export_clip(
+                source,
+                output,
+                export.clip_start_ms,
+                export.clip_end_ms,
+                keep_going,
+            )
+            if not keep_going(0.9):
+                raise Cancelled
+            try:
+                storage.upload_object(
+                    export.target_key,
+                    output,
+                    PLAYBACK_CONTENT_TYPE,
+                    report=keep_going,
+                )
+            except storage.TransferAborted:
+                raise Cancelled from None
+            uploaded = True
+            if not keep_going(0.98):
+                raise Cancelled
+            with jobs.transaction() as connection:
+                attached = bool(
+                    connection.execute(
+                        text("""
+                            SELECT private.complete_evidence_clip(
+                                :job_id, :worker_id, :duration_ms,
+                                :size_bytes, :sha256
+                            )
+                        """),
+                        {
+                            "job_id": str(job.id),
+                            "worker_id": job.locked_by,
+                            "duration_ms": result.duration_ms,
+                            "size_bytes": os.path.getsize(output),
+                            "sha256": file_sha256(output),
+                        },
+                    ).scalar_one()
+                )
+            if not attached:
+                _discard_own_clip_object(job, export.target_key)
+                uploaded = False
+    except Cancelled:
+        if uploaded:
+            try:
+                _discard_own_clip_object(job, export.target_key)
+            except storage.StorageError:
+                pass
+        raise
+
+
+def _discard_own_clip_object(job: jobs.Job, target_key: str) -> None:
+    """Remove this attempt's upload, but only while it is still this attempt's.
+
+    A clip's storage key is derived from its judgment and clip version, so a
+    job retried against the same clip row uploads to the same key as the
+    attempt it replaced. Deleting unconditionally on the way out would take
+    the replacement's finished clip with it, leaving a publication pointing at
+    an object that is no longer there.
+
+    Asking whether the key is unused is not enough on its own, because the
+    answer is read in one transaction and the delete happens after it commits:
+    a replacement can finish inside that window and lose its clip anyway. The
+    lease is what actually settles ownership. A worker that still holds this
+    job holds it exclusively, so no replacement exists to race with; a worker
+    that has lost it has no business deleting a key somebody else now owns,
+    and leaves the object to be reused or to expire on its deadline.
+    """
+    with jobs.transaction() as connection:
+        disposable = bool(
+            connection.execute(
+                text("""
+                    SELECT private.evidence_clip_object_disposable(
+                        :job_id, :worker_id, :key
+                    )
+                """),
+                {
+                    "job_id": str(job.id),
+                    "worker_id": job.locked_by,
+                    "key": target_key,
+                },
+            ).scalar_one()
+        )
+    if disposable:
+        storage.delete_object(target_key)
+
+
 def _fail_if_final(job: jobs.Job, video_id: UUID) -> None:
     """Tell the coach the truth once the queue has stopped retrying."""
     if job.attempts >= job.max_attempts:
@@ -824,4 +1040,5 @@ def _workspace() -> _Workspace:
 HANDLERS: dict[str, Any] = {
     "transcode": transcode_job,
     "thumbnail": thumbnail_job,
+    "clip_export": clip_export_job,
 }

@@ -60,6 +60,7 @@ class Job:
     attempts: int
     max_attempts: int
     payload: dict[str, Any]
+    locked_by: str
 
 
 def backoff_seconds(attempts: int) -> int:
@@ -136,7 +137,8 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
                     error_code = NULL,
                     error_message = NULL
                 WHERE id = :id AND status = 'queued'
-                RETURNING id, kind, video_id, attempts, max_attempts, payload
+                RETURNING id, kind, video_id, attempts, max_attempts, payload,
+                          locked_by
             """),
             {"id": candidate, "worker_id": worker_id},
         ).one()
@@ -147,6 +149,7 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
         attempts=row.attempts,
         max_attempts=row.max_attempts,
         payload=dict(row.payload),
+        locked_by=row.locked_by,
     )
 
 

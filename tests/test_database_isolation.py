@@ -125,6 +125,52 @@ EXPECTED_POLICIES = {
         "SELECT",
         "{shoulder_api}",
     ),
+    # 0010: coaches see publication state; players see only the complete
+    # current pointer chain for their own evidence.
+    (
+        "review_publication",
+        "review_publication_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "review_publication",
+        "review_publication_coach_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "review_publication",
+        "review_publication_player_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "review_publication_item",
+        "review_publication_item_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "review_publication_item",
+        "review_publication_item_coach_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "review_publication_item",
+        "review_publication_item_player_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "evidence_clip",
+        "evidence_clip_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    ("evidence_clip", "evidence_clip_coach_select", "SELECT", "{shoulder_api}"),
+    ("evidence_clip", "evidence_clip_player_select", "SELECT", "{shoulder_api}"),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -145,10 +191,27 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "is_judgment_coach",
     "is_published_revision_for_player",
     "write_judgment_revision",
+    "is_review_publication_coach",
+    "is_current_publication_for_player",
+    "is_current_publication_item_for_player",
+    "is_current_evidence_clip_for_player",
+    "player_evidence",
+    "player_clip_for_signing",
+    "request_review_publication",
+    "retry_review_publication",
+    "cancel_review_publication",
+    "withdraw_judgment",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
-EXPECTED_WORKER_FUNCTIONS: set[str] = set()
+EXPECTED_WORKER_FUNCTIONS = {
+    "clip_export_input",
+    "complete_evidence_clip",
+    # Asked before a worker deletes its own upload. It answers false once the
+    # job's lease has moved on, so a worker that lost its lease cannot remove
+    # the clip its replacement finished.
+    "evidence_clip_object_disposable",
+}
 
 
 class MutationGuardTests(unittest.TestCase):

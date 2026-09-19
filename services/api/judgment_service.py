@@ -22,10 +22,12 @@ NOT_ORIGINAL_AUTHOR = "PJ001"
 STALE_VERSION = "40001"
 JUDGMENT_ALREADY_EXISTS = "23505"
 JUDGMENT_NOT_FOUND = "P0002"
+JUDGMENT_RESERVED = "P1701"
 
 JUDGMENT_COLUMNS = """
     j.id, j.observation_id, j.goal_id, j.author_user_id, j.version,
     j.publication_status, j.current_revision_id, j.published_at,
+    j.current_publication_id, j.current_clip_id,
     j.updated_at, j.created_at
 """
 
@@ -62,7 +64,9 @@ def judgment_model(row: Any, snapshot: Any) -> dict[str, Any]:
         "author_user_id": row.author_user_id,
         "version": row.version,
         "publication_status": row.publication_status,
+        "current_publication_id": row.current_publication_id,
         "current_revision_id": row.current_revision_id,
+        "current_clip_id": row.current_clip_id,
         "published_at": row.published_at,
         "updated_at": row.updated_at,
         "created_at": row.created_at,
@@ -117,6 +121,12 @@ def _write(
                 403,
                 "Only the coach who created this judgment can edit it.",
                 "judgment-not-original-author",
+            ) from None
+        if code == JUDGMENT_RESERVED:
+            raise Problem(
+                409,
+                "This judgment is reserved by a publication export.",
+                "judgment-reserved",
             ) from None
         if code == STALE_VERSION:
             # The caller has to be told what it lost to, and this transaction
