@@ -39,6 +39,8 @@ MIN_PART_SIZE_BYTES = 5 * 1024 * 1024
 # five minutes and belongs to Task 18.
 PART_URL_SECONDS = 900
 GET_URL_SECONDS = 900
+# Player evidence has a tighter residual-access bound than coach playback.
+PLAYER_GET_URL_SECONDS = 300
 
 # Extension -> stored extension and accepted browser content type. The browser
 # MIME is a hint only; `docs/04-api.md` requires probing before trusting it,
@@ -156,6 +158,13 @@ def playback_key(video_id: UUID) -> str:
     be steered at another object.
     """
     return f"playback/{video_id}/coach-720p.mp4"
+
+
+def evidence_key(judgment_id: UUID, version: int) -> str:
+    """One isolated player object, derived only from durable server state."""
+    if version < 1:
+        raise StorageError("clip version is outside the allowed range")
+    return f"clips/{judgment_id}/{version}.mp4"
 
 
 def sprite_key(video_id: UUID, sheet: int) -> str:
@@ -300,6 +309,18 @@ def sign_get(key: str, seconds: int = GET_URL_SECONDS) -> str:
         ExpiresIn=seconds,
     )
     return str(url)
+
+
+def sign_player_get(key: str, seconds: int = PLAYER_GET_URL_SECONDS) -> str:
+    """Sign one current evidence object for no more than five minutes."""
+    if not key.startswith("clips/") or not 1 <= seconds <= PLAYER_GET_URL_SECONDS:
+        raise StorageError("player signing target is outside the allowed range")
+    return sign_get(key, seconds)
+
+
+def delete_object(key: str) -> None:
+    """Delete one exact object. S3 deletion is idempotent for an absent key."""
+    _call("delete_object", Bucket=bucket(), Key=key)
 
 
 def list_parts(key: str, upload_id: str) -> list[StoredPart]:

@@ -154,6 +154,131 @@
         "title": "BulkRowResult",
         "type": "object"
       },
+      "ClipUrl": {
+        "properties": {
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "published_revision_id": {
+            "format": "uuid",
+            "title": "Published Revision Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "expires_in",
+          "published_revision_id"
+        ],
+        "title": "ClipUrl",
+        "type": "object"
+      },
+      "ClipUrlRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_published_revision_id": {
+            "format": "uuid",
+            "title": "Expected Published Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_published_revision_id"
+        ],
+        "title": "ClipUrlRequest",
+        "type": "object"
+      },
+      "EvidenceItem": {
+        "properties": {
+          "clip_duration_ms": {
+            "title": "Clip Duration Ms",
+            "type": "integer"
+          },
+          "coach_display_name": {
+            "title": "Coach Display Name",
+            "type": "string"
+          },
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "judgment_id": {
+            "format": "uuid",
+            "title": "Judgment Id",
+            "type": "string"
+          },
+          "published_revision_id": {
+            "format": "uuid",
+            "title": "Published Revision Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "verdict_copy": {
+            "enum": [
+              "You did this.",
+              "Chance to do this."
+            ],
+            "title": "Verdict Copy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "judgment_id",
+          "published_revision_id",
+          "verdict",
+          "verdict_copy",
+          "comment",
+          "clip_duration_ms",
+          "coach_display_name"
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
+      },
+      "EvidenceSet": {
+        "properties": {
+          "game_label": {
+            "title": "Game Label",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "publication_id": {
+            "format": "uuid",
+            "title": "Publication Id",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publication_id",
+          "game_label",
+          "published_at",
+          "items"
+        ],
+        "title": "EvidenceSet",
+        "type": "object"
+      },
       "Game": {
         "properties": {
           "created_at": {
@@ -605,6 +730,30 @@
             "title": "Created At",
             "type": "string"
           },
+          "current_clip_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Clip Id"
+          },
+          "current_publication_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Publication Id"
+          },
           "current_revision_id": {
             "anyOf": [
               {
@@ -679,7 +828,9 @@
           "author_user_id",
           "version",
           "publication_status",
+          "current_publication_id",
           "current_revision_id",
+          "current_clip_id",
           "published_at",
           "updated_at",
           "created_at",
@@ -1164,6 +1315,289 @@
           }
         },
         "title": "PlayerPatch",
+        "type": "object"
+      },
+      "ReviewPublication": {
+        "properties": {
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "first_terminal_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Terminal Failure At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "goal_id": {
+            "format": "uuid",
+            "title": "Goal Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewPublicationItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "private_exports_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Private Exports Expires At"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "replaces_publication_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Publication Id"
+          },
+          "requested_by": {
+            "format": "uuid",
+            "title": "Requested By",
+            "type": "string"
+          },
+          "requested_count": {
+            "title": "Requested Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "exporting",
+              "published",
+              "failed",
+              "cancelled",
+              "superseded",
+              "withdrawn"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "player_id",
+          "goal_id",
+          "requested_by",
+          "status",
+          "replaces_publication_id",
+          "requested_count",
+          "first_terminal_failure_at",
+          "cancelled_at",
+          "private_exports_expires_at",
+          "created_at",
+          "updated_at",
+          "published_at",
+          "items"
+        ],
+        "title": "ReviewPublication",
+        "type": "object"
+      },
+      "ReviewPublicationItem": {
+        "properties": {
+          "clip_end_ms": {
+            "title": "Clip End Ms",
+            "type": "integer"
+          },
+          "clip_start_ms": {
+            "title": "Clip Start Ms",
+            "type": "integer"
+          },
+          "clip_status": {
+            "enum": [
+              "pending",
+              "ready",
+              "failed",
+              "deleted"
+            ],
+            "title": "Clip Status",
+            "type": "string"
+          },
+          "comment_text": {
+            "title": "Comment Text",
+            "type": "string"
+          },
+          "evidence_clip_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Clip Id"
+          },
+          "judgment_id": {
+            "format": "uuid",
+            "title": "Judgment Id",
+            "type": "string"
+          },
+          "judgment_revision_id": {
+            "format": "uuid",
+            "title": "Judgment Revision Id",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "requested_clip_version": {
+            "title": "Requested Clip Version",
+            "type": "integer"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity",
+              "not_relevant"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "judgment_id",
+          "judgment_revision_id",
+          "ordinal",
+          "requested_clip_version",
+          "evidence_clip_id",
+          "clip_status",
+          "version",
+          "verdict",
+          "comment_text",
+          "clip_start_ms",
+          "clip_end_ms"
+        ],
+        "title": "ReviewPublicationItem",
+        "type": "object"
+      },
+      "ReviewPublicationItemRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "judgment_id": {
+            "format": "uuid",
+            "title": "Judgment Id",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "judgment_id",
+          "version"
+        ],
+        "title": "ReviewPublicationItemRequest",
+        "type": "object"
+      },
+      "ReviewPublicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "goal_id": {
+            "format": "uuid",
+            "title": "Goal Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewPublicationItemRequest"
+            },
+            "maxItems": 6,
+            "minItems": 3,
+            "title": "Items",
+            "type": "array"
+          },
+          "replaces_publication_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Publication Id"
+          }
+        },
+        "required": [
+          "goal_id",
+          "items"
+        ],
+        "title": "ReviewPublicationRequest",
         "type": "object"
       },
       "RosterPlayer": {
@@ -2229,6 +2663,44 @@
         "summary": "List Revisions"
       }
     },
+    "/v1/judgments/{judgment_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_v1_judgments__judgment_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw"
+      }
+    },
     "/v1/me": {
       "get": {
         "operationId": "me_v1_me_get",
@@ -2250,6 +2722,110 @@
           }
         ],
         "summary": "Me"
+      }
+    },
+    "/v1/me/goals/{goal_id}/evidence": {
+      "get": {
+        "operationId": "player_evidence_v1_me_goals__goal_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Goal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceSet"
+                  },
+                  "title": "Response Player Evidence V1 Me Goals  Goal Id  Evidence Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Player Evidence"
+      }
+    },
+    "/v1/me/judgments/{judgment_id}/clip-url": {
+      "post": {
+        "operationId": "player_clip_url_v1_me_judgments__judgment_id__clip_url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClipUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClipUrl"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Player Clip Url"
       }
     },
     "/v1/observations/{observation_id}/judgment": {
@@ -2628,6 +3204,222 @@
           }
         ],
         "summary": "Invite Player"
+      }
+    },
+    "/v1/review-publications/{publication_id}": {
+      "get": {
+        "operationId": "get_publication_v1_review_publications__publication_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Publication Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPublication"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Publication"
+      }
+    },
+    "/v1/review-publications/{publication_id}/cancel": {
+      "post": {
+        "operationId": "cancel_v1_review_publications__publication_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Publication Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPublication"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel"
+      }
+    },
+    "/v1/review-publications/{publication_id}/retry": {
+      "post": {
+        "operationId": "retry_v1_review_publications__publication_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Publication Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPublication"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry"
+      }
+    },
+    "/v1/reviews/{game_id}/{player_id}/publish": {
+      "post": {
+        "operationId": "publish_review_v1_reviews__game_id___player_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPublication"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Review"
       }
     },
     "/v1/teams": {

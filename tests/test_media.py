@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
@@ -87,6 +88,21 @@ class PlaybackSizeTests(unittest.TestCase):
                 self.assertEqual(width % 2, 0)
                 self.assertEqual(height % 2, 0)
                 self.assertGreaterEqual(min(width, height), 2)
+
+
+class ClipBoundaryTests(unittest.TestCase):
+    def test_clip_duration_tolerance_is_privacy_bounded(self) -> None:
+        self.assertLessEqual(media.CLIP_DURATION_TOLERANCE_MS, 100)
+
+    def test_clip_command_uses_exact_output_seek_not_stream_copy(self) -> None:
+        with mock.patch.object(media, "_tool", return_value="ffmpeg"):
+            argv = media.clip_command("source.mp4", "clip.mp4", 1234, 3456, True)
+        self.assertIn("-ss", argv)
+        self.assertIn("1.234", argv)
+        self.assertIn("-t", argv)
+        self.assertIn("2.222", argv)
+        self.assertNotIn("copy", argv)
+        self.assertLess(argv.index("-i"), argv.index("-ss"))
 
 
 class SpriteGeometryTests(unittest.TestCase):
