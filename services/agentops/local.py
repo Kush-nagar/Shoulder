@@ -1677,7 +1677,12 @@ def run_once(
                 root, task_id, blocking_findings(verdict["findings"])
             )
         else:
-            prompt = build_prompt(root, task_id, "implement", repair="a failing check")
+            # Not "a failing check": this loop runs before a pull request
+            # exists, so a repair brief here would send the writer to read a
+            # review and a pull request that are not there. Task 17 stopped on
+            # exactly that -- the worker checked, found no pull request and no
+            # commits, and declined to act on a premise it could see was false.
+            prompt = build_prompt(root, task_id, "implement", repair="verification")
         attempted = implement(prompt)
         run = attempted["run"]
         writer = attempted["assignment"]

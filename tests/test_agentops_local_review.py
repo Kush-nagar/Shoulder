@@ -212,12 +212,21 @@ class TestAnEmptyAttemptIsRetriedRatherThanRepaired(ReviewLoopCase):
             self.assertNotIn("# Repair brief", prompt)
             self.assertIn("You are implementing exactly one canonical", prompt)
 
-    def test_a_retry_after_real_work_still_gets_the_repair_brief(self) -> None:
-        """The fix is about an empty branch, not about repairs in general."""
+    def test_a_retry_after_real_work_is_asked_to_finish_it(self) -> None:
+        """Work in the tree is continued, not restarted and not "repaired".
+
+        This loop runs before any pull request exists, so the retry must not
+        be told to read a review or a pull request: task 17's worker checked,
+        found neither, and declined to act on a premise it could see was false.
+        """
         self.run_loop(reviews=[clean_review()], verify_ok=[False, True])
         prompts = self.implement_prompts()
-        self.assertGreater(len(prompts), 1, "the failing check was never repaired")
-        self.assertIn("# Repair brief", prompts[1])
+        self.assertGreater(
+            len(prompts), 1, "the failing verification was never retried"
+        )
+        self.assertIn("# Continue brief", prompts[1])
+        self.assertNotIn("# Repair brief", prompts[1])
+        self.assertNotIn("opened a pull request", prompts[1])
 
 
 class TestReviewCannotBeSkipped(ReviewLoopCase):

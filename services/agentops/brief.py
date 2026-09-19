@@ -52,6 +52,14 @@ DISCIPLINE = """## Working rules
   this process is the run, and when it exits the work goes with it. A
   subagent may read or search on your behalf; every write is yours.
 
+- You hold this worktree's lease and you are its only writer. The one-writer
+  rule is enforced by that lease, not by what is running on the machine, so do
+  not go looking for rival processes: a `claude` or `codex` process is this
+  workstation's own tooling -- an editor integration, a background daemon, the
+  session that dispatched you -- and finding one is not evidence of a second
+  writer here. Uncommitted changes in this worktree are the previous attempt's
+  work on this same task, left for you deliberately.
+
 - Stay inside this task. Do not redesign adjacent systems or start a later task.
 - Public API types come from the FastAPI OpenAPI document. Never hand-write them.
 - Any schema change uses Alembic and includes RLS and grants in this task.
@@ -88,6 +96,18 @@ already exist rather than inventing a parallel set. Never invent player-facing
 wording: `applied` renders as "You did this.", `opportunity` as "Chance to do
 this.", and `not_relevant` is never shown to a player.
 """
+
+CONTINUE_HEADER = """# Continue brief
+
+A previous attempt left work for this task in this worktree. It is uncommitted,
+there is no pull request, nobody has reviewed it, and it does not yet pass. It
+is yours to finish.
+
+- Read what is already here first (`git status`, `git diff`), and keep it.
+  Rewriting working code costs the attempt that finishes the task.
+- Finish the parts the task still owes, then make the verification pass.
+"""
+
 
 REPAIR_HEADER = """# Repair brief
 
@@ -136,7 +156,18 @@ address hides a real defect from the one gate that would have caught it."""
 def _repair_section(reason: str, findings_path: Path | None) -> str:
     """What failed, in the smallest form a repairer can act on."""
     lines = ["## What failed"]
-    if reason == "ci":
+    if reason == "verification":
+        # Deliberately says nothing about a pull request or a reviewer. This
+        # runs inside the implement loop, which is always before a pull request
+        # exists, so a worker told to read one goes looking, finds none, and
+        # stops rather than writing.
+        lines.append(
+            "The verification this task owes did not pass, and the work in "
+            "this worktree is unfinished. Run it yourself to see where it "
+            "stands, finish what is missing, and do not weaken a check to "
+            "make it pass."
+        )
+    elif reason == "ci":
         lines.append(
             "A required check failed on the pull request. Read the failing "
             "job's log through `gh run view --log-failed`, find the cause, "
@@ -185,7 +216,13 @@ def render(
     result = classify.classify(task)
     block = ctx.backlog.block_for_task(task_id)
 
-    lines: list[str] = [REPAIR_HEADER if repair else HEADER]
+    if repair == "verification":
+        header = CONTINUE_HEADER
+    elif repair:
+        header = REPAIR_HEADER
+    else:
+        header = HEADER
+    lines: list[str] = [header]
     if repair:
         lines.append(_repair_section(repair, findings))
     lines.append(f"## Task {task.id} — {task.title}\n")
