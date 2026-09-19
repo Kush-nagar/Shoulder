@@ -966,36 +966,50 @@ def clip_export_job(job: jobs.Job, keep_going: Progress) -> None:
                     ).scalar_one()
                 )
             if not attached:
-                _discard_unused_clip_object(export.target_key)
+                _discard_own_clip_object(job, export.target_key)
                 uploaded = False
     except Cancelled:
         if uploaded:
             try:
-                _discard_unused_clip_object(export.target_key)
+                _discard_own_clip_object(job, export.target_key)
             except storage.StorageError:
                 pass
         raise
 
 
-def _discard_unused_clip_object(target_key: str) -> None:
-    """Remove this attempt's upload, unless something is now relying on it.
+def _discard_own_clip_object(job: jobs.Job, target_key: str) -> None:
+    """Remove this attempt's upload, but only while it is still this attempt's.
 
     A clip's storage key is derived from its judgment and clip version, so a
-    job that is retried against the same clip row uploads to the same key. A
-    worker that lost its lease mid-upload therefore shares a key with the
-    worker that replaced it, and deleting unconditionally on the way out would
-    take the replacement's finished clip with it -- leaving a publication
-    pointing at an object that is no longer there, permanently pending. So the
-    object is removed only while nothing claims it.
+    job retried against the same clip row uploads to the same key as the
+    attempt it replaced. Deleting unconditionally on the way out would take
+    the replacement's finished clip with it, leaving a publication pointing at
+    an object that is no longer there.
+
+    Asking whether the key is unused is not enough on its own, because the
+    answer is read in one transaction and the delete happens after it commits:
+    a replacement can finish inside that window and lose its clip anyway. The
+    lease is what actually settles ownership. A worker that still holds this
+    job holds it exclusively, so no replacement exists to race with; a worker
+    that has lost it has no business deleting a key somebody else now owns,
+    and leaves the object to be reused or to expire on its deadline.
     """
     with jobs.transaction() as connection:
-        unused = bool(
+        disposable = bool(
             connection.execute(
-                text("SELECT private.evidence_clip_object_unused(:key)"),
-                {"key": target_key},
+                text("""
+                    SELECT private.evidence_clip_object_disposable(
+                        :job_id, :worker_id, :key
+                    )
+                """),
+                {
+                    "job_id": str(job.id),
+                    "worker_id": job.locked_by,
+                    "key": target_key,
+                },
             ).scalar_one()
         )
-    if unused:
+    if disposable:
         storage.delete_object(target_key)
 
 

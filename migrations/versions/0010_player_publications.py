@@ -39,7 +39,7 @@ COACH_TRANSITIONS = (
 WORKER_FUNCTIONS = (
     "private.clip_export_input(uuid,text)",
     "private.complete_evidence_clip(uuid,text,integer,bigint,text)",
-    "private.evidence_clip_object_unused(text)",
+    "private.evidence_clip_object_disposable(uuid,text,text)",
 )
 FUNCTIONS = PLAYER_HELPERS + COACH_TRANSITIONS + WORKER_FUNCTIONS
 
@@ -488,14 +488,15 @@ def upgrade() -> None:
     """)
     for function in FUNCTIONS:
         op.execute(f"ALTER FUNCTION {function} OWNER TO {MIGRATION_ROLE}")
-        op.execute(f"REVOKE ALL ON FUNCTION {function} FROM PUBLIC, anon, authenticated")
+        op.execute(
+            f"REVOKE ALL ON FUNCTION {function} FROM PUBLIC, anon, authenticated"
+        )
     op.execute(
         "ALTER FUNCTION private.block_reserved_judgment_edit()"
         f" OWNER TO {MIGRATION_ROLE}"
     )
     op.execute(
-        "ALTER FUNCTION private.mark_failed_clip_export()"
-        f" OWNER TO {MIGRATION_ROLE}"
+        f"ALTER FUNCTION private.mark_failed_clip_export() OWNER TO {MIGRATION_ROLE}"
     )
     op.execute(
         "ALTER FUNCTION private.finalize_review_publication(uuid)"
@@ -1064,10 +1065,17 @@ def _create_worker_functions() -> None:
         $$
     """)
     op.execute("""
-        CREATE FUNCTION private.evidence_clip_object_unused(p_storage_key text)
-        RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+        CREATE FUNCTION private.evidence_clip_object_disposable(
+            p_job_id uuid, p_worker_id text, p_storage_key text
+        ) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
         SET search_path = '' AS $$
-            SELECT NOT EXISTS (
+            SELECT EXISTS (
+                SELECT 1 FROM app.processing_job job
+                WHERE job.id = p_job_id
+                  AND job.kind = 'clip_export'
+                  AND job.status = 'running'
+                  AND job.locked_by = p_worker_id
+            ) AND NOT EXISTS (
                 SELECT 1 FROM app.evidence_clip c
                 WHERE c.storage_key = p_storage_key
                   AND (
@@ -1172,7 +1180,9 @@ def _create_job_failure_trigger() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS processing_job_clip_failure ON app.processing_job")
+    op.execute(
+        "DROP TRIGGER IF EXISTS processing_job_clip_failure ON app.processing_job"
+    )
     op.execute("DROP FUNCTION IF EXISTS private.mark_failed_clip_export()")
     op.execute("DROP TRIGGER IF EXISTS judgment_reserved_edit ON app.judgment")
     op.execute("DROP FUNCTION IF EXISTS private.block_reserved_judgment_edit()")
@@ -1196,7 +1206,9 @@ def downgrade() -> None:
         $$
     """)
     # Detach every pointer into the tables before the tables are dropped.
-    op.execute("ALTER TABLE app.judgment DROP CONSTRAINT judgment_publication_pointers_whole")
+    op.execute(
+        "ALTER TABLE app.judgment DROP CONSTRAINT judgment_publication_pointers_whole"
+    )
     op.execute("ALTER TABLE app.judgment DROP COLUMN current_clip_id")
     op.execute("ALTER TABLE app.judgment DROP COLUMN current_publication_id")
     op.execute(

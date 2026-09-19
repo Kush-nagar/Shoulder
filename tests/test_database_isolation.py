@@ -207,9 +207,10 @@ EXPECTED_RUNTIME_FUNCTIONS = {
 EXPECTED_WORKER_FUNCTIONS = {
     "clip_export_input",
     "complete_evidence_clip",
-    # Asked before a worker deletes its own upload, so a worker that lost its
-    # lease cannot remove the clip its replacement finished.
-    "evidence_clip_object_unused",
+    # Asked before a worker deletes its own upload. It answers false once the
+    # job's lease has moved on, so a worker that lost its lease cannot remove
+    # the clip its replacement finished.
+    "evidence_clip_object_disposable",
 }
 
 
