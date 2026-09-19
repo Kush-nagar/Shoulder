@@ -357,6 +357,27 @@ test("five judgment drafts survive a lost response, reload, and stale edit witho
     ),
   ).toBe(5);
 
+  let lostPatchResponse = false;
+  await page.route("**/api/judgments/*", async (route) => {
+    if (!lostPatchResponse && route.request().method() === "PATCH") {
+      lostPatchResponse = true;
+      await route.fetch();
+      await route.abort("connectionfailed");
+      return;
+    }
+    await route.continue();
+  });
+  const first = page.getByRole("listitem").first();
+  await first
+    .getByLabel("Coach comment for clip 1")
+    .fill("Recovered after lost edit response");
+  await expect(first.getByText("Saved", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(first.getByRole("alert")).toHaveCount(0);
+  expect(lostPatchResponse).toBe(true);
+  await page.unroute("**/api/judgments/*");
+
   const other = await context.newPage();
   await other.goto(page.url());
   const otherFirst = other.getByRole("listitem").first();
@@ -368,7 +389,6 @@ test("five judgment drafts survive a lost response, reload, and stale edit witho
   });
   await other.close();
 
-  const first = page.getByRole("listitem").first();
   await first
     .getByLabel("Coach comment for clip 1")
     .fill("Preserve my local edit");

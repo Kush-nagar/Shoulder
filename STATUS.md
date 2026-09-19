@@ -15,7 +15,7 @@ against Git and GitHub before editing anything.
 | Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
 | Open PRs | #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work and requires its own rebase and verification. Task 16 has no PR yet. |
 | Database revision | `0009_draft_recovery` on this branch; local Postgres 17.6 applied it and passed the database/RLS suite. `Shoulder Dev` is still on `0005_video_ingest`. |
-| Last full verification | Task 16, 2026-09-19: 1,397 Python tests against Postgres 17.6 passed with 2 documented unrelated skips; draft recovery passed 9/9 real browser tests across Chromium, Firefox, and WebKit; `scripts/check.ps1` passed lint, types, unit tests, generated-contract drift, production build, bundle scan, and 3/3 browser smoke tests. |
+| Last full verification | Task 16, 2026-09-19: draft recovery passed 9/9 real browser tests across Chromium, Firefox, and WebKit, including lost create and edit responses plus a genuine stale conflict; `scripts/check.ps1` passed lint, types, 44 web unit tests, 1,397 Python tests (338 DB-dependent skips in that standalone run), generated-contract drift, production build, bundle scan, and 3/3 browser smoke tests. The earlier full Postgres 17.6 database/RLS run passed with 2 documented unrelated skips. |
 | Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it any more - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
 | Next action | Review and merge Task 16, then start Task 17 player-only clip export and batch publication. |
@@ -151,7 +151,8 @@ block, not inside it.
   is implemented and verified on
   `block-04-t16-draft-preservation-and-conflict-recovery`: local drafts save
   on every change, retry interrupted observation creation by client UUID,
-  restore after reload/offline, and preserve both sides of version conflicts.
+  reconcile accepted writes whose responses are lost, restore after
+  reload/offline, and preserve both sides of genuine version conflicts.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
 - Checkout: `D:\Shoulder` sits on `main`; Task 15 is written in its own
   worktree, `D:\Shoulder-agents\block-04-t15-coach-judgments`, on branch

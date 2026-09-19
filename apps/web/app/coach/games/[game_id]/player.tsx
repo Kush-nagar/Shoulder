@@ -250,10 +250,24 @@ export function CoachPlayer({
           },
         );
         if (result.status === 409 && result.current) {
+          const server = result.current as Judgment;
+          const serverSnapshot = snapshot(server);
+          if (contentMatches(draft, serverSnapshot)) {
+            replaceDraft(localId, (item) => ({
+              ...item,
+              observationId: server.observation_id,
+              judgmentId: server.id,
+              version: server.version,
+              synced: serverSnapshot,
+              conflict: null,
+              saveState: "saved",
+            }));
+            return;
+          }
           replaceDraft(localId, (item) => ({
             ...item,
             saveState: "conflict",
-            conflict: snapshot(result.current as Judgment),
+            conflict: serverSnapshot,
           }));
           return;
         }
