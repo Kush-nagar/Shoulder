@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `95cc6ae` |
+| Last verified `main` | `9d12581` (PR #37; carries #36 and #35) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8); Block 02 (Tasks 8-10, PR #10, status sync PR #11); Block 03 (Tasks 11-13, PR #13); Block 04 Task 14 (PR #21) |
 | Current block | Block 04. Task 15 is implemented and waiting in PR #32. No later product task is started. |
 | Current worker / branch | AgentOps three-writer upgrade / `agentops/verdict-sees-clean-review` |
-| Open PRs | #35 local Codex lane and concurrent execution (auto-merge armed); #32 Task 15 (blocked on a stale `verdict`, which #35 fixes); #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and 8 commits behind a much-changed `main`; needs a rebase and its own verification before it can land |
+| Open PRs | #32 Task 15, now choosing an independent reviewer (DeepSeek, since Claude wrote it); #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and 8 commits behind a much-changed `main`; needs a rebase and its own verification before it can land |
 | Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
 | Last full verification | 2026-09-19 on `agentops/verdict-sees-clean-review`: `scripts/check.ps1` end to end, exit 0 - 1334 Python tests (289 skipped, all Docker or remote dependent), of which 976 are AgentOps'; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. Evidence index: `docs/agentops-three-writer-verification.md`. |
 | Blockers | none that require a human before Task 23 |
-| Bootstrap blocker | none; every owner action is complete |
-| Next action | Land #35, then update #32 from `main` so its `verdict` re-runs against the fix and merges. Task 16 then needs its stale `blocked` lease cleared: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the new Codex lane fixes. The coordinator selects tasks by itself; do not dispatch by hand. |
+| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's. Reconnect it only for Codex Cloud reviews specifically. |
+| Next action | Merge #32 once its independent review lands. Task 16 then needs its stale `blocked` lease cleared: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the new Codex lane fixes. The coordinator selects tasks by itself; do not dispatch by hand. |
 
 ### Concurrency and routing, as of 2026-09-19
 
