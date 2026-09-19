@@ -108,7 +108,13 @@ class ReviewLoopCase(unittest.TestCase):
 
         def worker(root, paths, **kwargs):  # type: ignore[no-untyped-def]
             role = kwargs["role"]
-            self.calls.append({"role": role, "model": kwargs["model"]})
+            self.calls.append(
+                {
+                    "role": role,
+                    "model": kwargs["model"],
+                    "prompt": kwargs.get("prompt", ""),
+                }
+            )
             if role == "review":
                 answer = reviews.pop(0) if reviews else clean_review()
                 return {
@@ -179,6 +185,39 @@ class TestTheHappyPath(ReviewLoopCase):
         result = self.run_loop()
         self.assertIn("reviewer", result)
         self.assertIn("reviewer_independent", result)
+
+
+class TestAnEmptyAttemptIsRetriedRatherThanRepaired(ReviewLoopCase):
+    """Task 17 again, one layer below the empty-implementation guard.
+
+    The guard sent the task back to a writer, which was right. What it was
+    sent back with was not: the retry path built a repair brief, and a repair
+    brief opens by telling the writer that a previous attempt is already on
+    the branch with a pull request open, and that its job is to fix the
+    findings below and nothing else. After an empty implementation none of
+    that exists. Both retries read that brief, correctly found nothing to
+    repair, and exited in under four seconds each, so one no-op spent every
+    attempt the task had and blocked a task whose implementation had not
+    started.
+    """
+
+    def implement_prompts(self) -> list[str]:
+        return [call["prompt"] for call in self.calls if call["role"] == "implement"]
+
+    def test_a_retry_after_an_empty_attempt_asks_for_the_implementation(self) -> None:
+        self.run_loop(edits=False)
+        prompts = self.implement_prompts()
+        self.assertGreater(len(prompts), 1, "the empty attempt was never retried")
+        for prompt in prompts[1:]:
+            self.assertNotIn("# Repair brief", prompt)
+            self.assertIn("You are implementing exactly one canonical", prompt)
+
+    def test_a_retry_after_real_work_still_gets_the_repair_brief(self) -> None:
+        """The fix is about an empty branch, not about repairs in general."""
+        self.run_loop(reviews=[clean_review()], verify_ok=[False, True])
+        prompts = self.implement_prompts()
+        self.assertGreater(len(prompts), 1, "the failing check was never repaired")
+        self.assertIn("# Repair brief", prompts[1])
 
 
 class TestReviewCannotBeSkipped(ReviewLoopCase):
