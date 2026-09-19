@@ -275,6 +275,12 @@ test("five judgment drafts survive a lost response, reload, and stale edit witho
   request,
 }) => {
   const { video, videoId } = await readyReview(page, context, request);
+  const expectedBounds = [
+    "0:00–0:01",
+    "0:02–0:03",
+    "0:04–0:05",
+    "0:06–0:07",
+  ];
 
   for (let index = 0; index < 4; index += 1) {
     await video.evaluate((element, seconds) => {
@@ -284,6 +290,9 @@ test("five judgment drafts survive a lost response, reload, and stale edit witho
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("o");
     await expect(page.getByRole("listitem")).toHaveCount(index + 1);
+    await expect(page.getByRole("listitem").nth(index)).toContainText(
+      expectedBounds[index],
+    );
   }
 
   let interrupted = false;
@@ -303,6 +312,7 @@ test("five judgment drafts survive a lost response, reload, and stale edit witho
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("o");
   await expect(page.getByRole("listitem")).toHaveCount(5);
+  await expect(page.getByRole("listitem").nth(4)).toContainText("0:08–0:09");
   await context.setOffline(true);
   await expect(page.getByRole("status")).toHaveText(
     "Offline — saved on this device",

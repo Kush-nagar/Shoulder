@@ -638,7 +638,11 @@ export function CoachPlayer({
       setMarkingMessage("Set an in point first.");
       return;
     }
-    const outMs = Math.round(video.current.currentTime * 1000);
+    // Keyboard seeks update this value synchronously. WebKit may not commit
+    // video.currentTime before the next key arrives, so reading the element
+    // here can collapse a rapid I, ArrowRight, O sequence to a zero-length
+    // clip even though the requested playhead moved.
+    const outMs = Math.round(requestedTimeSeconds.current * 1000);
     if (!validClipBounds(inMs, outMs, durationMs)) {
       setSaveState("Needs attention");
       setMarkingMessage("Choose an out point after the in point.");
