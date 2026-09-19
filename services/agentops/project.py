@@ -155,18 +155,20 @@ def repository(root: Path, repo: str | None = None) -> str:
 
 
 def save(paths: localstate.LocalPaths, **fields: Any) -> dict[str, Any]:
-    """Record where the loop is, merging into what was already there.
+    """Update the project breadcrumb, under the same lock everything else uses.
 
-    Every phase this file has a name for is also derivable from Git, GitHub and
-    the lease ledger, which is what makes resuming safe. This file is the index
-    into those facts, not a second copy of them: it says which task, branch,
-    worktree and pull request to go and look at.
+    This is a read-modify-write on the file `note_in_flight` also writes, so
+    taking the lock in one of them and not the other left the lock protecting
+    nothing: a `save` that read the document before a breadcrumb was added
+    would write it back afterwards and delete it. A task whose breadcrumb is
+    gone keeps its lease, so nothing re-dispatches it and nothing ships it.
     """
-    current = localstate.read(paths.project, {})
-    current.update({k: v for k, v in fields.items() if v is not None})
-    current["updated_at"] = localstate.now()
-    localstate.write(paths.project, current)
-    return current
+
+    def change(stored: dict[str, Any]) -> None:
+        stored.update({k: v for k, v in fields.items() if v is not None})
+        stored["updated_at"] = localstate.now()
+
+    return localstate.mutate(paths, paths.project, change, {})
 
 
 def status(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
@@ -800,19 +802,22 @@ def ship(
 
 
 def _recoverable(
-    ctx: coordinator.Context, stored: Mapping[str, Any]
+    ctx: coordinator.Context, record: Mapping[str, Any]
 ) -> dict[str, Any] | None:
-    """One recorded breadcrumb, if the task it names is still worth resuming."""
-    raw = stored.get("task_id")
+    """One worker's record, if the task it names is still worth resuming."""
+    raw = record.get("task_id")
     if raw is None:
         return None
-    task_id = int(raw)
+    try:
+        task_id = int(raw)
+    except (TypeError, ValueError):
+        return None
     if task_id in state.completed_tasks(ctx.progress):
         return None
     if local.settled_locally(ctx.tasks, task_id) != "ready_for_pr":
         return None
-    branch = str(stored.get("branch") or "")
-    worktree = Path(str(stored.get("worktree") or ""))
+    branch = str(record.get("branch") or "")
+    worktree = Path(str(record.get("worktree") or ""))
     if not branch or not worktree.exists():
         return None
     return {
@@ -821,7 +826,7 @@ def _recoverable(
         "branch": branch,
         "worktree": str(worktree),
         "outcome": "ready_for_pr",
-        "detail": "resumed from the recorded project state",
+        "detail": "resumed from the recorded worker state",
         "resumed": True,
     }
 
@@ -831,27 +836,26 @@ def in_flight_all(
 ) -> list[dict[str, Any]]:
     """Every task a previous run left finished and waiting for a pull request.
 
-    Without this, a run interrupted after `ready_for_pr` could not be resumed:
-    the next start called `run_once`, which correctly refuses to re-dispatch a
-    task already waiting for its pull request, and the loop read that refusal
-    as a human blocker. The breadcrumb plus the lease say which task it is;
-    `ship` is idempotent, so it picks the branch and pull request back up.
+    Read from the worker ledger and the leases, which is to say from what the
+    workers themselves wrote, rather than from a note the coordinator kept
+    about them. That distinction is the whole point. A coordinator-kept note
+    has to be written after the worker has already finished, so a coordinator
+    killed in between -- or one that returned early on `max_tasks`, or stopped
+    on another task's failure -- leaves a finished branch with a held lease
+    and no record: nothing re-dispatches it, because the lease says it is
+    taken, and nothing ships it, because the note was never made. Every worker
+    already records its own task, branch and worktree when it starts, under
+    the same lock everything else uses, so there is nothing left to miss.
 
-    It returns a list because several tasks can now be in flight at once, and a
-    resume that found only the first would strand the others: their leases stay
-    held, so the coordinator would never re-dispatch them and never ship them
-    either. The older single-task breadcrumb is still read, so a run started
-    before this existed still resumes.
+    It returns a list because several tasks can be in flight at once. A resume
+    that found only the first would strand the rest in exactly that way.
     """
-    stored = localstate.read(paths.project, {})
-    records: list[Mapping[str, Any]] = []
-    tasks = stored.get("tasks")
-    if isinstance(tasks, Mapping):
-        records = [row for row in tasks.values() if isinstance(row, Mapping)]
-    elif stored.get("task_id") is not None:
-        records = [stored]
+    ctx_tasks = ctx.tasks or {}
+    leased = set((ctx_tasks.get("leases") or {}).keys())
     out: list[dict[str, Any]] = []
-    for record in records:
+    for key, record in localstate.worker_records(paths).items():
+        if key not in leased and str(record.get("task_id")) not in leased:
+            continue
         found = _recoverable(ctx, record)
         if found is not None:
             out.append(found)
@@ -866,49 +870,12 @@ def in_flight(
     return found[0] if found else None
 
 
-def note_in_flight(paths: localstate.LocalPaths, task_id: int, **fields: Any) -> None:
-    """Record one task's branch and worktree so a restart can find it.
-
-    Written under the ledger lock rather than with `save`, because three
-    workers reach this at once and `save` is a read-modify-write: the last
-    writer would otherwise drop the other two breadcrumbs, and a task whose
-    breadcrumb is gone is a task no resume can ship.
-    """
-
-    def change(stored: dict[str, Any]) -> None:
-        tasks = stored.setdefault("tasks", {})
-        if not isinstance(tasks, dict):
-            tasks = {}
-            stored["tasks"] = tasks
-        row = dict(tasks.get(str(task_id)) or {})
-        row.update({"task_id": task_id, **fields})
-        tasks[str(task_id)] = row
-
-    localstate.mutate(paths, paths.project, change, {})
-
-
-def clear_in_flight(paths: localstate.LocalPaths, task_id: int) -> None:
-    """Forget a task that has merged, so a resume does not try to ship it."""
-
-    def change(stored: dict[str, Any]) -> None:
-        tasks = stored.get("tasks")
-        if isinstance(tasks, dict):
-            tasks.pop(str(task_id), None)
-
-    # Only the in-flight entry is removed. The flat `task_id`/`branch`/
-    # `pull_request` keys are the record of the last task this run shipped,
-    # which `status` and `resume` report; `_recoverable` already refuses to
-    # resume a task that has been reconciled as complete, so leaving them
-    # cannot cause the work to be picked up twice.
-    localstate.mutate(paths, paths.project, change, {})
-
-
 def writer_cap(root: Path, override: int | None = None) -> int:
     """How many tasks may be written at once.
 
-    Policy owns the number so that raising it is a reviewed edit rather than a
-    command-line flag somebody passes once. The override exists for tests and
-    for an operator deliberately running a single writer.
+    Policy owns the number so raising it is a reviewed edit rather than a flag
+    somebody passes once. The override exists for tests and for an operator
+    deliberately running a single writer.
     """
     if override is not None:
         return max(1, int(override))
@@ -1086,16 +1053,6 @@ def run_project(
                         finished = future.result()
                         if finished.get("dispatched"):
                             ready.append(finished)
-                            # Recorded now rather than inside `ship`: the gap
-                            # between a worker finishing and its pull request
-                            # opening is exactly where a crash leaves a branch
-                            # that a resume must still be able to find.
-                            note_in_flight(
-                                paths,
-                                int(finished["task_id"]),
-                                branch=str(finished.get("branch") or ""),
-                                worktree=str(finished.get("worktree") or ""),
-                            )
                         elif not running and not ready:
                             # Nothing eligible while others are still writing
                             # is ordinary -- the rest is waiting on a
@@ -1161,14 +1118,29 @@ def run_project(
                     )
 
                 local.remove_worktree(root, Path(str(result["worktree"])))
-                clear_in_flight(paths, task_id)
                 merged.append(shipped)
                 save(paths, phase="task_merged", merged=len(merged))
         finally:
             # A writer holds a harness process, so the pool is not abandoned on
             # the way out: an interpreter that exits with one still running
             # leaves a worker editing a worktree nobody is watching any more.
+            #
+            # Waiting is not enough by itself. A run that returns on
+            # `max_tasks`, or stops because one task failed, can have two
+            # other writers mid-flight; they finish here, and their results
+            # are collected so the exceptions they raised are not discarded
+            # silently. What makes their branches recoverable is that each
+            # worker recorded its own task, branch and worktree when it
+            # started -- see `in_flight_all` -- so nothing here has to.
             pool.shutdown(wait=True, cancel_futures=True)
+            for future in running:
+                if future.cancelled() or not future.done():
+                    continue
+                failure = future.exception()
+                if failure is not None:
+                    localstate.append_event(
+                        paths, "writer_failed", detail=str(failure)[:300]
+                    )
 
     except Stop as stop:
         save(paths, status=stop.status, phase="stopped", detail=stop.detail)

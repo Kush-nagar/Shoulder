@@ -272,6 +272,12 @@ class Executor(Protocol):
 
     name: str
     provider: str
+    # Whether the prompt is delivered on stdin rather than as the last
+    # argument. It has to be, for anything but a short one: Windows caps a
+    # command line at 32767 characters and a review prompt carries up to 60000
+    # characters of diff, so argv delivery fails outright with
+    # "[WinError 206] The filename or extension is too long".
+    prompt_on_stdin: bool
 
     def available(self) -> tuple[bool, str]:
         """Whether this harness can run here, and why not when it cannot."""
@@ -304,6 +310,12 @@ class ClaudeCliExecutor:
 
     name = "claude-cli"
     provider = "anthropic"
+    # Left on argv, which is how this lane has always run. It shares the
+    # Windows command-line ceiling described on the protocol, so a very large
+    # review prompt will fail here until this lane is moved to stdin too --
+    # that is a change to a working, well-covered path and wants its own
+    # verification against the installed CLI rather than being assumed.
+    prompt_on_stdin = False
 
     def __init__(self, binary: str | None = None) -> None:
         self.binary = binary or CLAUDE_BINARY
@@ -379,6 +391,10 @@ class OpenCodeExecutor:
 
     name = "opencode"
     provider = "openrouter"
+    # OpenCode's published documentation does not specify stdin behaviour for
+    # `opencode run`, and guessing would swap a failure that is loud for one
+    # that is silent.
+    prompt_on_stdin = False
 
     def __init__(self, binary: str | None = None) -> None:
         self.binary = binary or OPENCODE_BINARY
@@ -504,6 +520,11 @@ class CodexCliExecutor:
 
     name = "codex-cli"
     provider = "openai"
+    # `codex exec -` reads the instructions from stdin; verified against the
+    # installed CLI, not inferred. This is what makes a real review possible
+    # here: the prompt carries the diff, and on Windows that is far past what
+    # a command line can hold.
+    prompt_on_stdin = True
 
     def __init__(self, binary: str | None = None, effort: str = "") -> None:
         self.binary = binary or CODEX_BINARY
@@ -577,7 +598,9 @@ class CodexCliExecutor:
         budget: Mapping[str, int],
         prompt: str,
     ) -> list[str]:
-        return [*self.argv(model, role, worktree, budget), prompt]
+        # `-` means "the instructions arrive on stdin". The prompt itself is
+        # deliberately absent from argv; see `prompt_on_stdin`.
+        return [*self.argv(model, role, worktree, budget), "-"]
 
 
 def for_lane(lane: str, harness: str = "", effort: str = "") -> Executor:
@@ -734,15 +757,27 @@ def run(
         worktree=str(worktree),
     )
 
+    # Fed from a file rather than written down a pipe. Writing to stdin while
+    # reading stdout in the same thread deadlocks as soon as the prompt is
+    # bigger than the pipe buffer -- the child blocks writing output nobody is
+    # draining, and the parent blocks writing input nobody is reading -- and a
+    # review prompt is comfortably bigger than the buffer.
+    prompt_file: Path | None = None
+    stdin_handle: Any = subprocess.DEVNULL
+    if getattr(executor, "prompt_on_stdin", False):
+        prompt_file = run_dir / "prompt.txt"
+        prompt_file.write_text(prompt, encoding="utf-8")
+        stdin_handle = prompt_file.open("rb")
+
     spawn = popen or subprocess.Popen
     process = spawn(
         command,
         cwd=str(worktree),
         env=executor.env(os.environ, run_dir),
-        # Closed deliberately. Codex appends whatever it finds on stdin to the
-        # prompt as a `<stdin>` block, and an inherited terminal would leave an
-        # unattended worker waiting for a human who is not there.
-        stdin=subprocess.DEVNULL,
+        # Otherwise closed deliberately. Codex appends whatever it finds on
+        # stdin to the prompt as a `<stdin>` block, and an inherited terminal
+        # would leave an unattended worker waiting for a human who is not there.
+        stdin=stdin_handle,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -750,6 +785,11 @@ def run(
         errors="replace",
         bufsize=1,
     )
+
+    if stdin_handle is not subprocess.DEVNULL:
+        # The child has its own descriptor now. The copy here is closed at
+        # once so the file can be removed the moment the run ends.
+        stdin_handle.close()
 
     if on_spawn is not None and getattr(process, "pid", None):
         on_spawn(int(process.pid))
@@ -784,6 +824,12 @@ def run(
                 stream.flush()
     finally:
         alarm.cancel()
+
+    if prompt_file is not None:
+        # Removed as soon as the harness has read it. `brief.md` keeps the
+        # redacted copy for later; this one is the real text, and it has no
+        # reason to outlive the process that needed it.
+        prompt_file.unlink(missing_ok=True)
 
     stderr = ""
     try:

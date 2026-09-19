@@ -904,8 +904,44 @@ def load_leases(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
     return seeded
 
 
-def save_leases(paths: localstate.LocalPaths, tasks: dict[str, Any]) -> None:
-    localstate.write(paths.leases, tasks)
+def save_leases(
+    paths: localstate.LocalPaths,
+    tasks: dict[str, Any],
+    *,
+    task_id: int | None = None,
+) -> None:
+    """Persist the lease ledger, without discarding anyone else's entry.
+
+    `tasks` is one worker's in-memory snapshot, taken when that worker started.
+    Writing the whole of it back was correct while one writer existed and is a
+    data-loss bug now: a worker that began before its neighbour acquired a
+    lease has never seen that lease, so writing its snapshot deletes it. The
+    neighbour then holds a branch the ledger says nobody holds, the writer cap
+    counts one worker short, and the next coordinator hands the same task out
+    again -- two writers on one branch, which is the failure the lease exists
+    to prevent.
+
+    So a caller that changed one task says which, and only that entry is
+    merged into whatever is on disk now. A caller that legitimately owns the
+    whole document -- the reclaim sweep, or the claim path, both of which hold
+    the schedule lock while they read it -- passes nothing and writes it whole.
+    Either way the read and the write happen under one lock.
+    """
+    if task_id is None:
+        localstate.mutate(paths, paths.leases, lambda stored: stored.update(tasks))
+        return
+
+    key = str(task_id)
+    mine = (tasks.get("leases") or {}).get(key)
+
+    def change(stored: dict[str, Any]) -> None:
+        leases_on_disk = stored.setdefault("leases", {})
+        if mine is None:
+            leases_on_disk.pop(key, None)
+        else:
+            leases_on_disk[key] = mine
+
+    localstate.mutate(paths, paths.leases, change, {"leases": {}})
 
 
 def changed_paths(
@@ -1056,7 +1092,7 @@ def _finish(
         state_name = "ready_for_pr" if outcome != UNREVIEWED else UNREVIEWED
         lease["state"] = state_name
         lease["heartbeat_at"] = localstate.now()
-        save_leases(paths, tasks)
+        save_leases(paths, tasks, task_id=task_id)
         return {"lease_state": state_name, "escalated": False}
 
     if outcome == WAITING_PROVIDER:
@@ -1065,12 +1101,12 @@ def _finish(
         # task parked for one usage window never came back and its worktree
         # sat there forever.
         leases.park(tasks, task_id, reason="provider allowance exhausted")
-        save_leases(paths, tasks)
+        save_leases(paths, tasks, task_id=task_id)
         return {"lease_state": leases.WAITING_PROVIDER, "escalated": False}
 
     if outcome in ("governance_refused", "blocked"):
         leases.release(tasks, task_id, "blocked")
-        save_leases(paths, tasks)
+        save_leases(paths, tasks, task_id=task_id)
         return {"lease_state": "blocked", "escalated": False}
 
     if outcome in REPAIRABLE:
@@ -1078,18 +1114,18 @@ def _finish(
             leases.begin_repair(
                 tasks, dict(policy), task_id, reason="ci", once_key=once_key
             )
-            save_leases(paths, tasks)
+            save_leases(paths, tasks, task_id=task_id)
             return {"lease_state": "repairing", "escalated": True}
         except leases.RepairBudgetExhausted as exhausted:
             leases.release(tasks, task_id, "blocked")
-            save_leases(paths, tasks)
+            save_leases(paths, tasks, task_id=task_id)
             return {
                 "lease_state": "blocked",
                 "escalated": False,
                 "reason": str(exhausted),
             }
 
-    save_leases(paths, tasks)
+    save_leases(paths, tasks, task_id=task_id)
     return {"lease_state": lease.get("state"), "escalated": False}
 
 
@@ -1126,7 +1162,7 @@ def implement_once(
             if lease is not None:
                 lease["pid"] = pid
                 lease["image"] = image
-                save_leases(paths, tasks)
+                save_leases(paths, tasks, task_id=task_id)
 
     run = run_worker(
         root,
@@ -1295,7 +1331,12 @@ def reclaim_abandoned(
         lease["reclaimed_from"] = {"pid": pid, "at": localstate.now()}
         reclaimed.append(int(key))
     if reclaimed:
-        save_leases(paths, tasks)
+        # One entry at a time, because this sweep runs outside the schedule
+        # lock as well as inside it. Writing the whole ledger from a snapshot
+        # taken before the sweep began would delete any lease acquired since
+        # -- reclaiming an abandoned worker by abandoning a live one.
+        for reclaimed_id in reclaimed:
+            save_leases(paths, tasks, task_id=reclaimed_id)
         localstate.append_event(paths, "leases_reclaimed", tasks=reclaimed)
     return reclaimed
 
@@ -1421,7 +1462,7 @@ def run_once(
         return {"dispatched": False, "reason": str(conflict)}
     except leases.AttemptsExhausted as exhausted:
         leases.release(ctx.tasks, candidate.task.id, "blocked")
-        save_leases(paths, ctx.tasks)
+        save_leases(paths, ctx.tasks, task_id=candidate.task.id)
         return {"dispatched": False, "reason": f"BLOCKED_AUTOMATION: {exhausted}"}
 
     task_id = candidate.task.id
@@ -1678,7 +1719,7 @@ def run_once(
                     reason="review",
                     once_key=f"{run_id}-review-{cycle}",
                 )
-                save_leases(paths, ctx.tasks)
+                save_leases(paths, ctx.tasks, task_id=task_id)
             except leases.RepairBudgetExhausted as exhausted:
                 return finish("blocked", str(exhausted))
 

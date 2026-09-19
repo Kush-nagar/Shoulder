@@ -668,11 +668,15 @@ class TestCodexResultParsing(unittest.TestCase):
 
 
 class TestResumeFindsParallelWork(unittest.TestCase):
-    """A restart has to find every branch that was left waiting, not the first.
+    """A restart has to find every branch left waiting, not just the first.
 
-    A task whose breadcrumb is missed keeps its lease, so the coordinator will
-    not re-dispatch it and will never ship it either: the work is finished,
-    pushed nowhere, and invisible.
+    What makes a branch findable is that the worker recorded its own task,
+    branch and worktree when it started. Nothing the coordinator writes
+    afterwards is relied on, because the coordinator is exactly what may have
+    died -- or returned early on `max_tasks`, or stopped because a different
+    task failed. A task whose record is missed keeps its lease, so nothing
+    re-dispatches it and nothing ships it: the work is finished, pushed
+    nowhere, and invisible.
     """
 
     def setUp(self) -> None:
@@ -685,11 +689,15 @@ class TestResumeFindsParallelWork(unittest.TestCase):
             tree = self.root / f"wt-{task_id}"
             tree.mkdir()
             self.trees[task_id] = tree
-            project.note_in_flight(
+            # Exactly what `run_once` writes when it starts a task.
+            localstate.save_worker(
                 self.paths,
-                task_id,
-                branch=f"block-x-t{task_id}",
-                worktree=str(tree),
+                str(task_id),
+                {
+                    "task_id": task_id,
+                    "branch": f"block-x-t{task_id}",
+                    "worktree": str(tree),
+                },
             )
 
     def context(self, ready: tuple[int, ...], done: tuple[int, ...] = ()) -> Any:
@@ -722,43 +730,148 @@ class TestResumeFindsParallelWork(unittest.TestCase):
         self.assertEqual([row["task_id"] for row in found], [15, 17])
 
     def test_a_task_that_is_not_ready_is_not_resumed(self) -> None:
-        found = project.in_flight_all(self.context((15,)), self.paths)
-        self.assertEqual([row["task_id"] for row in found], [15])
+        """A worker still implementing must not be shipped out from under."""
+        ctx = self.context((15, 16, 17))
+        ctx.tasks["leases"]["16"]["state"] = "implementing"
+        found = project.in_flight_all(ctx, self.paths)
+        self.assertEqual([row["task_id"] for row in found], [15, 17])
+
+    def test_a_task_with_no_lease_at_all_is_not_resumed(self) -> None:
+        found = project.in_flight_all(self.context((15, 17)), self.paths)
+        self.assertEqual([row["task_id"] for row in found], [15, 17])
 
     def test_a_vanished_worktree_is_not_resumed(self) -> None:
-        for child in sorted(self.trees[16].rglob("*"), reverse=True):
-            child.unlink()
         self.trees[16].rmdir()
         found = project.in_flight_all(self.context((15, 16, 17)), self.paths)
         self.assertEqual([row["task_id"] for row in found], [15, 17])
 
-    def test_a_merged_task_is_cleared_but_the_record_survives(self) -> None:
-        project.clear_in_flight(self.paths, 16)
+    def test_it_survives_a_coordinator_that_never_got_to_write_anything(
+        self,
+    ) -> None:
+        """The failure the coordinator-kept note could not survive.
+
+        Nothing but the workers' own records exists here -- no project
+        breadcrumb was ever written -- and all three branches are still found.
+        """
+        self.assertFalse(self.paths.project.exists())
         found = project.in_flight_all(self.context((15, 16, 17)), self.paths)
-        self.assertEqual([row["task_id"] for row in found], [15, 17])
+        self.assertEqual(len(found), 3)
 
-    def test_an_older_single_task_breadcrumb_still_resumes(self) -> None:
-        """A run started before this existed must not be stranded by it."""
-        paths = localstate.ensure(localstate.LocalPaths(self.root / "old"))
-        tree = self.root / "old-wt"
-        tree.mkdir()
-        localstate.write(
-            paths.project,
-            {"task_id": 15, "branch": "block-x-t15", "worktree": str(tree)},
-        )
-        found = project.in_flight_all(self.context((15,)), paths)
-        self.assertEqual([row["task_id"] for row in found], [15])
-
-    def test_concurrent_breadcrumbs_do_not_overwrite_each_other(self) -> None:
-        def note(task_id: int) -> None:
-            project.note_in_flight(
-                self.paths, task_id, branch=f"b{task_id}", worktree=str(self.root)
+    def test_concurrent_workers_do_not_overwrite_each_others_records(
+        self,
+    ) -> None:
+        def record(task_id: int) -> None:
+            localstate.save_worker(
+                self.paths,
+                str(task_id),
+                {
+                    "task_id": task_id,
+                    "branch": f"b{task_id}",
+                    "worktree": str(self.root),
+                },
             )
 
         with ThreadPoolExecutor(max_workers=6) as pool:
-            list(pool.map(note, range(100, 130)))
-        stored = localstate.read(self.paths.project)["tasks"]
+            list(pool.map(record, range(100, 130)))
+        stored = localstate.worker_records(self.paths)
         self.assertEqual(len(stored), 33)
+
+
+class TestTheLeaseLedgerSurvivesThreeWriters(unittest.TestCase):
+    """Writing a lease must not delete a lease the writer never saw.
+
+    Each worker holds an in-memory snapshot taken when it started. Writing the
+    whole snapshot back -- which is what `save_leases` did while only one
+    writer existed -- deletes every lease acquired since. The neighbour then
+    holds a branch the ledger says nobody holds, the cap counts short, and the
+    next coordinator hands the same task out again.
+    """
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+        self.paths = localstate.ensure(localstate.LocalPaths(self.root))
+
+    def lease(self, task_id: int, state_name: str = "implementing") -> dict[str, Any]:
+        return {
+            "task_id": task_id,
+            "owner": f"worker-{task_id}",
+            "branch": f"block-x-t{task_id}",
+            "state": state_name,
+            "heartbeat_at": localstate.now(),
+        }
+
+    def test_a_stale_snapshot_does_not_delete_a_newer_lease(self) -> None:
+        # Worker A starts and sees only its own lease.
+        stale = {"leases": {"15": self.lease(15)}}
+        local.save_leases(self.paths, stale, task_id=15)
+        # Worker B acquires afterwards; A never learns about it.
+        fresh = {"leases": {"16": self.lease(16)}}
+        local.save_leases(self.paths, fresh, task_id=16)
+        # A now finishes and writes its own outcome from its old snapshot.
+        stale["leases"]["15"]["state"] = "ready_for_pr"
+        local.save_leases(self.paths, stale, task_id=15)
+
+        on_disk = localstate.read(self.paths.leases)["leases"]
+        self.assertEqual(sorted(on_disk), ["15", "16"])
+        self.assertEqual(on_disk["15"]["state"], "ready_for_pr")
+        self.assertEqual(on_disk["16"]["owner"], "worker-16")
+
+    def test_three_writers_all_keep_their_leases(self) -> None:
+        snapshots = []
+        for task_id in (15, 16, 17):
+            snapshot = {"leases": {str(task_id): self.lease(task_id)}}
+            snapshots.append((task_id, snapshot))
+            local.save_leases(self.paths, snapshot, task_id=task_id)
+        for task_id, snapshot in snapshots:
+            snapshot["leases"][str(task_id)]["state"] = "ready_for_pr"
+            local.save_leases(self.paths, snapshot, task_id=task_id)
+        on_disk = localstate.read(self.paths.leases)["leases"]
+        self.assertEqual(sorted(on_disk), ["15", "16", "17"])
+        for row in on_disk.values():
+            self.assertEqual(row["state"], "ready_for_pr")
+
+    def test_concurrent_lease_writes_keep_every_record(self) -> None:
+        def write(task_id: int) -> None:
+            local.save_leases(
+                self.paths,
+                {"leases": {str(task_id): self.lease(task_id)}},
+                task_id=task_id,
+            )
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            list(pool.map(write, range(20, 50)))
+        self.assertEqual(len(localstate.read(self.paths.leases)["leases"]), 30)
+
+    def test_reclaiming_a_dead_worker_keeps_a_live_workers_lease(self) -> None:
+        """The sweep runs outside the schedule lock as well as inside it.
+
+        Reclaiming an abandoned lease by writing the whole ledger back from a
+        pre-sweep snapshot would delete any lease taken since -- recovering one
+        dead worker by abandoning a live one.
+        """
+        policy = _policy()
+        dead = self.lease(15)
+        dead["pid"] = 999999  # a pid nothing is running under
+        dead["image"] = "no-such-image.exe"
+        tasks = {"leases": {"15": dead}}
+        local.save_leases(self.paths, tasks, task_id=15)
+        # A second worker starts after the snapshot above was taken.
+        local.save_leases(self.paths, {"leases": {"16": self.lease(16)}}, task_id=16)
+
+        reclaimed = local.reclaim_abandoned(self.paths, tasks, policy)
+        self.assertEqual(reclaimed, [15])
+        on_disk = localstate.read(self.paths.leases)["leases"]
+        self.assertEqual(sorted(on_disk), ["15", "16"])
+        self.assertEqual(on_disk["16"]["owner"], "worker-16")
+
+    def test_the_whole_document_may_still_be_written_deliberately(self) -> None:
+        """The reclaim sweep owns the whole ledger and says so by passing none."""
+        local.save_leases(self.paths, {"leases": {"15": self.lease(15)}}, task_id=15)
+        local.save_leases(self.paths, {"leases": {"99": self.lease(99)}})
+        on_disk = localstate.read(self.paths.leases)["leases"]
+        self.assertEqual(sorted(on_disk), ["99"])
 
 
 class TestTheCapIsReadNotHardCoded(unittest.TestCase):
