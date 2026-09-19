@@ -160,12 +160,15 @@ def create_judgment(
 )
 def load_observation_judgment(
     observation_id: UUID,
+    goal_id: UUID,
     response: Response,
     user_id: Annotated[str, Depends(authenticated_identity)],
 ) -> Judgment | None:
     try:
         with user_transaction(user_id) as connection:
-            result = load_observation_judgment_service(connection, observation_id)
+            result = load_observation_judgment_service(
+                connection, observation_id, goal_id
+            )
     except DBAPIError:
         raise unavailable() from None
     if result is None:

@@ -3,6 +3,7 @@ import type { components } from "@shoulder/contracts";
 type Judgment = components["schemas"]["Judgment"];
 
 export type DraftScope = {
+  coachId: string;
   videoId: string;
   playerId: string;
   goalId: string | null;
@@ -104,7 +105,28 @@ function isDraft(value: unknown): value is ReviewDraft {
 }
 
 export function draftStorageKey(scope: DraftScope): string {
-  return `shoulder:review-drafts:v1:${scope.videoId}:${scope.playerId}`;
+  // Every part of the scope is in the key, and the coach is the part that
+  // matters most. Keyed on video and player alone, a second coach signing in
+  // on the same browser profile restored the first coach's unsent drafts --
+  // their comment text and clip marks -- and could submit them under their own
+  // identity. `judgment.author_user_id` comes from the session, so the stored
+  // text and the recorded author would have been two different people.
+  //
+  // The goal is here for a smaller reason with the same shape: restore already
+  // validates it, so a key that omitted it would read the old goal's drafts,
+  // reject them as mismatched, and overwrite them -- losing the drafts of
+  // whichever goal was not being looked at.
+  //
+  // v2 because the shape changed. A v1 entry is left where it is rather than
+  // migrated: it cannot be attributed to a coach, and guessing would be the
+  // bug this fixes.
+  return [
+    "shoulder:review-drafts:v2",
+    scope.coachId,
+    scope.videoId,
+    scope.playerId,
+    scope.goalId ?? "no-goal",
+  ].join(":");
 }
 
 export function serializeDrafts(

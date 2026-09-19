@@ -7,7 +7,16 @@ export async function GET(
 ) {
   const observationId = uuid((await params).observation_id);
   if (!observationId) return badRequest();
-  return forward(request, `/v1/observations/${observationId}/judgment`, "GET");
+  // The judgment is unique per observation and goal, so the goal is part of
+  // the question. Validated here rather than passed through, because `forward`
+  // takes the upstream path and nothing else reaches the API unchecked.
+  const goalId = uuid(request.nextUrl.searchParams.get("goal_id") ?? "");
+  if (!goalId) return badRequest();
+  return forward(
+    request,
+    `/v1/observations/${observationId}/judgment?goal_id=${goalId}`,
+    "GET",
+  );
 }
 
 export async function POST(

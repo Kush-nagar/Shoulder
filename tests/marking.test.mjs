@@ -91,6 +91,7 @@ test("clip bounds must be ordered, non-negative, and within the video", () => {
 
 test("five complete review drafts survive an exact storage round trip", () => {
   const scope = {
+    coachId: "00000000-0000-4000-8000-00000000000c",
     videoId: "10000000-0000-4000-8000-000000000001",
     playerId: "20000000-0000-4000-8000-000000000002",
     goalId: "30000000-0000-4000-8000-000000000003",
@@ -122,12 +123,41 @@ test("five complete review drafts survive an exact storage round trip", () => {
   assert.deepEqual(restoreDrafts(stored, scope), drafts);
   assert.equal(
     draftStorageKey(scope),
-    "shoulder:review-drafts:v1:10000000-0000-4000-8000-000000000001:20000000-0000-4000-8000-000000000002",
+    "shoulder:review-drafts:v2:00000000-0000-4000-8000-00000000000c:10000000-0000-4000-8000-000000000001:20000000-0000-4000-8000-000000000002:30000000-0000-4000-8000-000000000003",
+  );
+});
+
+test("a draft key belongs to one coach, video, player and goal", () => {
+  const base = {
+    coachId: "coach-a",
+    videoId: "video-a",
+    playerId: "player-a",
+    goalId: "goal-a",
+  };
+  const key = draftStorageKey(base);
+  // Two coaches sharing a browser profile must not share a key. Keyed on
+  // video and player alone, the second coach restored the first one's unsent
+  // text and could submit it under their own name.
+  assert.notEqual(draftStorageKey({ ...base, coachId: "coach-b" }), key);
+  // And the goal, because restore validates it: a key that omitted it read
+  // the other goal's drafts, rejected them, then overwrote them.
+  assert.notEqual(draftStorageKey({ ...base, goalId: "goal-b" }), key);
+  assert.notEqual(draftStorageKey({ ...base, videoId: "video-b" }), key);
+  assert.notEqual(draftStorageKey({ ...base, playerId: "player-b" }), key);
+  // A player with no active goal still gets a key of its own.
+  assert.equal(
+    draftStorageKey({ ...base, goalId: null }),
+    "shoulder:review-drafts:v2:coach-a:video-a:player-a:no-goal",
   );
 });
 
 test("draft restore fails closed for corrupt or mismatched local data", () => {
-  const scope = { videoId: "video-a", playerId: "player-a", goalId: "goal-a" };
+  const scope = {
+    coachId: "coach-a",
+    videoId: "video-a",
+    playerId: "player-a",
+    goalId: "goal-a",
+  };
   assert.deepEqual(restoreDrafts("not json", scope), []);
   assert.deepEqual(
     restoreDrafts(

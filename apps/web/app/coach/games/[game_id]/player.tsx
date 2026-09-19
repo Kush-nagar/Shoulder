@@ -13,20 +13,20 @@ import {
   validClipBounds,
 } from "../../../../lib/marking";
 import {
+  contentMatches,
+  type DraftScope,
+  draftStorageKey,
+  type ReviewDraft,
+  restoreDrafts,
+  type SyncedDraft,
+  serializeDrafts,
+} from "../../../../lib/review-drafts";
+import {
   formatClock,
   type SpriteLayout,
   spriteLayout,
   tileOffset,
 } from "../../../../lib/timeline";
-import {
-  contentMatches,
-  draftStorageKey,
-  type DraftScope,
-  type ReviewDraft,
-  restoreDrafts,
-  serializeDrafts,
-  type SyncedDraft,
-} from "../../../../lib/review-drafts";
 import { focus, metadata, panel, secondary } from "../../ui";
 
 /**
@@ -94,12 +94,15 @@ function snapshot(judgment: Judgment): SyncedDraft {
 export function CoachPlayer({
   videoId,
   label,
+  coachId,
   playerId,
   goalId = null,
   initialObservations = [],
 }: {
   videoId: string;
   label: string;
+  /** The signed-in coach. Drafts are stored per coach, never per browser. */
+  coachId: string;
   playerId?: string;
   goalId?: string | null;
   initialObservations?: Observation[];
@@ -129,8 +132,8 @@ export function CoachPlayer({
   const [draftsReady, setDraftsReady] = useState(false);
 
   const scope: DraftScope | null = useMemo(
-    () => (playerId ? { videoId, playerId, goalId } : null),
-    [goalId, playerId, videoId],
+    () => (playerId ? { coachId, videoId, playerId, goalId } : null),
+    [coachId, goalId, playerId, videoId],
   );
 
   const commitDrafts = useCallback(
@@ -273,7 +276,7 @@ export function CoachPlayer({
         }
         if (result.status === 409 && !draft.judgmentId) {
           const existing = await clientRequest<Judgment | null>(
-            `/api/observations/${draft.observationId}/judgment`,
+            `/api/observations/${draft.observationId}/judgment?goal_id=${goalId}`,
           );
           if (existing.data) {
             const server = existing.data;
@@ -329,7 +332,7 @@ export function CoachPlayer({
         syncing.current.delete(localId);
       }
     },
-    [replaceDraft, scheduleSync, scope, videoId],
+    [goalId, replaceDraft, scheduleSync, scope, videoId],
   );
   sendDraftRef.current = sendDraft;
 
@@ -386,7 +389,7 @@ export function CoachPlayer({
         .map(async (draft) => ({
           localId: draft.localId,
           result: await clientRequest<Judgment | null>(
-            `/api/observations/${draft.observationId}/judgment`,
+            `/api/observations/${draft.observationId}/judgment?goal_id=${goalId}`,
           ),
         })),
     ).then((loaded) => {
@@ -456,7 +459,14 @@ export function CoachPlayer({
     return () => {
       alive = false;
     };
-  }, [commitDrafts, initialObservations, replaceDraft, scheduleSync, scope]);
+  }, [
+    commitDrafts,
+    goalId,
+    initialObservations,
+    replaceDraft,
+    scheduleSync,
+    scope,
+  ]);
 
   useEffect(() => {
     const retry = () => {

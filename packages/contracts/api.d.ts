@@ -1596,7 +1596,9 @@ export interface operations {
     };
     load_observation_judgment_v1_observations__observation_id__judgment_get: {
         parameters: {
-            query?: never;
+            query: {
+                goal_id: string;
+            };
             header?: never;
             path: {
                 observation_id: string;
