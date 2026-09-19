@@ -13,7 +13,7 @@ against Git and GitHub before editing anything.
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8); Block 02 (Tasks 8-10, PR #10, status sync PR #11); Block 03 (Tasks 11-13, PR #13); Block 04 Task 14 (PR #21) |
 | Current block | Block 04. Task 15 is implemented and waiting in PR #32. No later product task is started. |
 | Current worker / branch | AgentOps three-writer upgrade / `agentops/verdict-sees-clean-review` |
-| Open PRs | #35 local Codex lane and concurrent execution (auto-merge armed); #32 Task 15 (blocked on a stale `verdict`, which #35 fixes); #27 live bootstrap hotfix from 2026-09-15, superseded by PRs #28-#33 and not rebased |
+| Open PRs | #35 local Codex lane and concurrent execution (auto-merge armed); #32 Task 15 (blocked on a stale `verdict`, which #35 fixes); #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and 8 commits behind a much-changed `main`; needs a rebase and its own verification before it can land |
 | Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
 | Last full verification | 2026-09-19 on `agentops/verdict-sees-clean-review`: `scripts/check.ps1` end to end, exit 0 - 1334 Python tests (289 skipped, all Docker or remote dependent), of which 976 are AgentOps'; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. Evidence index: `docs/agentops-three-writer-verification.md`. |
 | Blockers | none that require a human before Task 23 |
