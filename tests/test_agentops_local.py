@@ -559,6 +559,44 @@ class TestVerdicts(unittest.TestCase):
             "completed",
         )
 
+    def test_a_writer_that_changed_nothing_has_not_implemented(self) -> None:
+        """Task 17: twenty-eight turns, a plan returned, and a clean worktree.
+
+        The harness exited cheerfully, so the run was "ok". Verification then
+        passed trivially -- an unchanged tree is whatever main already was --
+        and the task reached review with an empty diff. The reviewer had
+        nothing to read and the loop stopped on a task nobody had written.
+        """
+        self.assertEqual(
+            local.classify_outcome(
+                {"ok": True, "outcome": "completed"}, {"ok": True}, [], []
+            ),
+            "implementation_failed",
+        )
+
+    def test_a_writer_that_changed_something_is_judged_on_its_tests(self) -> None:
+        self.assertEqual(
+            local.classify_outcome(
+                {"ok": True, "outcome": "completed"}, {"ok": True}, [], ["app.py"]
+            ),
+            "completed",
+        )
+
+    def test_an_empty_change_is_repairable_rather_than_terminal(self) -> None:
+        """So the task goes back to a writer instead of stopping the loop."""
+        self.assertIn("implementation_failed", local.REPAIRABLE)
+
+    def test_governance_still_outranks_an_empty_change(self) -> None:
+        self.assertEqual(
+            local.classify_outcome(
+                {"ok": True, "outcome": "completed"},
+                {"ok": True},
+                ["ops/policy.json"],
+                [],
+            ),
+            "governance_refused",
+        )
+
     def test_verification_failure_blocks_completion(self) -> None:
         self.assertEqual(
             local.classify_outcome(

@@ -42,6 +42,11 @@ pull request. Do not implement around it.
 
 DISCIPLINE = """## Working rules
 
+- Implement this task now, in this worktree. A plan is not the deliverable and
+  neither is a description of what you would do: the branch is read by its
+  diff, and a worker that finishes without changing a file has not done the
+  task. Plan privately if it helps, then write the code.
+
 - Stay inside this task. Do not redesign adjacent systems or start a later task.
 - Public API types come from the FastAPI OpenAPI document. Never hand-write them.
 - Any schema change uses Alembic and includes RLS and grants in this task.
