@@ -23,7 +23,7 @@ from unittest import mock
 
 from agentops_fixtures import REPO_ROOT, installed_harnesses
 
-from services.agentops import local, localstate, state
+from services.agentops import executors, local, localstate, state
 
 
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -100,6 +100,30 @@ class TestTheExecutorCommandLine(LocalCase):
         self.assertNotIn("acceptEdits", argv)
         self.assertNotIn("--permission-mode", argv)
         self.assertNotIn("--permission-prompts", argv)
+
+    def test_no_lane_puts_a_real_review_prompt_on_the_command_line(self) -> None:
+        """Windows caps a command line at 32767 characters.
+
+        A review prompt carries the diff, so it passes that the moment the
+        diff is real. Task 17's reviewer never started: its prompt went in
+        argv, CreateProcess refused the spawn with "[WinError 206] The
+        filename or extension is too long", and the whole project loop died
+        with it. Every lane therefore has to keep the prompt off argv, which
+        is what `prompt_on_stdin` is for.
+        """
+        prompt = "x" * 40_000
+        for lane in ("claude_subscription", "openrouter", "codex_local"):
+            executor = executors.for_lane(lane)
+            command = executor.command(
+                "claude-sonnet-5", "review", self.worktree, {"max_turns": 5}, prompt
+            )
+            with self.subTest(lane=lane):
+                self.assertTrue(
+                    getattr(executor, "prompt_on_stdin", False),
+                    f"{lane} would pass the prompt as an argument",
+                )
+                self.assertNotIn(prompt, command)
+                self.assertLess(len(" ".join(command)), 32_767)
 
     def test_the_prompt_is_never_placed_after_a_variadic_flag(self) -> None:
         """`--add-dir` takes a list, so a prompt after it is read as another

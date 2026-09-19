@@ -398,10 +398,17 @@ class OpenCodeExecutor:
 
     name = "opencode"
     provider = "openrouter"
-    # OpenCode's published documentation does not specify stdin behaviour for
-    # `opencode run`, and guessing would swap a failure that is loud for one
-    # that is silent.
-    prompt_on_stdin = False
+    # OpenCode's published documentation still does not specify stdin
+    # behaviour for `opencode run`, so this was measured rather than assumed:
+    # OpenCode 1.18.31, prompt on stdin and no message argument, returned the
+    # answer and exited 0. The measurement was worth making. `message` is a
+    # variadic positional, so the prompt used to go in argv, and Windows caps a
+    # command line at 32767 characters -- which a review prompt passes the
+    # moment the diff is real. Task 17's reviewer never started: CreateProcess
+    # refused the spawn with "[WinError 206] The filename or extension is too
+    # long" and took the whole loop down with it. Claude's lane was moved to
+    # stdin for this same reason; this is the lane that was left behind.
+    prompt_on_stdin = True
 
     def __init__(self, binary: str | None = None) -> None:
         self.binary = binary or OPENCODE_BINARY
@@ -503,7 +510,9 @@ class OpenCodeExecutor:
         budget: Mapping[str, int],
         prompt: str,
     ) -> list[str]:
-        return [*self.argv(model, role, worktree, budget), prompt]
+        # No message argument: the prompt arrives on stdin. See
+        # `prompt_on_stdin` for why, and for what proves OpenCode reads it.
+        return self.argv(model, role, worktree, budget)
 
 
 class CodexCliExecutor:
