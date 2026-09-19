@@ -483,6 +483,36 @@ class TestReviewWorkflow(unittest.TestCase):
         self.assertEqual(self.text.count("--exclude-mechanism local-cli"), 2)
         self.assertNotIn("needs.choose.outputs.lane == 'codex_local'", self.text)
 
+    def test_choosing_the_reviewer_can_read_the_pull_request(self) -> None:
+        """The writer lane is in the body, so the job has to be able to read it.
+
+        Without `pull-requests: read` the command cannot see the marker,
+        refuses because it cannot establish the writer, and every autonomous
+        pull request fails to choose a reviewer at all -- which is exactly
+        what happened the first time this ran.
+        """
+        choose = self.text.split("  choose:", 1)[1].split("  review:", 1)[0]
+        block = choose.split("permissions:", 1)[1].split("outputs:", 1)[0]
+        # The values only. A comment here mentions the *writer* lane, and
+        # searching the raw text for "write" matched that instead.
+        granted = dict(
+            line.split(":", 1)
+            for line in (row.strip() for row in block.splitlines())
+            if line and not line.startswith("#")
+        )
+        granted = {k.strip(): v.strip() for k, v in granted.items()}
+        self.assertEqual(granted, {"contents": "read", "pull-requests": "read"})
+
+    def test_choosing_the_reviewer_holds_no_provider_secret(self) -> None:
+        """Reading a pull request body must not have widened this job."""
+        choose = self.text.split("  choose:", 1)[1].split("  review:", 1)[0]
+        self.assertNotIn("secrets.", choose)
+
+    def test_a_refused_choice_says_why_in_the_log(self) -> None:
+        """Its answer goes to a redirected file, so a refusal left no trace."""
+        self.assertIn("if ! uv run --locked python -m services.agentops.cli", self.text)
+        self.assertEqual(self.text.count("cat reviewer.json || true"), 2)
+
     def test_the_reviewer_is_told_which_pull_request_it_is(self) -> None:
         """Without it the writer cannot be established, and a guess can name
         the writer as its own reviewer."""

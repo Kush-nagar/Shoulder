@@ -44,6 +44,10 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      # The writer lane is recorded in the pull request body, and reading
+      # it is what keeps the reviewer from being the writer. Still no
+      # provider secrets here: this job runs orchestrator code.
+      pull-requests: read
     outputs:
       task: ${{ steps.pick.outputs.task }}
       lane: ${{ steps.pick.outputs.lane }}
@@ -86,10 +90,18 @@ jobs:
           # a subscription this runner does not have. Choosing one would
           # find no step to run, report success having reviewed nothing,
           # and leave the verdict waiting for a review that cannot arrive.
-          uv run --locked python -m services.agentops.cli reviewer \
+          # Guarded rather than left to `set -e`, which aborts on the
+          # failing command before any exit status can be read. This one
+          # refuses when it cannot establish the writer, and a refusal
+          # whose reason goes to a redirected file leaves nothing to read.
+          if ! uv run --locked python -m services.agentops.cli reviewer \
             --task "$task" --pull-request "$PR" --repo "$REPO" \
             --exclude-mechanism local-cli \
-            > reviewer.json
+            > reviewer.json; then
+            cat reviewer.json >> "$GITHUB_STEP_SUMMARY" || true
+            cat reviewer.json || true
+            exit 1
+          fi
           cat reviewer.json >> "$GITHUB_STEP_SUMMARY"
           echo "task=$task" >> "$GITHUB_OUTPUT"
           echo "lane=$(jq -r '.lane // empty' reviewer.json)" >> "$GITHUB_OUTPUT"
@@ -265,10 +277,19 @@ jobs:
           # a subscription this runner does not have. Choosing one would
           # find no step to run, report success having reviewed nothing,
           # and leave the verdict waiting for a review that cannot arrive.
-          uv run --locked python -m services.agentops.cli reviewer \
+          # Guarded rather than left to `set -e`, which aborts on the
+          # failing command before any exit status can be read. This one
+          # refuses when it cannot establish the writer, and a refusal
+          # whose reason goes to a redirected file leaves nothing to read.
+          if ! uv run --locked python -m services.agentops.cli reviewer \
             --task "$task" --pull-request "$PR" --repo "$REPO" \
             --exclude-mechanism local-cli \
-            > reviewer.json
+            > reviewer.json; then
+            cat reviewer.json >> "$GITHUB_STEP_SUMMARY" || true
+            cat reviewer.json || true
+            exit 1
+          fi
+          cat reviewer.json >> "$GITHUB_STEP_SUMMARY"
           mechanism="$(jq -r '.mechanism // empty' reviewer.json)"
           login="$(jq -r '.review_bot_login // empty' reviewer.json)"
           if [ "$mechanism" = 'github-mention' ]; then
