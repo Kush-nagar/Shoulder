@@ -200,6 +200,29 @@ class TestTheLockItself(unittest.TestCase):
         with localstate.lock(self.paths, "probe", timeout=10):
             pass  # reached, so the dead holder's lock did not survive it
 
+    def test_taking_it_twice_in_one_thread_fails_at_once(self) -> None:
+        """Waiting for yourself must not look like waiting for someone else.
+
+        The lock is a byte range held per file handle and each call opens its
+        own, so it is not reentrant. Without this guard a caller that locks and
+        then calls a helper that locks the same name stalls for the full
+        timeout and then reports that another worker is holding it -- which
+        sends whoever reads the message looking for a process that does not
+        exist.
+        """
+        with localstate.lock(self.paths, "probe"):
+            with self.assertRaises(localstate.LockReentered):
+                with localstate.lock(self.paths, "probe"):
+                    pass
+        # And the guard releases with the lock, so the name is usable again.
+        with localstate.lock(self.paths, "probe", timeout=5):
+            pass
+
+    def test_a_different_name_is_not_blocked_by_the_guard(self) -> None:
+        with localstate.lock(self.paths, "probe"):
+            with localstate.lock(self.paths, "other", timeout=5):
+                pass
+
     def test_a_mutation_is_read_modify_write_under_one_lock(self) -> None:
         def bump(stored: dict[str, Any]) -> None:
             stored["n"] = int(stored.get("n", 0)) + 1

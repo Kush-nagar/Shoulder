@@ -825,17 +825,28 @@ def run(
     finally:
         alarm.cancel()
 
-    if prompt_file is not None:
-        # Removed as soon as the harness has read it. `brief.md` keeps the
-        # redacted copy for later; this one is the real text, and it has no
-        # reason to outlive the process that needed it.
-        prompt_file.unlink(missing_ok=True)
-
     stderr = ""
     try:
         _, stderr = process.communicate(timeout=60)
     except Exception:  # noqa: BLE001 - a hung child must not hang the runtime
         terminate_tree(process)
+
+    if prompt_file is not None:
+        # Removed once the harness has read it and exited. `brief.md` keeps the
+        # redacted copy for later; this one is the real text and has no reason
+        # to outlive the process that needed it.
+        #
+        # After the child is gone, not before: it inherited a descriptor on
+        # this file for its stdin, and Windows refuses to delete a file another
+        # process still holds open -- "[WinError 32] The process cannot access
+        # the file because it is being used by another process", which failed
+        # the whole run over a temporary file. A worker killed by the timeout
+        # can also leave the handle behind, so failing to remove it is logged
+        # by leaving it in the run directory rather than raised.
+        try:
+            prompt_file.unlink(missing_ok=True)
+        except OSError:
+            pass
     if stderr:
         (run_dir / "stderr.log").write_text(
             str(localstate.redact(stderr)), encoding="utf-8"

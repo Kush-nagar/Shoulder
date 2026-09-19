@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -227,9 +228,20 @@ def write(path: Path, data: dict[str, Any]) -> None:
 LOCK_TIMEOUT_SECONDS = 30.0
 LOCK_POLL_SECONDS = 0.02
 
+# Which locks this thread is already inside. The lock is not reentrant -- it is
+# a byte range held per file handle, and each call opens its own -- so a caller
+# that takes it and then calls something that takes it again waits for itself
+# until the timeout and then blames another worker. Tracked so that mistake
+# fails at once and says what it really is.
+_held = threading.local()
+
 
 class LockTimeout(RuntimeError):
     """Another process held this lock for longer than any writer should."""
+
+
+class LockReentered(RuntimeError):
+    """This thread already holds this lock and would be waiting for itself."""
 
 
 @contextmanager
@@ -257,6 +269,13 @@ def lock(
     and `msvcrt.locking` on Windows -- and neither blocks in a way that can be
     bounded portably, so both are polled to a deadline.
     """
+    mine: set[str] = getattr(_held, "names", set())
+    if name in mine:
+        raise LockReentered(
+            f"this thread already holds the {name} lock; taking it again would "
+            "wait for itself. Call the unlocked operation inside the callback "
+            "`mutate` gives you, rather than locking around a locking helper."
+        )
     paths.locks.mkdir(parents=True, exist_ok=True)
     path = paths.locks / f"{name}.lock"
     deadline = time.monotonic() + timeout
@@ -276,9 +295,12 @@ def lock(
                         "another worker is holding it or died while writing"
                     ) from None
                 time.sleep(LOCK_POLL_SECONDS)
+        mine.add(name)
+        _held.names = mine
         try:
             yield
         finally:
+            mine.discard(name)
             try:
                 if sys.platform == "win32":
                     # Windows unlocks the same byte range it locked, and the

@@ -601,9 +601,15 @@ class TestEndToEndFailover(unittest.TestCase):
 
         # Make every lane usable so the only variable is health.
         providers = state.read_json(state.Paths(self.root).providers)
-        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
+        for lane in (
+            "claude_subscription",
+            "openrouter",
+            "codex_cloud",
+            "codex_local",
+        ):
             state.mark_provider(providers, lane, "AVAILABLE", reason="test")
-        state.mark_lane_qualified(providers, "codex_cloud", evidence="test")
+        for lane in ("codex_cloud", "codex_local"):
+            state.mark_lane_qualified(providers, lane, evidence="test")
         # A lane whose privacy is enforced on the provider account stays
         # ineligible until the owner confirms it; this fixture is a fully
         # configured deployment.
@@ -638,9 +644,17 @@ class TestEndToEndFailover(unittest.TestCase):
         state.write_json(paths.providers, providers)
 
     def test_a_backend_task_routes_before_any_failure(self) -> None:
+        """Task 15 carries a security and migration risk, so it starts at Codex.
+
+        The classifier raises it to CRITICAL on those risks alone, which is the
+        class the owner sends to Codex at the top of the effort ladder. An
+        ordinary backend task still starts at Claude; that is asserted in the
+        routing tests, against a classification rather than this one task.
+        """
         built = self.plan_for(15)
         assert built.writer is not None, built.blocked_reason
-        self.assertEqual(built.writer.lane, "claude_subscription")
+        self.assertEqual(built.writer.lane, "codex_local")
+        self.assertEqual(built.writer.effort, "xhigh")
 
     def test_ordinary_backend_work_overflows_to_deepseek(self) -> None:
         """Owner decision, 2026-09-18: DeepSeek is Claude's overflow.
@@ -657,6 +671,8 @@ class TestEndToEndFailover(unittest.TestCase):
         DeepSeek may not write never lands here.
         """
         self.cool("claude_subscription")
+        self.cool("codex_local")
+        self.cool("codex_cloud")
         built = self.plan_for(15)
         assert built.writer is not None, built.blocked_reason
         self.assertEqual(built.writer.lane, "openrouter")
@@ -672,11 +688,12 @@ class TestEndToEndFailover(unittest.TestCase):
     def test_frontend_work_waits_when_every_permitted_lane_cools(self) -> None:
         """It must not fall through to a writer the policy forbids.
 
-        Both lanes allowed to write UI are cooled here. Since the 2026-09-14
-        owner decision that is Claude as well as Codex Cloud; the OpenRouter
+        Every lane allowed to write UI is cooled here -- since 2026-09-18 that
+        is both Codex lanes, Claude having handed frontend back. The OpenRouter
         lane is still forbidden, and that is what must not be promoted.
         """
         self.cool("codex_cloud")
+        self.cool("codex_local")
         self.cool("claude_subscription")
         built = self.plan_for(18)
         self.assertIsNone(built.writer)
@@ -697,14 +714,18 @@ class TestEndToEndFailover(unittest.TestCase):
         )
         state.write_json(paths.providers, providers)
 
-        # Claude is cooled so the recovered lane is the one under test.
+        # The other lanes are cooled so the recovered one is under test.
         self.cool("claude_subscription")
+        self.cool("codex_local")
         built = self.plan_for(18)
         assert built.writer is not None, built.blocked_reason
         self.assertEqual(built.writer.lane, "codex_cloud")
 
     def test_everything_down_blocks_rather_than_improvising(self) -> None:
-        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
+        # Every lane in policy, not a list written out here. A lane added later
+        # is covered the day it is added; a hand-written roster would have gone
+        # on passing while the new lane quietly took the work.
+        for lane in state.read_json(state.Paths(self.root).policy)["lanes"]:
             self.cool(lane)
         built = self.plan_for(15)
         self.assertIsNone(built.writer)
