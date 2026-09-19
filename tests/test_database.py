@@ -891,9 +891,9 @@ class ZMigrationTests(unittest.TestCase):
                 # media membership helpers, the `0007` bounds helper,
                 # `0008`'s four judgment visibility helpers plus its single
                 # write function, and `0010`'s six player/publication helpers,
-                # four coach transitions, two worker functions, finalize,
+                # four coach transitions, three worker functions, finalize,
                 # the failure trigger, and the reserved-edit trigger.
-                self.assertEqual(self.function_count(connection), 32)
+                self.assertEqual(self.function_count(connection), 33)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")

@@ -201,7 +201,6 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "retry_review_publication",
     "cancel_review_publication",
     "withdraw_judgment",
-    "evidence_clip_object_unused",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
