@@ -11,14 +11,14 @@ against Git and GitHub before editing anything.
 |---|---|
 | Last verified `main` | `6cf1c5d` (PR #36; carries #35, #33 and #31 before it) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14-15 merged, Task 16 implemented and verified on this branch. |
-| Current block | Block 04. Task 16 behavior is implemented and locally verified, but its load-bearing browser suite is not invoked by CI. |
+| Current block | Block 04. Task 16 is implemented, and its load-bearing browser suite has been run: `scripts/check-marking.ps1` against real Auth, Postgres and MinIO, 9 of 9 passing in Chromium, Firefox and WebKit, including "five judgment drafts survive a lost response, reload, and stale edit without loss". Awaiting independent review and merge. |
 | Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
 | Open PRs | #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work and requires its own rebase and verification. Task 16 has no PR yet. |
 | Database revision | `0009_draft_recovery` on this branch; local Postgres 17.6 applied it and passed the database/RLS suite. `Shoulder Dev` is still on `0005_video_ingest`. |
 | Last full verification | Task 16, 2026-09-19: draft recovery passed 9/9 real browser tests across Chromium, Firefox, and WebKit, including lost create and edit responses plus a genuine stale conflict; `scripts/check.ps1` passed lint, types, 44 web unit tests, 1,397 Python tests (338 DB-dependent skips in that standalone run), generated-contract drift, production build, bundle scan, and 3/3 browser smoke tests. The earlier full Postgres 17.6 database/RLS run passed with 2 documented unrelated skips. |
-| Blockers | Task 16 cannot meet its CI definition of done without a permitted CI wiring change. `tests/marking.spec.mjs` passes locally but no workflow invokes it; this task explicitly forbids editing `.github/workflows/`. |
+| Blockers | none that require a human before Task 23. See the standing CI gap below: it predates this task and does not block it. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it any more - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Have an authorized workflow owner add the Task 16 marking suite to a CI job with Auth, Postgres, and MinIO, then rerun and review Task 16. Do not start Task 17 first. |
+| Next action | None by hand. Task 16 goes through independent review, CI and merge, then the loop selects Task 17. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -46,6 +46,28 @@ Maintained by `services/agentops/reconcile.py`. Edit around this
 block, not inside it.
 
 <!-- agentops:progress:end -->
+
+### Standing gap: the Docker-backed suites do not run in CI
+
+`scripts/check.ps1`, which is what CI runs, executes the smoke suite only. The
+marking, player, roster, upload, auth and playback-budget suites each need the
+Supabase CLI stack with a real Auth server plus MinIO, and CI substitutes a
+bare `postgres` service. So four of the suites that carry load-bearing
+guarantees run on a workstation and nowhere else.
+
+This is not new and Task 16 did not introduce it: every task from 1 to 15
+shipped this way, including Task 14, which is the task that created
+`tests/marking.spec.mjs`. The worker on Task 16 read
+`docs/11-testing-quality.md`, concluded CI must invoke the suite, and stopped
+rather than editing `.github/workflows/` to add it -- which was the right call,
+because an autonomous branch editing workflow files is exactly what the
+governance guard refuses.
+
+It is recorded here rather than treated as a blocker, because the standard the
+repository actually holds is a local run of the suite, and that run was made:
+9 of 9 in three browsers, on 2026-09-19. Closing the gap means running the
+Supabase stack inside Actions, which is its own piece of work and needs an
+owner decision.
 
 ### Environment limitations on this workstation
 
