@@ -580,13 +580,21 @@ class TestControlCenter(unittest.TestCase):
 class TestFrontendIsNotAStoppingCondition(unittest.TestCase):
     """The loop must not stall on a canonical task that contains UI.
 
-    Owner decision of 2026-09-14. Functional interface work is Claude's; final
-    visual polish is a separate later pass, which is why the brief says so
-    explicitly rather than leaving the writer to guess the scope.
+    Owner decision of 2026-09-14, revised 2026-09-18. Which lane writes the
+    interface has moved between Claude and Codex and may move again; what must
+    not change is that *some* enabled lane can write it, because the day none
+    can is the day the loop stops on the first UI task and waits for a human.
+    So this asserts the property, not the current holder -- the holder is
+    asserted in the routing tests, where changing it is a deliberate edit.
     """
 
-    def test_claude_may_write_the_interface_a_task_requires(self) -> None:
-        self.assertTrue(policy()["lanes"]["claude_subscription"]["may_write_frontend"])
+    def test_some_enabled_lane_may_write_the_interface(self) -> None:
+        writers = [
+            name
+            for name, lane in policy()["lanes"].items()
+            if lane.get("enabled", True) and lane.get("may_write_frontend")
+        ]
+        self.assertTrue(writers, "no enabled lane may write frontend")
 
     def test_the_openrouter_restriction_is_unchanged(self) -> None:
         self.assertFalse(policy()["lanes"]["openrouter"]["may_write_frontend"])

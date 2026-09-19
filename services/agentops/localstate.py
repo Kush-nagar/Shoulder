@@ -17,11 +17,18 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterable, Mapping
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 LOCAL_DIR = Path(".agentops") / "local"
 
@@ -209,6 +216,109 @@ def write(path: Path, data: dict[str, Any]) -> None:
             os.unlink(handle.name)
 
 
+# --------------------------------------------------------------------------
+# Cross-process mutation
+# --------------------------------------------------------------------------
+
+# How long a writer waits for another writer's turn to end before giving up.
+# Every critical section here is a read, a dictionary update and an atomic
+# rename, so it is measured in milliseconds; a wait this long means a holder
+# died mid-write rather than that the system is busy.
+LOCK_TIMEOUT_SECONDS = 30.0
+LOCK_POLL_SECONDS = 0.02
+
+
+class LockTimeout(RuntimeError):
+    """Another process held this lock for longer than any writer should."""
+
+
+@contextmanager
+def lock(
+    paths: LocalPaths, name: str, timeout: float = LOCK_TIMEOUT_SECONDS
+) -> Iterator[None]:
+    """Hold an exclusive cross-process lock named `name`.
+
+    `write` is already atomic, which is enough for one writer and not enough
+    for several: every ledger here is updated by reading it, changing one key
+    and writing it back, and two processes doing that concurrently both read
+    the same version, so the second write silently discards the first. With one
+    worker at a time that could never happen. With three it is a matter of
+    timing, and the lost record would be a lease -- which is to say two writers
+    on one branch, the exact failure the lease exists to prevent.
+
+    The lock is a file rather than a thread primitive because the writers are
+    separate processes, and it is a byte-range lock rather than an
+    exclusive-create lock file because the operating system releases those when
+    the holder dies. A create-and-delete lock file leaves the system wedged if a
+    worker is killed while holding it, which on this runtime is an ordinary
+    event: the timeout path kills a whole process tree.
+
+    The two platforms need different calls -- `fcntl.flock` where there is one
+    and `msvcrt.locking` on Windows -- and neither blocks in a way that can be
+    bounded portably, so both are polled to a deadline.
+    """
+    paths.locks.mkdir(parents=True, exist_ok=True)
+    path = paths.locks / f"{name}.lock"
+    deadline = time.monotonic() + timeout
+    handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        while True:
+            try:
+                if sys.platform == "win32":
+                    msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise LockTimeout(
+                        f"waited {timeout:g}s for the {name} lock; "
+                        "another worker is holding it or died while writing"
+                    ) from None
+                time.sleep(LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            try:
+                if sys.platform == "win32":
+                    # Windows unlocks the same byte range it locked, and the
+                    # file offset has to be back where it started to name it.
+                    os.lseek(handle, 0, os.SEEK_SET)
+                    msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+            except OSError:
+                # Closing the handle releases it on both platforms, so a
+                # failure here is not worth losing the caller's exception over.
+                pass
+    finally:
+        os.close(handle)
+
+
+def mutate(
+    paths: LocalPaths,
+    path: Path,
+    change: Callable[[dict[str, Any]], Any],
+    default: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Read a ledger, change it, and write it back, with nobody else between.
+
+    The whole read-modify-write runs under one lock, which is the only way the
+    sequence is safe: locking the write alone would still let two processes
+    read the same version first and then take turns overwriting each other.
+
+    `change` mutates the dictionary it is handed; its return value is ignored,
+    so a callback that rebuilds rather than mutates has to assign into that
+    same object. The written document is returned for the caller to use.
+    """
+    ensure(paths)
+    with lock(paths, path.stem):
+        data = read(path, default)
+        change(data)
+        write(path, data)
+    return data
+
+
 def load_config(paths: LocalPaths) -> dict[str, Any]:
     """Configuration with defaults filled in for anything not written yet."""
     stored = read(paths.config, {})
@@ -233,8 +343,14 @@ def append_event(paths: LocalPaths, kind: str, /, **fields: Any) -> dict[str, An
     """
     ensure(paths)
     event: dict[str, Any] = redact({"at": now(), "kind": kind, **fields})
-    with paths.events.open("a", encoding="utf-8", newline="\n") as stream:
-        stream.write(json.dumps(event, sort_keys=True) + "\n")
+    line = json.dumps(event, sort_keys=True) + "\n"
+    # An append is close to atomic on both platforms for a line this short, but
+    # "close to" is not a property to hand three concurrent writers. A torn line
+    # is an unparseable event and `events()` drops those silently, so the loss
+    # would never be reported. The lock costs microseconds.
+    with lock(paths, "events"):
+        with paths.events.open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(line)
     return event
 
 
@@ -325,10 +441,19 @@ def worker_records(paths: LocalPaths) -> dict[str, Any]:
 
 
 def save_worker(paths: LocalPaths, key: str, record: dict[str, Any]) -> None:
-    stored = read(paths.workers, {"workers": {}})
-    workers = stored.setdefault("workers", {})
-    workers[key] = {**workers.get(key, {}), **record, "updated_at": now()}
-    write(paths.workers, stored)
+    """Merge one worker's record into the shared ledger.
+
+    Every writable worker writes here and each touches only its own key, so
+    without the lock the damage is not a corrupted record but a vanished one:
+    two workers read the same document, each adds its own key, and the second
+    write drops the first worker's entry entirely.
+    """
+
+    def change(stored: dict[str, Any]) -> None:
+        workers = stored.setdefault("workers", {})
+        workers[key] = {**workers.get(key, {}), **record, "updated_at": now()}
+
+    mutate(paths, paths.workers, change, {"workers": {}})
 
 
 def usage_totals(paths: LocalPaths) -> dict[str, float]:

@@ -24,6 +24,14 @@ current published documentation rather than assumed:
   explicitly denied, and `OPENCODE_CONFIG` points at a config file, so
   permissions and the OpenRouter key can be supplied without writing anything
   into the worktree and without putting the key in argv.
+* Codex CLI 0.154.0: `codex exec --json` emits JSONL whose shapes were read off
+  the installed binary rather than assumed. `-m` selects the model and
+  `-c model_reasoning_effort=<effort>` the effort, so unlike the cloud mention
+  lane this one really is model-enforced; `low`, `medium`, `high` and `xhigh`
+  are all accepted. `--ignore-user-config` drops the workstation's MCP servers
+  and hooks while keeping the ChatGPT subscription auth, which is what makes a
+  worker reproducible. A turn ends at `turn.completed` or `turn.failed`, and
+  the exit code agrees with it.
 """
 
 from __future__ import annotations
@@ -48,10 +56,15 @@ OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
 
 CLAUDE_BINARY = os.environ.get("SHOULDER_CLAUDE_BINARY", "claude")
 OPENCODE_BINARY = os.environ.get("SHOULDER_OPENCODE_BINARY", "opencode")
+CODEX_BINARY = os.environ.get("SHOULDER_CODEX_BINARY", "codex")
 
 # How OpenCode names a model routed through OpenRouter: its provider id, then
 # the OpenRouter model id, which is itself `vendor/model`.
 OPENCODE_PROVIDER = "openrouter"
+
+# Lanes driven by the local Codex CLI. Named here so policy and code cannot
+# drift: `codex_cloud` is the mention lane and is NOT one of these.
+CODEX_LOCAL_LANES = ("codex_local",)
 
 # Read-only roles run in a mode that cannot edit. A reviewer that can edit
 # stops being a reviewer the first time it decides a finding is easier to fix
@@ -67,6 +80,17 @@ def _text_of(event: Mapping[str, Any]) -> str:
     looks in the places both have used and gives up quietly rather than
     failing a run over a log line.
     """
+    # Codex wraps everything it says in `item.completed`, so the readable
+    # part is one level down and has no `content` at all.
+    item = event.get("item")
+    if isinstance(item, Mapping):
+        if isinstance(item.get("text"), str) and item["text"].strip():
+            return str(item["text"]).strip()[:400]
+        kind = str(item.get("type") or "")
+        if kind and kind != "agent_message":
+            label = item.get("command") or item.get("path") or kind
+            return f"tool: {str(label)[:200]}"
+
     message = event.get("message")
     parts: Any = None
     if isinstance(message, Mapping):
@@ -159,7 +183,20 @@ RESET_PATTERN = re.compile(
 
 # Where the harness itself speaks, as opposed to where it relays what a model
 # wrote. Only these are searched.
-RESULT_EVENT_TYPES = ("result", "done", "finish", "error", "summary")
+# `turn.failed` is where Codex puts its refusal, so it has to be searched for
+# an allowance message. Its benign advisories are NOT here: those arrive as
+# `item.completed` carrying an `error` item -- a clamped hook timeout, a
+# shortened skill description -- and reading those as harness failures would
+# fail every Codex run that ever emitted one.
+RESULT_EVENT_TYPES = (
+    "result",
+    "done",
+    "finish",
+    "error",
+    "summary",
+    "turn.completed",
+    "turn.failed",
+)
 ERROR_FIELDS = ("error", "message", "detail", "reason", "subtype", "stop_reason")
 
 
@@ -446,22 +483,126 @@ class OpenCodeExecutor:
         return [*self.argv(model, role, worktree, budget), prompt]
 
 
-def for_lane(lane: str, harness: str = "") -> Executor:
+class CodexCliExecutor:
+    """The Codex CLI against the ChatGPT subscription, on this machine.
+
+    The local counterpart of the `codex_cloud` mention lane, and materially
+    different from it in the one way that matters to routing: a mention carries
+    no model and no reasoning effort, while `codex exec` takes both as
+    arguments. So this lane is model-enforced and the tier the router chose is
+    actually applied rather than merely recorded.
+
+    `--ignore-user-config` is not a detail. Without it a worker inherits this
+    workstation's `~/.codex/config.toml`: its MCP servers (which log
+    authentication failures into the run and can reach the network), its hooks,
+    and whatever model the human last selected. A worker whose behaviour
+    depends on a file nobody reviewed is not reproducible, and the tier the
+    router applied would be silently overridden. Authentication is unaffected,
+    because Codex reads credentials from `CODEX_HOME` rather than from the
+    config file.
+    """
+
+    name = "codex-cli"
+    provider = "openai"
+
+    def __init__(self, binary: str | None = None, effort: str = "") -> None:
+        self.binary = binary or CODEX_BINARY
+        # The router's decision, applied. Empty means "whatever the account
+        # defaults to", which is the honest reading when nobody chose.
+        self.effort = effort
+
+    def available(self) -> tuple[bool, str]:
+        found = shutil.which(self.binary)
+        if not found:
+            return False, (
+                f"{self.binary} is not installed. One-time install: "
+                "npm install -g @openai/codex, then `codex login`"
+            )
+        return True, f"{found}"
+
+    def argv(
+        self, model: str, role: str, worktree: Path, budget: Mapping[str, int]
+    ) -> list[str]:
+        argv = [
+            self.binary,
+            "exec",
+            "--json",
+            "--ignore-user-config",
+            "-C",
+            str(worktree),
+        ]
+        # A lane that cannot be told which model to use reports
+        # "account-configured" rather than a slug. Passing that string to `-m`
+        # would ask Codex for a model of that name, so it is not passed.
+        if model and model != "account-configured":
+            argv += ["-m", model]
+        if self.effort:
+            argv += ["-c", f'model_reasoning_effort="{self.effort}"']
+        if role in READ_ONLY_ROLES:
+            # Codex's own sandbox does the enforcing here, not a prompt.
+            argv += ["-s", "read-only"]
+        else:
+            # The same choice, for the same reason, as the Claude lane's
+            # bypass: `workspace-write` still raises an approval prompt for
+            # every command outside the workspace and blocks the network, so
+            # `uv sync`, `pnpm install` and `scripts/check.ps1` are denied with
+            # nobody attached to answer. The worker is already confined to a
+            # throwaway worktree on a branch of its own, which is where the
+            # real isolation comes from.
+            argv += ["--dangerously-bypass-approvals-and-sandbox"]
+        return argv
+
+    def env(self, base: Mapping[str, str], run_dir: Path) -> dict[str, str]:
+        """The subscription session's environment, with other lanes' keys out.
+
+        A Codex worker has no business reading the OpenRouter or Anthropic
+        credentials, so they are removed rather than inherited. `CODEX_HOME` is
+        left exactly as it is: it is where the ChatGPT login lives.
+        """
+        env = dict(base)
+        for name in (
+            OPENROUTER_KEY_ENV,
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+        ):
+            env.pop(name, None)
+        return env
+
+    def command(
+        self,
+        model: str,
+        role: str,
+        worktree: Path,
+        budget: Mapping[str, int],
+        prompt: str,
+    ) -> list[str]:
+        return [*self.argv(model, role, worktree, budget), prompt]
+
+
+def for_lane(lane: str, harness: str = "", effort: str = "") -> Executor:
     """The harness a lane runs in.
 
     The lane is the decision the router already made, and the family ban in
     policy keeps Anthropic models in the subscription lane, so a lane is enough
     to decide the harness without re-deciding anything.
+
+    `effort` is carried here rather than through the shared `argv` signature
+    because only one harness can act on it. Claude Code and OpenCode have no
+    equivalent argument, so giving all three a parameter two of them ignore
+    would advertise a setting that does not apply.
     """
     if lane == "openrouter":
         return OpenCodeExecutor()
+    if lane in CODEX_LOCAL_LANES:
+        return CodexCliExecutor(effort=effort)
     return ClaudeCliExecutor()
 
 
 def availability() -> dict[str, dict[str, Any]]:
     """What can run here right now, for `doctor` and the dashboard."""
     report: dict[str, dict[str, Any]] = {}
-    for executor in (ClaudeCliExecutor(), OpenCodeExecutor()):
+    for executor in (ClaudeCliExecutor(), CodexCliExecutor(), OpenCodeExecutor()):
         ok, reason = executor.available()
         report[executor.name] = {
             "available": ok,
@@ -570,7 +711,15 @@ def run(
             "pid": None,
         }
 
-    command = executor.command(model, role, worktree, budget, prompt)
+    command = list(executor.command(model, role, worktree, budget, prompt))
+    # Resolved to a real path before spawning, for every harness. Windows
+    # CreateProcess searches PATH but only ever appends `.exe`, so a bare
+    # `codex` or `opencode` -- both installed by npm as `.CMD` shims -- fails
+    # with "The system cannot find the file specified" even though the harness
+    # is installed and `available()` just said so. Only Claude Code escaped it,
+    # by happening to install a real `.EXE`.
+    if not popen:
+        command[0] = shutil.which(command[0]) or command[0]
     timeout = int(budget.get("timeout_seconds", 900))
     started = time.monotonic()
 
@@ -590,6 +739,10 @@ def run(
         command,
         cwd=str(worktree),
         env=executor.env(os.environ, run_dir),
+        # Closed deliberately. Codex appends whatever it finds on stdin to the
+        # prompt as a `<stdin>` block, and an inherited terminal would leave an
+        # unattended worker waiting for a human who is not there.
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -644,15 +797,22 @@ def run(
 
     events = parse_events(lines)
     result_event: dict[str, Any] = {}
+    # Codex says whether the turn worked in the event stream as well as in the
+    # exit code. Both are read: an exit code alone cannot tell a failed turn
+    # from a harness that crashed after a good one.
+    failed_turn = False
     for event in events:
         kind = str(event.get("type") or event.get("event") or "")
-        if kind in ("assistant", "message", "step"):
+        if kind in ("assistant", "message", "step", "item.completed"):
             turns += 1
             text = _text_of(event)
             if text:
                 last_action = text
-        elif kind in ("result", "done", "finish", "summary"):
+        elif kind in ("result", "done", "finish", "summary", "turn.completed"):
             result_event = event
+        elif kind == "turn.failed":
+            result_event = event
+            failed_turn = True
         elif _text_of(event):
             last_action = _text_of(event) or last_action
 
@@ -661,6 +821,7 @@ def run(
     ok_run = (
         (not timed_out.is_set())
         and returncode == 0
+        and not failed_turn
         and subtype in ("", "success", "completed", "ok")
     )
     outcome = "timeout" if timed_out.is_set() else ("completed" if ok_run else "failed")
@@ -683,7 +844,11 @@ def run(
         "turns": turns,
         "elapsed_seconds": round(time.monotonic() - started, 1),
         "pid": getattr(process, "pid", None),
-        "stop_reason": result_event.get("stop_reason") or subtype or None,
+        "stop_reason": (
+            result_event.get("stop_reason")
+            or subtype
+            or ("turn.failed" if failed_turn else None)
+        ),
         "session_id": result_event.get("session_id") or result_event.get("sessionID"),
         "usage": _usage_of(result_event),
         "cost_usd": cost,
@@ -717,5 +882,5 @@ def run(
 def worker_image(executor: Executor | None = None) -> str:
     """The process image a recorded pid should still be running."""
     name = getattr(executor, "name", "claude-cli")
-    base = "opencode" if name == "opencode" else "claude"
+    base = {"opencode": "opencode", "codex-cli": "codex"}.get(name, "claude")
     return f"{base}.exe" if sys.platform == "win32" else base

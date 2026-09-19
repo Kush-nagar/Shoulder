@@ -160,7 +160,7 @@ def make_stale(lease: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any
 
 @contextlib.contextmanager
 def installed_harnesses(
-    *, claude: bool = True, opencode: bool = False
+    *, claude: bool = True, opencode: bool = False, codex: bool = False
 ) -> Iterator[None]:
     """Pin which coding harnesses look installed.
 
@@ -177,6 +177,8 @@ def installed_harnesses(
             return "/usr/bin/claude" if claude else None
         if base.startswith("opencode"):
             return "/usr/bin/opencode" if opencode else None
+        if base.startswith("codex"):
+            return "/usr/bin/codex" if codex else None
         found: str | None = real(name, *args, **kwargs)
         return found
 

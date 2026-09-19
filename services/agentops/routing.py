@@ -157,9 +157,20 @@ def eligible_models(
     banned = tuple(lane.get("banned_namespaces", ()))
     reject_meta = bool(lane.get("reject_meta_routers"))
 
+    # The catalogue assigns each family to exactly one owning lane, which was
+    # fine while one lane per family could run it. Two lanes now reach the same
+    # OpenAI subscription -- the local CLI and the cloud mention -- and only one
+    # of them can own the namespace. So a lane also serves a family it declares
+    # as its own namespace, which is what lets both Codex lanes see the same
+    # models. No other lane's set changes: every other lane already owns the
+    # namespace it declares, and the OpenRouter lane declares `*`, which is not
+    # a family any model has.
+    namespace = lane.get("catalog_namespace")
     out = []
     for model in inputs.models:
-        if model.lane != lane_name or model.deprecated:
+        if model.deprecated:
+            continue
+        if model.lane != lane_name and model.family != namespace:
             continue
         if model.family in banned:
             continue
@@ -233,8 +244,35 @@ def privacy_violation(policy: dict[str, Any], lane: dict[str, Any]) -> str | Non
     return None
 
 
-def _ordered_lanes(policy: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    return sorted(policy["lanes"].items(), key=lambda kv: kv[1]["priority"])
+def _ordered_lanes(
+    policy: dict[str, Any], class_name: str = ""
+) -> list[tuple[str, dict[str, Any]]]:
+    """Lanes in the order this class wants them tried.
+
+    Priority alone could not express the routing table this system actually
+    runs. It is a single global order, so it can say "Codex before Claude" or
+    the reverse, but not "Codex writes the security migration and Claude writes
+    the ordinary endpoint" -- and that distinction is the whole point of having
+    both. The capability class is where difficulty has already been decided, so
+    it is where the preference belongs.
+
+    This reorders; it never admits anything. Every filter in `select` still
+    runs, so a preferred lane that is unhealthy, over budget, unqualified or
+    forbidden to write this category is still rejected and the next lane in the
+    order takes the work. A class that states no preference keeps the global
+    priority order exactly as before.
+    """
+    preferred: list[str] = []
+    if class_name:
+        spec = policy.get("capability_classes", {}).get(class_name, {})
+        preferred = list(spec.get("prefer_lanes", ()))
+
+    def rank(item: tuple[str, dict[str, Any]]) -> tuple[int, int]:
+        name, lane = item
+        first = preferred.index(name) if name in preferred else len(preferred)
+        return (first, lane["priority"])
+
+    return sorted(policy["lanes"].items(), key=rank)
 
 
 def select(
@@ -253,7 +291,7 @@ def select(
     chain: list[tuple[str, str]] = []
     chosen: tuple[str, dict[str, Any], Model] | None = None
 
-    for lane_name, lane in _ordered_lanes(inputs.policy):
+    for lane_name, lane in _ordered_lanes(inputs.policy, class_name):
         if lane_name in exclude_lanes:
             rejections.append(f"{lane_name}: excluded by caller")
             continue
@@ -313,7 +351,16 @@ def select(
     # STRONG_CODING task reads as a decision that was never made and never
     # applied. The class is the real decision; the model is whatever the
     # account has configured.
-    harness_model = model.harness_model if enforced else "account-configured"
+    if enforced:
+        harness_model = model.harness_model
+    else:
+        # A lane whose model does not come from the catalogue may still name the
+        # slug its harness is handed. codex_local does: `codex exec -m` takes
+        # one, and the routed effort reaches `-c model_reasoning_effort`, so
+        # reporting "account-configured" would understate what was applied.
+        # codex_cloud names none, because a mention cannot carry one, and there
+        # the honest answer is still that the account decides.
+        harness_model = str(lane.get("harness_model") or "") or "account-configured"
     preference = inputs.policy["capability_classes"][class_name].get(
         "prefer", "cheapest"
     )
@@ -322,12 +369,17 @@ def select(
         f"{preference} qualified model in lane {lane_name} "
         f"at ${model.input_usd_per_mtok:.3f}/Mtok in"
     )
-    if not enforced:
+    if not enforced and harness_model == "account-configured":
         # Codex Cloud is reached by mentioning @codex on a pull request, and a
         # mention carries no model or effort. The tier is still chosen and
         # recorded so the decision is auditable, but saying it was applied
         # would be false.
         reason += "; tier is advisory, the account's configured Codex model runs"
+    elif not enforced:
+        reason += (
+            f"; model is not catalogue-chosen, the lane runs {harness_model} "
+            f"at {effort} effort"
+        )
     return Assignment(
         lane=lane_name,
         model=model.id,

@@ -282,16 +282,30 @@ class TestClaudeIsPreferred(ClaudeFirstCase):
         self.assertIsNotNone(plan.writer, plan.blocked_reason)
         self.assertEqual(plan.writer.lane, local.CLAUDE_LANE)
 
-    def test_claude_first_permits_the_fallback_lane_as_well(self) -> None:
+    def test_claude_first_permits_the_fallback_lanes_as_well(self) -> None:
+        """Claude first, but not Claude only -- and the set grew on 2026-09-18.
+
+        The name is about preference, not exclusivity: it says which lane runs
+        while its allowance lasts, not which lanes exist. Leaving the Codex
+        subscription out would waste a whole included allowance and leave
+        frontend work with no permitted writer at all.
+        """
         self.assertEqual(
             local.provider_lanes({"provider": "claude-first"}),
-            ("claude_subscription", "openrouter"),
+            ("claude_subscription", "codex_local", "openrouter"),
+        )
+        # Claude is still what runs first.
+        self.assertEqual(
+            local.provider_lanes({"provider": "claude-first"})[0], local.CLAUDE_LANE
         )
 
-    def test_the_status_names_both_lanes(self) -> None:
+    def test_the_status_names_every_permitted_lane(self) -> None:
         status = local.provider_status({"provider": "claude-first"})
         self.assertEqual(status["provider"], "claude-first")
-        self.assertEqual(len(status["lanes"]), 2)
+        self.assertEqual(
+            sorted(status["lanes"]),
+            ["claude_subscription", "codex_local", "openrouter"],
+        )
 
 
 class TestCooldownMovesTheWork(ClaudeFirstCase):
@@ -556,11 +570,18 @@ class TestOnlyApprovedFallbacksRun(ClaudeFirstCase):
 
 
 class TestTheSwitchDoesNotTouchGovernance(ClaudeFirstCase):
-    def test_cloud_autonomy_stays_off_and_the_writer_cap_stays_one(self) -> None:
+    def test_cloud_autonomy_stays_off_and_the_cap_is_not_rewritten(self) -> None:
+        """Recording a local cooldown must not edit governance at all.
+
+        The cap is read rather than asserted to be a particular number: what
+        this test is about is that a local event does not write to the tracked
+        policy, not what the owner has set the cap to.
+        """
+        before = state.load_policy(state.Paths(self.root))["autonomy"]
         local.mark_lane_exhausted(self.paths, local.CLAUDE_LANE, policy=self.ctx.policy)
         policy = state.load_policy(state.Paths(self.root))
         self.assertFalse(policy["autonomy"]["enabled"])
-        self.assertEqual(int(policy["autonomy"]["max_parallel_writers"]), 1)
+        self.assertEqual(policy["autonomy"], before)
 
 
 if __name__ == "__main__":

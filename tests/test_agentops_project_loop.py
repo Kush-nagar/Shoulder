@@ -607,12 +607,15 @@ class TestTheWholeBacklog(ProjectCase):
         self.assertEqual(order, ["select:15", "ship:15", "select:16", "ship:16"])
 
     def test_cloud_autonomy_and_the_writer_cap_are_untouched(self) -> None:
+        before = state.load_policy(state.Paths(self.root))
         self.dispatched = [self.ready(15)]
         self.reconciles = {15}
         self.drive(max_tasks=1)
         policy = state.load_policy(state.Paths(self.root))
         self.assertFalse(policy["autonomy"]["enabled"])
-        self.assertEqual(int(policy["autonomy"]["max_parallel_writers"]), 1)
+        # Unchanged, rather than equal to a number written out here: a run of
+        # the loop must not edit governance, whatever the owner has set.
+        self.assertEqual(policy["autonomy"], before["autonomy"])
         self.assertFalse(policy["gates"]["real_use_gate"])
 
 

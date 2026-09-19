@@ -36,6 +36,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -798,18 +799,10 @@ def ship(
 # --------------------------------------------------------------------------
 
 
-def in_flight(
-    ctx: coordinator.Context, paths: localstate.LocalPaths
+def _recoverable(
+    ctx: coordinator.Context, stored: Mapping[str, Any]
 ) -> dict[str, Any] | None:
-    """The task a previous run left finished and waiting, if there is one.
-
-    Without this, a run interrupted after `ready_for_pr` could not be resumed:
-    the next start called `run_once`, which correctly refuses to re-dispatch a
-    task that is already waiting for its pull request, and the loop read that
-    refusal as a human blocker. The breadcrumb plus the lease say which task it
-    is; `ship` is idempotent, so it picks the branch and pull request back up.
-    """
-    stored = localstate.read(paths.project, {})
+    """One recorded breadcrumb, if the task it names is still worth resuming."""
     raw = stored.get("task_id")
     if raw is None:
         return None
@@ -831,6 +824,112 @@ def in_flight(
         "detail": "resumed from the recorded project state",
         "resumed": True,
     }
+
+
+def in_flight_all(
+    ctx: coordinator.Context, paths: localstate.LocalPaths
+) -> list[dict[str, Any]]:
+    """Every task a previous run left finished and waiting for a pull request.
+
+    Without this, a run interrupted after `ready_for_pr` could not be resumed:
+    the next start called `run_once`, which correctly refuses to re-dispatch a
+    task already waiting for its pull request, and the loop read that refusal
+    as a human blocker. The breadcrumb plus the lease say which task it is;
+    `ship` is idempotent, so it picks the branch and pull request back up.
+
+    It returns a list because several tasks can now be in flight at once, and a
+    resume that found only the first would strand the others: their leases stay
+    held, so the coordinator would never re-dispatch them and never ship them
+    either. The older single-task breadcrumb is still read, so a run started
+    before this existed still resumes.
+    """
+    stored = localstate.read(paths.project, {})
+    records: list[Mapping[str, Any]] = []
+    tasks = stored.get("tasks")
+    if isinstance(tasks, Mapping):
+        records = [row for row in tasks.values() if isinstance(row, Mapping)]
+    elif stored.get("task_id") is not None:
+        records = [stored]
+    out: list[dict[str, Any]] = []
+    for record in records:
+        found = _recoverable(ctx, record)
+        if found is not None:
+            out.append(found)
+    return sorted(out, key=lambda row: int(row["task_id"]))
+
+
+def in_flight(
+    ctx: coordinator.Context, paths: localstate.LocalPaths
+) -> dict[str, Any] | None:
+    """The first task waiting for a pull request, or None."""
+    found = in_flight_all(ctx, paths)
+    return found[0] if found else None
+
+
+def note_in_flight(paths: localstate.LocalPaths, task_id: int, **fields: Any) -> None:
+    """Record one task's branch and worktree so a restart can find it.
+
+    Written under the ledger lock rather than with `save`, because three
+    workers reach this at once and `save` is a read-modify-write: the last
+    writer would otherwise drop the other two breadcrumbs, and a task whose
+    breadcrumb is gone is a task no resume can ship.
+    """
+
+    def change(stored: dict[str, Any]) -> None:
+        tasks = stored.setdefault("tasks", {})
+        if not isinstance(tasks, dict):
+            tasks = {}
+            stored["tasks"] = tasks
+        row = dict(tasks.get(str(task_id)) or {})
+        row.update({"task_id": task_id, **fields})
+        tasks[str(task_id)] = row
+
+    localstate.mutate(paths, paths.project, change, {})
+
+
+def clear_in_flight(paths: localstate.LocalPaths, task_id: int) -> None:
+    """Forget a task that has merged, so a resume does not try to ship it."""
+
+    def change(stored: dict[str, Any]) -> None:
+        tasks = stored.get("tasks")
+        if isinstance(tasks, dict):
+            tasks.pop(str(task_id), None)
+
+    # Only the in-flight entry is removed. The flat `task_id`/`branch`/
+    # `pull_request` keys are the record of the last task this run shipped,
+    # which `status` and `resume` report; `_recoverable` already refuses to
+    # resume a task that has been reconciled as complete, so leaving them
+    # cannot cause the work to be picked up twice.
+    localstate.mutate(paths, paths.project, change, {})
+
+
+def writer_cap(root: Path, override: int | None = None) -> int:
+    """How many tasks may be written at once.
+
+    Policy owns the number so that raising it is a reviewed edit rather than a
+    command-line flag somebody passes once. The override exists for tests and
+    for an operator deliberately running a single writer.
+    """
+    if override is not None:
+        return max(1, int(override))
+    policy = state.read_json(state.Paths(root).policy)
+    return max(1, int(policy["autonomy"]["max_parallel_writers"]))
+
+
+def _why_blocked(ctx: coordinator.Context) -> list[str]:
+    """Why each outstanding task cannot start, for the stop record.
+
+    A loop that halts saying only "nothing could be dispatched" leaves the
+    person reading it to re-derive the answer by hand.
+    """
+    outstanding = set(_outstanding(ctx))
+    out: list[str] = []
+    for candidate in coordinator.candidates(ctx):
+        if candidate.eligible or candidate.task.id not in outstanding:
+            continue
+        for reason in candidate.reasons or ["not eligible"]:
+            out.append(f"task {candidate.task.id}: {reason}")
+    return out
 
 
 def _outstanding(ctx: coordinator.Context) -> list[int]:
@@ -868,12 +967,28 @@ def run_project(
     max_tasks: int | None = None,
     poll_seconds: int = DEFAULT_POLL_SECONDS,
     gate_timeout_seconds: int = DEFAULT_GATE_TIMEOUT_SECONDS,
+    max_writers: int | None = None,
 ) -> dict[str, Any]:
     """Work the backlog until it is finished or something needs a person.
 
-    One task is in flight at a time, by construction: the next task is not even
-    selected until the previous one is merged and reconciled, which is what
-    keeps a dependent task from starting before its prerequisite lands.
+    Implementation runs in parallel and integration does not, and that split is
+    the whole design. Writing is where the wall clock goes -- a worker can hold
+    a harness for ninety minutes -- and each task has its own branch and its
+    own worktree, so several can write at once without seeing each other.
+    Merging cannot overlap: every merge moves `main` and invalidates the CI run
+    of whatever is queued behind it. So writers are dispatched up to the cap
+    and pull requests are shipped one at a time, in the order they became
+    ready.
+
+    Dependencies need no scheduler of their own. A task whose prerequisite has
+    not merged is not eligible, so it is never dispatched and never counted as
+    a free slot; when the prerequisite merges and reconciles, the next pass
+    picks it up. That is the rule the sequential loop already relied on, asked
+    once per pass instead of once per task.
+
+    The cap comes from `autonomy.max_parallel_writers` and is enforced twice:
+    here, and again inside `leases.acquire`, which is the one that counts --
+    it is the check a second coordinator process also passes through.
     """
     localstate.ensure(paths)
     started = datetime.now(UTC)
@@ -895,89 +1010,165 @@ def run_project(
         require_clean_checkout(root, paths)
         target = repository(root, repo)
 
-        while True:
-            require_clean_checkout(root, paths)
-            reconcile_mod.reconcile(root, repo=target)
-            record_ledger(paths, root)
+        cap = writer_cap(root, max_writers)
+        pool = ThreadPoolExecutor(max_workers=cap, thread_name_prefix="agentops")
+        running: set[Future[dict[str, Any]]] = set()
+        ready: list[dict[str, Any]] = []
 
-            ctx = coordinator.load_context(root)
-            ctx.tasks = local.load_leases(root, paths)
-            if not _outstanding(ctx):
-                break
-            if max_tasks is not None and len(merged) >= max_tasks:
-                # A bounded run that did what it was asked is not a completed
-                # project, and saying so would mark the backlog finished.
-                save(paths, status=RUNNING, phase="paused", detail="task limit reached")
-                _mark_runtime(paths, root, "stopped")
-                return {
-                    "status": RUNNING,
-                    "detail": f"stopped after {max_tasks} task(s) as asked",
-                    "merged": merged,
-                    "elapsed_seconds": round(
-                        (datetime.now(UTC) - started).total_seconds(), 1
-                    ),
-                }
-
-            save(paths, phase="selecting")
-            result = in_flight(ctx, paths) or local.run_once(
+        def dispatch() -> dict[str, Any]:
+            """One writer, start to ready-for-review, off the main thread."""
+            return local.run_once(
                 root, paths, verification_kind=verification, review=True
             )
-            if not result.get("dispatched"):
-                raise Stop(
-                    BLOCKED_HUMAN,
-                    str(result.get("reason") or "no task could be dispatched"),
-                    rejections=result.get("rejections") or [],
-                )
 
-            task_id = int(result["task_id"])
-            detail = str(result.get("detail") or "")
-            if result.get("outcome") != "ready_for_pr":
-                waiting = (
-                    result.get("outcome") == local.WAITING_PROVIDER
-                    or BLOCKED_WAITING_PROVIDER in detail
-                )
-                status_name = BLOCKED_WAITING_PROVIDER if waiting else BLOCKED_HUMAN
-                raise Stop(
-                    status_name,
-                    f"task {task_id} ended as {result.get('outcome')}: {detail}",
+        try:
+            while True:
+                require_clean_checkout(root, paths)
+                reconcile_mod.reconcile(root, repo=target)
+                record_ledger(paths, root)
+
+                ctx = coordinator.load_context(root)
+                ctx.tasks = local.load_leases(root, paths)
+                if not _outstanding(ctx) and not running and not ready:
+                    break
+                if max_tasks is not None and len(merged) >= max_tasks:
+                    # A bounded run that did what it was asked is not a
+                    # completed project, and saying so would mark the backlog
+                    # finished.
+                    save(
+                        paths,
+                        status=RUNNING,
+                        phase="paused",
+                        detail="task limit reached",
+                    )
+                    _mark_runtime(paths, root, "stopped")
+                    return {
+                        "status": RUNNING,
+                        "detail": f"stopped after {max_tasks} task(s) as asked",
+                        "merged": merged,
+                        "elapsed_seconds": round(
+                            (datetime.now(UTC) - started).total_seconds(), 1
+                        ),
+                    }
+
+                # Work a previous run left finished is shipped before anything
+                # new starts. Its lease is still held, so leaving it would tie
+                # up a writer slot on a task nothing would ever dispatch.
+                claimed = {int(row["task_id"]) for row in ready}
+                for resumed in in_flight_all(ctx, paths):
+                    if int(resumed["task_id"]) not in claimed:
+                        ready.append(resumed)
+
+                # Top up the writers, but only by as many tasks as could
+                # actually start. Submitting a free slot with nothing eligible
+                # to fill it would spin: the worker returns "no eligible task"
+                # at once and the next pass submits it again.
+                free = cap - len(running)
+                startable = sum(1 for c in coordinator.candidates(ctx) if c.eligible)
+                for _ in range(max(0, min(free, startable))):
+                    running.add(pool.submit(dispatch))
+                if running:
+                    save(paths, phase="implementing", writers=len(running))
+
+                if not running and not ready:
+                    raise Stop(
+                        BLOCKED_HUMAN,
+                        "no task could be dispatched and none is in flight",
+                        rejections=_why_blocked(ctx),
+                    )
+
+                # Only wait when there is nothing to ship. A finished branch
+                # must not sit behind a worker that has an hour left to run.
+                if not ready:
+                    done, _ = wait(list(running), return_when=FIRST_COMPLETED)
+                    for future in done:
+                        running.discard(future)
+                        finished = future.result()
+                        if finished.get("dispatched"):
+                            ready.append(finished)
+                            # Recorded now rather than inside `ship`: the gap
+                            # between a worker finishing and its pull request
+                            # opening is exactly where a crash leaves a branch
+                            # that a resume must still be able to find.
+                            note_in_flight(
+                                paths,
+                                int(finished["task_id"]),
+                                branch=str(finished.get("branch") or ""),
+                                worktree=str(finished.get("worktree") or ""),
+                            )
+                        elif not running and not ready:
+                            # Nothing eligible while others are still writing
+                            # is ordinary -- the rest is waiting on a
+                            # prerequisite. Nothing eligible with nothing left
+                            # running is a stop.
+                            raise Stop(
+                                BLOCKED_HUMAN,
+                                str(
+                                    finished.get("reason")
+                                    or "no task could be dispatched"
+                                ),
+                                rejections=finished.get("rejections") or [],
+                            )
+                if not ready:
+                    continue
+
+                # ---------------------------------------------- integration
+                result = ready.pop(0)
+                task_id = int(result["task_id"])
+                detail = str(result.get("detail") or "")
+                if result.get("outcome") != "ready_for_pr":
+                    waiting = (
+                        result.get("outcome") == local.WAITING_PROVIDER
+                        or BLOCKED_WAITING_PROVIDER in detail
+                    )
+                    status_name = BLOCKED_WAITING_PROVIDER if waiting else BLOCKED_HUMAN
+                    raise Stop(
+                        status_name,
+                        f"task {task_id} ended as {result.get('outcome')}: {detail}",
+                        task_id=task_id,
+                        findings=(result.get("review") or {}).get("findings") or [],
+                    )
+
+                task = ctx.backlog.tasks.get(task_id)
+                shipped = ship(
+                    root,
+                    paths,
                     task_id=task_id,
-                    findings=(result.get("review") or {}).get("findings") or [],
+                    title=task.title if task else str(result["branch"]),
+                    branch=str(result["branch"]),
+                    worktree=Path(str(result["worktree"])),
+                    repo=target,
+                    verification_kind=verification,
+                    poll_seconds=poll_seconds,
+                    gate_timeout_seconds=gate_timeout_seconds,
                 )
 
-            task = ctx.backlog.tasks.get(task_id)
-            shipped = ship(
-                root,
-                paths,
-                task_id=task_id,
-                title=task.title if task else str(result["branch"]),
-                branch=str(result["branch"]),
-                worktree=Path(str(result["worktree"])),
-                repo=target,
-                verification_kind=verification,
-                poll_seconds=poll_seconds,
-                gate_timeout_seconds=gate_timeout_seconds,
-            )
+                save(paths, phase="reconciling")
+                reconcile_mod.reconcile(root, repo=target)
+                record_ledger(paths, root)
+                fetch_main(root, paths)
 
-            save(paths, phase="reconciling")
-            reconcile_mod.reconcile(root, repo=target)
-            record_ledger(paths, root)
-            fetch_main(root, paths)
+                # Proof, not assumption. If the merge did not reach the ledger
+                # the next pass would select the same task again and redo work
+                # that has already landed, so the loop stops instead.
+                after = coordinator.load_context(root)
+                if task_id not in state.completed_tasks(after.progress):
+                    raise Stop(
+                        BLOCKED_HUMAN,
+                        f"pull request {shipped['pull_request']} merged but task "
+                        f"{task_id} was not reconciled as complete",
+                        task_id=task_id,
+                    )
 
-            # Proof, not assumption. If the merge did not reach the ledger the
-            # next pass would select the same task again and redo work that has
-            # already landed, so the loop stops instead.
-            after = coordinator.load_context(root)
-            if task_id not in state.completed_tasks(after.progress):
-                raise Stop(
-                    BLOCKED_HUMAN,
-                    f"pull request {shipped['pull_request']} merged but task "
-                    f"{task_id} was not reconciled as complete",
-                    task_id=task_id,
-                )
-
-            local.remove_worktree(root, Path(str(result["worktree"])))
-            merged.append(shipped)
-            save(paths, phase="task_merged", merged=len(merged))
+                local.remove_worktree(root, Path(str(result["worktree"])))
+                clear_in_flight(paths, task_id)
+                merged.append(shipped)
+                save(paths, phase="task_merged", merged=len(merged))
+        finally:
+            # A writer holds a harness process, so the pool is not abandoned on
+            # the way out: an interpreter that exits with one still running
+            # leaves a worker editing a worktree nobody is watching any more.
+            pool.shutdown(wait=True, cancel_futures=True)
 
     except Stop as stop:
         save(paths, status=stop.status, phase="stopped", detail=stop.detail)
