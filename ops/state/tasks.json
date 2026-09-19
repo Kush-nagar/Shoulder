@@ -36,8 +36,9 @@
       "expires_at": "2026-09-15T04:00:31+00:00",
       "heartbeat_at": "2026-09-15T02:30:59+00:00",
       "owner": "run-34921416961",
+      "released_at": "2026-09-19T08:47:29+00:00",
       "run_id": "34921416961",
-      "state": "abandoned",
+      "state": "merged",
       "task_id": 15,
       "worker_run_attempt": "1",
       "worker_run_id": "34921450581"
