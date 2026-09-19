@@ -169,8 +169,9 @@ class ProjectCase(unittest.TestCase):
         return self.reviews[0] if len(self.reviews) == 1 else self.reviews.pop(0)
 
     def fake_run_once(self, root: Path, paths: Any, **kwargs: Any) -> dict[str, Any]:
-        result = self.dispatched.pop(0)
-        return result
+        if not self.dispatched:
+            return {"dispatched": False, "reason": "no eligible task"}
+        return self.dispatched.pop(0)
 
     def fake_reconcile(self, root: Path, *, repo: str | None = None) -> dict[str, Any]:
         """Complete the tasks whose pull request merged, like the real one."""
@@ -495,12 +496,19 @@ class TestResumingAnInFlightTask(ProjectCase):
         super().setUp()
         self.reconciles = {15}
         self.ready(15)
-        project.save(
+        project.save(self.paths, pull_request=101)
+        # What `run_once` writes when it starts a task. Resume reads this
+        # rather than a note the coordinator kept, so that a coordinator
+        # killed before it could write anything still leaves the branch
+        # findable.
+        localstate.save_worker(
             self.paths,
-            task_id=15,
-            branch="block-x-t1-fixture",
-            worktree=str(Path(self.tmp.name) / "agents" / "block-x-t1-fixture"),
-            pull_request=101,
+            "15",
+            {
+                "task_id": 15,
+                "branch": "block-x-t1-fixture",
+                "worktree": str(Path(self.tmp.name) / "agents" / "block-x-t1-fixture"),
+            },
         )
         leases_file = localstate.read(self.paths.leases, {"leases": {}})
         leases_file["leases"] = {"15": {"task_id": 15, "state": "ready_for_pr"}}
@@ -541,7 +549,10 @@ class TestResumingAnInFlightTask(ProjectCase):
         self.assertIsNone(project.in_flight(self.context(), self.paths))
 
     def test_a_vanished_worktree_is_not_resumed(self) -> None:
-        project.save(self.paths, worktree=str(self.root / "gone"))
+        """The worktree is the work. Without it there is nothing to ship."""
+        localstate.save_worker(
+            self.paths, "15", {"task_id": 15, "worktree": str(self.root / "gone")}
+        )
         self.assertIsNone(project.in_flight(self.context(), self.paths))
 
 
@@ -607,12 +618,15 @@ class TestTheWholeBacklog(ProjectCase):
         self.assertEqual(order, ["select:15", "ship:15", "select:16", "ship:16"])
 
     def test_cloud_autonomy_and_the_writer_cap_are_untouched(self) -> None:
+        before = state.load_policy(state.Paths(self.root))
         self.dispatched = [self.ready(15)]
         self.reconciles = {15}
         self.drive(max_tasks=1)
         policy = state.load_policy(state.Paths(self.root))
         self.assertFalse(policy["autonomy"]["enabled"])
-        self.assertEqual(int(policy["autonomy"]["max_parallel_writers"]), 1)
+        # Unchanged, rather than equal to a number written out here: a run of
+        # the loop must not edit governance, whatever the owner has set.
+        self.assertEqual(policy["autonomy"], before["autonomy"])
         self.assertFalse(policy["gates"]["real_use_gate"])
 
 

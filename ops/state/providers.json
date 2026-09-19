@@ -23,6 +23,11 @@
       "reason": "subscription lane; availability is proven by use",
       "status": "AVAILABLE"
     },
+    "codex_local": {
+      "lane_qualification_evidence": "Codex CLI 0.154.0 driven locally by services.agentops.executors.CodexCliExecutor on 2026-09-19. Writable smoke run on a throwaway worktree: edited a tracked file and returned turn.completed with usage, 15.4s. Read-only review run at high effort read a real 1500-line diff of commit d5fd09a and returned four findings, three of which were genuine defects that are fixed in 47bcf7c. Subscription-backed via codex login, no API key. Model and effort are passed as -m and -c model_reasoning_effort, so unlike codex_cloud the routed tier is applied rather than advisory.",
+      "lane_qualified": true,
+      "lane_qualified_at": "2026-09-19T07:49:10+00:00"
+    },
     "openrouter": {
       "changed_at": "2026-09-14T20:47:52+00:00",
       "failure_count": 0,

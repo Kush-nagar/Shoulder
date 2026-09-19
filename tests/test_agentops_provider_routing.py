@@ -180,19 +180,22 @@ class TestWhatTheStatusSays(ProviderCase):
             ["claude_subscription"],
         )
 
-    def test_auto_reports_both_lanes(self) -> None:
+    def test_auto_reports_every_permitted_lane(self) -> None:
         status = local.provider_status({"provider": "auto"})
         self.assertEqual(status["provider"], "auto")
-        self.assertEqual(len(status["lanes"]), 2)
+        self.assertEqual(
+            sorted(status["lanes"]),
+            ["claude_subscription", "codex_local", "openrouter"],
+        )
 
     def test_auto_is_available_while_any_harness_is_installed(self) -> None:
-        with installed_harnesses(claude=True, opencode=False):
+        with installed_harnesses(claude=True, opencode=False, codex=False):
             self.assertEqual(
                 local.provider_status({"provider": "auto"})["status"], "AVAILABLE"
             )
 
     def test_auto_is_available_later_when_nothing_is_installed(self) -> None:
-        with installed_harnesses(claude=False, opencode=False):
+        with installed_harnesses(claude=False, opencode=False, codex=False):
             self.assertEqual(
                 local.provider_status({"provider": "auto"})["status"], "AVAILABLE_LATER"
             )

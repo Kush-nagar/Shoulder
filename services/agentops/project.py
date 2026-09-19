@@ -36,6 +36,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -154,18 +155,20 @@ def repository(root: Path, repo: str | None = None) -> str:
 
 
 def save(paths: localstate.LocalPaths, **fields: Any) -> dict[str, Any]:
-    """Record where the loop is, merging into what was already there.
+    """Update the project breadcrumb, under the same lock everything else uses.
 
-    Every phase this file has a name for is also derivable from Git, GitHub and
-    the lease ledger, which is what makes resuming safe. This file is the index
-    into those facts, not a second copy of them: it says which task, branch,
-    worktree and pull request to go and look at.
+    This is a read-modify-write on the file `note_in_flight` also writes, so
+    taking the lock in one of them and not the other left the lock protecting
+    nothing: a `save` that read the document before a breadcrumb was added
+    would write it back afterwards and delete it. A task whose breadcrumb is
+    gone keeps its lease, so nothing re-dispatches it and nothing ships it.
     """
-    current = localstate.read(paths.project, {})
-    current.update({k: v for k, v in fields.items() if v is not None})
-    current["updated_at"] = localstate.now()
-    localstate.write(paths.project, current)
-    return current
+
+    def change(stored: dict[str, Any]) -> None:
+        stored.update({k: v for k, v in fields.items() if v is not None})
+        stored["updated_at"] = localstate.now()
+
+    return localstate.mutate(paths, paths.project, change, {})
 
 
 def status(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
@@ -798,28 +801,23 @@ def ship(
 # --------------------------------------------------------------------------
 
 
-def in_flight(
-    ctx: coordinator.Context, paths: localstate.LocalPaths
+def _recoverable(
+    ctx: coordinator.Context, record: Mapping[str, Any]
 ) -> dict[str, Any] | None:
-    """The task a previous run left finished and waiting, if there is one.
-
-    Without this, a run interrupted after `ready_for_pr` could not be resumed:
-    the next start called `run_once`, which correctly refuses to re-dispatch a
-    task that is already waiting for its pull request, and the loop read that
-    refusal as a human blocker. The breadcrumb plus the lease say which task it
-    is; `ship` is idempotent, so it picks the branch and pull request back up.
-    """
-    stored = localstate.read(paths.project, {})
-    raw = stored.get("task_id")
+    """One worker's record, if the task it names is still worth resuming."""
+    raw = record.get("task_id")
     if raw is None:
         return None
-    task_id = int(raw)
+    try:
+        task_id = int(raw)
+    except (TypeError, ValueError):
+        return None
     if task_id in state.completed_tasks(ctx.progress):
         return None
     if local.settled_locally(ctx.tasks, task_id) != "ready_for_pr":
         return None
-    branch = str(stored.get("branch") or "")
-    worktree = Path(str(stored.get("worktree") or ""))
+    branch = str(record.get("branch") or "")
+    worktree = Path(str(record.get("worktree") or ""))
     if not branch or not worktree.exists():
         return None
     return {
@@ -828,9 +826,77 @@ def in_flight(
         "branch": branch,
         "worktree": str(worktree),
         "outcome": "ready_for_pr",
-        "detail": "resumed from the recorded project state",
+        "detail": "resumed from the recorded worker state",
         "resumed": True,
     }
+
+
+def in_flight_all(
+    ctx: coordinator.Context, paths: localstate.LocalPaths
+) -> list[dict[str, Any]]:
+    """Every task a previous run left finished and waiting for a pull request.
+
+    Read from the worker ledger and the leases, which is to say from what the
+    workers themselves wrote, rather than from a note the coordinator kept
+    about them. That distinction is the whole point. A coordinator-kept note
+    has to be written after the worker has already finished, so a coordinator
+    killed in between -- or one that returned early on `max_tasks`, or stopped
+    on another task's failure -- leaves a finished branch with a held lease
+    and no record: nothing re-dispatches it, because the lease says it is
+    taken, and nothing ships it, because the note was never made. Every worker
+    already records its own task, branch and worktree when it starts, under
+    the same lock everything else uses, so there is nothing left to miss.
+
+    It returns a list because several tasks can be in flight at once. A resume
+    that found only the first would strand the rest in exactly that way.
+    """
+    ctx_tasks = ctx.tasks or {}
+    leased = set((ctx_tasks.get("leases") or {}).keys())
+    out: list[dict[str, Any]] = []
+    for key, record in localstate.worker_records(paths).items():
+        if key not in leased and str(record.get("task_id")) not in leased:
+            continue
+        found = _recoverable(ctx, record)
+        if found is not None:
+            out.append(found)
+    return sorted(out, key=lambda row: int(row["task_id"]))
+
+
+def in_flight(
+    ctx: coordinator.Context, paths: localstate.LocalPaths
+) -> dict[str, Any] | None:
+    """The first task waiting for a pull request, or None."""
+    found = in_flight_all(ctx, paths)
+    return found[0] if found else None
+
+
+def writer_cap(root: Path, override: int | None = None) -> int:
+    """How many tasks may be written at once.
+
+    Policy owns the number so raising it is a reviewed edit rather than a flag
+    somebody passes once. The override exists for tests and for an operator
+    deliberately running a single writer.
+    """
+    if override is not None:
+        return max(1, int(override))
+    policy = state.read_json(state.Paths(root).policy)
+    return max(1, int(policy["autonomy"]["max_parallel_writers"]))
+
+
+def _why_blocked(ctx: coordinator.Context) -> list[str]:
+    """Why each outstanding task cannot start, for the stop record.
+
+    A loop that halts saying only "nothing could be dispatched" leaves the
+    person reading it to re-derive the answer by hand.
+    """
+    outstanding = set(_outstanding(ctx))
+    out: list[str] = []
+    for candidate in coordinator.candidates(ctx):
+        if candidate.eligible or candidate.task.id not in outstanding:
+            continue
+        for reason in candidate.reasons or ["not eligible"]:
+            out.append(f"task {candidate.task.id}: {reason}")
+    return out
 
 
 def _outstanding(ctx: coordinator.Context) -> list[int]:
@@ -868,12 +934,28 @@ def run_project(
     max_tasks: int | None = None,
     poll_seconds: int = DEFAULT_POLL_SECONDS,
     gate_timeout_seconds: int = DEFAULT_GATE_TIMEOUT_SECONDS,
+    max_writers: int | None = None,
 ) -> dict[str, Any]:
     """Work the backlog until it is finished or something needs a person.
 
-    One task is in flight at a time, by construction: the next task is not even
-    selected until the previous one is merged and reconciled, which is what
-    keeps a dependent task from starting before its prerequisite lands.
+    Implementation runs in parallel and integration does not, and that split is
+    the whole design. Writing is where the wall clock goes -- a worker can hold
+    a harness for ninety minutes -- and each task has its own branch and its
+    own worktree, so several can write at once without seeing each other.
+    Merging cannot overlap: every merge moves `main` and invalidates the CI run
+    of whatever is queued behind it. So writers are dispatched up to the cap
+    and pull requests are shipped one at a time, in the order they became
+    ready.
+
+    Dependencies need no scheduler of their own. A task whose prerequisite has
+    not merged is not eligible, so it is never dispatched and never counted as
+    a free slot; when the prerequisite merges and reconciles, the next pass
+    picks it up. That is the rule the sequential loop already relied on, asked
+    once per pass instead of once per task.
+
+    The cap comes from `autonomy.max_parallel_writers` and is enforced twice:
+    here, and again inside `leases.acquire`, which is the one that counts --
+    it is the check a second coordinator process also passes through.
     """
     localstate.ensure(paths)
     started = datetime.now(UTC)
@@ -895,89 +977,170 @@ def run_project(
         require_clean_checkout(root, paths)
         target = repository(root, repo)
 
-        while True:
-            require_clean_checkout(root, paths)
-            reconcile_mod.reconcile(root, repo=target)
-            record_ledger(paths, root)
+        cap = writer_cap(root, max_writers)
+        pool = ThreadPoolExecutor(max_workers=cap, thread_name_prefix="agentops")
+        running: set[Future[dict[str, Any]]] = set()
+        ready: list[dict[str, Any]] = []
 
-            ctx = coordinator.load_context(root)
-            ctx.tasks = local.load_leases(root, paths)
-            if not _outstanding(ctx):
-                break
-            if max_tasks is not None and len(merged) >= max_tasks:
-                # A bounded run that did what it was asked is not a completed
-                # project, and saying so would mark the backlog finished.
-                save(paths, status=RUNNING, phase="paused", detail="task limit reached")
-                _mark_runtime(paths, root, "stopped")
-                return {
-                    "status": RUNNING,
-                    "detail": f"stopped after {max_tasks} task(s) as asked",
-                    "merged": merged,
-                    "elapsed_seconds": round(
-                        (datetime.now(UTC) - started).total_seconds(), 1
-                    ),
-                }
-
-            save(paths, phase="selecting")
-            result = in_flight(ctx, paths) or local.run_once(
+        def dispatch() -> dict[str, Any]:
+            """One writer, start to ready-for-review, off the main thread."""
+            return local.run_once(
                 root, paths, verification_kind=verification, review=True
             )
-            if not result.get("dispatched"):
-                raise Stop(
-                    BLOCKED_HUMAN,
-                    str(result.get("reason") or "no task could be dispatched"),
-                    rejections=result.get("rejections") or [],
-                )
 
-            task_id = int(result["task_id"])
-            detail = str(result.get("detail") or "")
-            if result.get("outcome") != "ready_for_pr":
-                waiting = (
-                    result.get("outcome") == local.WAITING_PROVIDER
-                    or BLOCKED_WAITING_PROVIDER in detail
-                )
-                status_name = BLOCKED_WAITING_PROVIDER if waiting else BLOCKED_HUMAN
-                raise Stop(
-                    status_name,
-                    f"task {task_id} ended as {result.get('outcome')}: {detail}",
+        try:
+            while True:
+                require_clean_checkout(root, paths)
+                reconcile_mod.reconcile(root, repo=target)
+                record_ledger(paths, root)
+
+                ctx = coordinator.load_context(root)
+                ctx.tasks = local.load_leases(root, paths)
+                if not _outstanding(ctx) and not running and not ready:
+                    break
+                if max_tasks is not None and len(merged) >= max_tasks:
+                    # A bounded run that did what it was asked is not a
+                    # completed project, and saying so would mark the backlog
+                    # finished.
+                    save(
+                        paths,
+                        status=RUNNING,
+                        phase="paused",
+                        detail="task limit reached",
+                    )
+                    _mark_runtime(paths, root, "stopped")
+                    return {
+                        "status": RUNNING,
+                        "detail": f"stopped after {max_tasks} task(s) as asked",
+                        "merged": merged,
+                        "elapsed_seconds": round(
+                            (datetime.now(UTC) - started).total_seconds(), 1
+                        ),
+                    }
+
+                # Work a previous run left finished is shipped before anything
+                # new starts. Its lease is still held, so leaving it would tie
+                # up a writer slot on a task nothing would ever dispatch.
+                claimed = {int(row["task_id"]) for row in ready}
+                for resumed in in_flight_all(ctx, paths):
+                    if int(resumed["task_id"]) not in claimed:
+                        ready.append(resumed)
+
+                # Top up the writers, but only by as many tasks as could
+                # actually start. Submitting a free slot with nothing eligible
+                # to fill it would spin: the worker returns "no eligible task"
+                # at once and the next pass submits it again.
+                free = cap - len(running)
+                startable = sum(1 for c in coordinator.candidates(ctx) if c.eligible)
+                for _ in range(max(0, min(free, startable))):
+                    running.add(pool.submit(dispatch))
+                if running:
+                    save(paths, phase="implementing", writers=len(running))
+
+                if not running and not ready:
+                    raise Stop(
+                        BLOCKED_HUMAN,
+                        "no task could be dispatched and none is in flight",
+                        rejections=_why_blocked(ctx),
+                    )
+
+                # Only wait when there is nothing to ship. A finished branch
+                # must not sit behind a worker that has an hour left to run.
+                if not ready:
+                    done, _ = wait(list(running), return_when=FIRST_COMPLETED)
+                    for future in done:
+                        running.discard(future)
+                        finished = future.result()
+                        if finished.get("dispatched"):
+                            ready.append(finished)
+                        elif not running and not ready:
+                            # Nothing eligible while others are still writing
+                            # is ordinary -- the rest is waiting on a
+                            # prerequisite. Nothing eligible with nothing left
+                            # running is a stop.
+                            raise Stop(
+                                BLOCKED_HUMAN,
+                                str(
+                                    finished.get("reason")
+                                    or "no task could be dispatched"
+                                ),
+                                rejections=finished.get("rejections") or [],
+                            )
+                if not ready:
+                    continue
+
+                # ---------------------------------------------- integration
+                result = ready.pop(0)
+                task_id = int(result["task_id"])
+                detail = str(result.get("detail") or "")
+                if result.get("outcome") != "ready_for_pr":
+                    waiting = (
+                        result.get("outcome") == local.WAITING_PROVIDER
+                        or BLOCKED_WAITING_PROVIDER in detail
+                    )
+                    status_name = BLOCKED_WAITING_PROVIDER if waiting else BLOCKED_HUMAN
+                    raise Stop(
+                        status_name,
+                        f"task {task_id} ended as {result.get('outcome')}: {detail}",
+                        task_id=task_id,
+                        findings=(result.get("review") or {}).get("findings") or [],
+                    )
+
+                task = ctx.backlog.tasks.get(task_id)
+                shipped = ship(
+                    root,
+                    paths,
                     task_id=task_id,
-                    findings=(result.get("review") or {}).get("findings") or [],
+                    title=task.title if task else str(result["branch"]),
+                    branch=str(result["branch"]),
+                    worktree=Path(str(result["worktree"])),
+                    repo=target,
+                    verification_kind=verification,
+                    poll_seconds=poll_seconds,
+                    gate_timeout_seconds=gate_timeout_seconds,
                 )
 
-            task = ctx.backlog.tasks.get(task_id)
-            shipped = ship(
-                root,
-                paths,
-                task_id=task_id,
-                title=task.title if task else str(result["branch"]),
-                branch=str(result["branch"]),
-                worktree=Path(str(result["worktree"])),
-                repo=target,
-                verification_kind=verification,
-                poll_seconds=poll_seconds,
-                gate_timeout_seconds=gate_timeout_seconds,
-            )
+                save(paths, phase="reconciling")
+                reconcile_mod.reconcile(root, repo=target)
+                record_ledger(paths, root)
+                fetch_main(root, paths)
 
-            save(paths, phase="reconciling")
-            reconcile_mod.reconcile(root, repo=target)
-            record_ledger(paths, root)
-            fetch_main(root, paths)
+                # Proof, not assumption. If the merge did not reach the ledger
+                # the next pass would select the same task again and redo work
+                # that has already landed, so the loop stops instead.
+                after = coordinator.load_context(root)
+                if task_id not in state.completed_tasks(after.progress):
+                    raise Stop(
+                        BLOCKED_HUMAN,
+                        f"pull request {shipped['pull_request']} merged but task "
+                        f"{task_id} was not reconciled as complete",
+                        task_id=task_id,
+                    )
 
-            # Proof, not assumption. If the merge did not reach the ledger the
-            # next pass would select the same task again and redo work that has
-            # already landed, so the loop stops instead.
-            after = coordinator.load_context(root)
-            if task_id not in state.completed_tasks(after.progress):
-                raise Stop(
-                    BLOCKED_HUMAN,
-                    f"pull request {shipped['pull_request']} merged but task "
-                    f"{task_id} was not reconciled as complete",
-                    task_id=task_id,
-                )
-
-            local.remove_worktree(root, Path(str(result["worktree"])))
-            merged.append(shipped)
-            save(paths, phase="task_merged", merged=len(merged))
+                local.remove_worktree(root, Path(str(result["worktree"])))
+                merged.append(shipped)
+                save(paths, phase="task_merged", merged=len(merged))
+        finally:
+            # A writer holds a harness process, so the pool is not abandoned on
+            # the way out: an interpreter that exits with one still running
+            # leaves a worker editing a worktree nobody is watching any more.
+            #
+            # Waiting is not enough by itself. A run that returns on
+            # `max_tasks`, or stops because one task failed, can have two
+            # other writers mid-flight; they finish here, and their results
+            # are collected so the exceptions they raised are not discarded
+            # silently. What makes their branches recoverable is that each
+            # worker recorded its own task, branch and worktree when it
+            # started -- see `in_flight_all` -- so nothing here has to.
+            pool.shutdown(wait=True, cancel_futures=True)
+            for future in running:
+                if future.cancelled() or not future.done():
+                    continue
+                failure = future.exception()
+                if failure is not None:
+                    localstate.append_event(
+                        paths, "writer_failed", detail=str(failure)[:300]
+                    )
 
     except Stop as stop:
         save(paths, status=stop.status, phase="stopped", detail=stop.detail)

@@ -25,3 +25,8 @@ datasets/
 weights/
 frames/
 .agentops/
+
+# Knowledge-graph output from the graphify skill: a local cache, not a build
+# artifact anything here reads. Ignored so an unattended `git add -A` cannot
+# sweep several hundred generated files into a task branch.
+graphify-out/

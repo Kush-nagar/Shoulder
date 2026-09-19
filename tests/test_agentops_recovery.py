@@ -54,18 +54,28 @@ class TestLeaseExclusivity(unittest.TestCase):
         self.assertIn("worker-a", str(raised.exception))
 
     def test_parallel_writer_limit_is_enforced(self) -> None:
-        """52. Concurrency never exceeds the configured ceiling."""
-        self.assertEqual(self.policy["autonomy"]["max_parallel_writers"], 1)
-        self._acquire("worker-a", task_id=14)
+        """52. Concurrency never exceeds the configured ceiling.
+
+        The ceiling is whatever policy says -- it was 1 until 2026-09-19 and is
+        3 now -- so the test fills it rather than naming it. Pinning the number
+        here would make raising the cap look like a broken invariant instead of
+        the deliberate edit it is, and would stop testing the thing that
+        matters: that the writer after the last permitted one is refused.
+        """
+        cap = int(self.policy["autonomy"]["max_parallel_writers"])
+        for index in range(cap):
+            self._acquire(f"worker-{index}", task_id=14 + index)
         with self.assertRaises(leases.LeaseConflict) as raised:
-            self._acquire("worker-b", task_id=15)
+            self._acquire("worker-over", task_id=14 + cap)
         self.assertIn("max_parallel_writers", str(raised.exception))
 
-    def test_raising_the_limit_allows_a_second_writer(self) -> None:
-        self.policy["autonomy"]["max_parallel_writers"] = 2
-        self._acquire("worker-a", task_id=14)
-        second = self._acquire("worker-b", task_id=15)
-        self.assertEqual(second["owner"], "worker-b")
+    def test_raising_the_limit_allows_another_writer(self) -> None:
+        cap = int(self.policy["autonomy"]["max_parallel_writers"])
+        self.policy["autonomy"]["max_parallel_writers"] = cap + 1
+        for index in range(cap):
+            self._acquire(f"worker-{index}", task_id=14 + index)
+        extra = self._acquire("worker-extra", task_id=14 + cap)
+        self.assertEqual(extra["owner"], "worker-extra")
 
     def test_released_lease_frees_the_task(self) -> None:
         self._acquire("worker-a")
@@ -591,9 +601,15 @@ class TestEndToEndFailover(unittest.TestCase):
 
         # Make every lane usable so the only variable is health.
         providers = state.read_json(state.Paths(self.root).providers)
-        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
+        for lane in (
+            "claude_subscription",
+            "openrouter",
+            "codex_cloud",
+            "codex_local",
+        ):
             state.mark_provider(providers, lane, "AVAILABLE", reason="test")
-        state.mark_lane_qualified(providers, "codex_cloud", evidence="test")
+        for lane in ("codex_cloud", "codex_local"):
+            state.mark_lane_qualified(providers, lane, evidence="test")
         # A lane whose privacy is enforced on the provider account stays
         # ineligible until the owner confirms it; this fixture is a fully
         # configured deployment.
@@ -628,39 +644,56 @@ class TestEndToEndFailover(unittest.TestCase):
         state.write_json(paths.providers, providers)
 
     def test_a_backend_task_routes_before_any_failure(self) -> None:
+        """Task 15 carries a security and migration risk, so it starts at Codex.
+
+        The classifier raises it to CRITICAL on those risks alone, which is the
+        class the owner sends to Codex at the top of the effort ladder. An
+        ordinary backend task still starts at Claude; that is asserted in the
+        routing tests, against a classification rather than this one task.
+        """
         built = self.plan_for(15)
         assert built.writer is not None, built.blocked_reason
-        self.assertEqual(built.writer.lane, "claude_subscription")
+        self.assertEqual(built.writer.lane, "codex_local")
+        self.assertEqual(built.writer.effort, "xhigh")
 
-    def test_backend_work_prefers_the_other_subscription_lane(self) -> None:
-        """Paid credits are the last resort, not the first fallback.
+    def test_ordinary_backend_work_overflows_to_deepseek(self) -> None:
+        """Owner decision, 2026-09-18: DeepSeek is Claude's overflow.
 
-        With Claude cooled, Codex Cloud takes the work because it is also
-        subscription-backed. Reaching for metered OpenRouter capacity while an
-        included allowance sits unused would be the more expensive choice.
+        This inverts what was asserted here before, and the reason is which
+        resource is actually scarce. The older reading counted dollars, so an
+        included Codex allowance beat metered credits. But Codex is not spare
+        capacity any more: it is the only lane allowed to write frontend, and
+        the one that takes every security, RLS and migration task. Spending it
+        on an ordinary endpoint that DeepSeek can write for a fraction of a
+        cent is what leaves the expensive work with nowhere to go.
+
+        The restriction that matters is unchanged and asserted below: work
+        DeepSeek may not write never lands here.
         """
         self.cool("claude_subscription")
-        built = self.plan_for(15)
-        assert built.writer is not None, built.blocked_reason
-        self.assertEqual(built.writer.lane, "codex_cloud")
-
-    def test_backend_work_reaches_openrouter_once_both_subscriptions_cool(
-        self,
-    ) -> None:
-        self.cool("claude_subscription")
+        self.cool("codex_local")
         self.cool("codex_cloud")
         built = self.plan_for(15)
         assert built.writer is not None, built.blocked_reason
         self.assertEqual(built.writer.lane, "openrouter")
 
+    def test_backend_work_reaches_codex_once_deepseek_is_cool_too(self) -> None:
+        self.cool("claude_subscription")
+        self.cool("openrouter")
+        built = self.plan_for(15)
+        assert built.writer is not None, built.blocked_reason
+        lanes = state.read_json(state.Paths(self.root).policy)["lanes"]
+        self.assertEqual(lanes[built.writer.lane]["provider"], "openai")
+
     def test_frontend_work_waits_when_every_permitted_lane_cools(self) -> None:
         """It must not fall through to a writer the policy forbids.
 
-        Both lanes allowed to write UI are cooled here. Since the 2026-09-14
-        owner decision that is Claude as well as Codex Cloud; the OpenRouter
+        Every lane allowed to write UI is cooled here -- since 2026-09-18 that
+        is both Codex lanes, Claude having handed frontend back. The OpenRouter
         lane is still forbidden, and that is what must not be promoted.
         """
         self.cool("codex_cloud")
+        self.cool("codex_local")
         self.cool("claude_subscription")
         built = self.plan_for(18)
         self.assertIsNone(built.writer)
@@ -681,14 +714,18 @@ class TestEndToEndFailover(unittest.TestCase):
         )
         state.write_json(paths.providers, providers)
 
-        # Claude is cooled so the recovered lane is the one under test.
+        # The other lanes are cooled so the recovered one is under test.
         self.cool("claude_subscription")
+        self.cool("codex_local")
         built = self.plan_for(18)
         assert built.writer is not None, built.blocked_reason
         self.assertEqual(built.writer.lane, "codex_cloud")
 
     def test_everything_down_blocks_rather_than_improvising(self) -> None:
-        for lane in ("claude_subscription", "openrouter", "codex_cloud"):
+        # Every lane in policy, not a list written out here. A lane added later
+        # is covered the day it is added; a hand-written roster would have gone
+        # on passing while the new lane quietly took the work.
+        for lane in state.read_json(state.Paths(self.root).policy)["lanes"]:
             self.cool(lane)
         built = self.plan_for(15)
         self.assertIsNone(built.writer)
