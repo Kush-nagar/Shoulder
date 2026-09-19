@@ -50,6 +50,9 @@ jobs:
       model: ${{ steps.pick.outputs.model }}
     env:
       HEAD_REF: ${{ github.head_ref }}
+      PR: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       # The base revision, deliberately: this job runs orchestrator code, and
       # the pull request's copy of that code is not trusted.
@@ -72,7 +75,20 @@ jobs:
             echo 'could not read a task number from the branch' >&2
             exit 1
           fi
-          uv run --locked python -m services.agentops.cli reviewer --task "$task" \
+          # The pull request is passed because the lease that records
+          # the writer lives in the local runtime's ignored state, which
+          # this checkout cannot see. Without it the command refuses
+          # rather than guessing, and a wrong guess can nominate the
+          # writer to review its own branch.
+          #
+          # local-cli lanes are excluded because they cannot run here: the
+          # local Codex lane drives `codex exec` on a workstation, against
+          # a subscription this runner does not have. Choosing one would
+          # find no step to run, report success having reviewed nothing,
+          # and leave the verdict waiting for a review that cannot arrive.
+          uv run --locked python -m services.agentops.cli reviewer \
+            --task "$task" --pull-request "$PR" --repo "$REPO" \
+            --exclude-mechanism local-cli \
             > reviewer.json
           cat reviewer.json >> "$GITHUB_STEP_SUMMARY"
           echo "task=$task" >> "$GITHUB_OUTPUT"
@@ -238,8 +254,21 @@ jobs:
           # its job succeeding proves only that the request was posted. The
           # verdict then has to wait for a review of this exact head commit, or
           # "not looked at yet" passes as "reviewed and clean".
+          # The pull request is passed because the lease that records
+          # the writer lives in the local runtime's ignored state, which
+          # this checkout cannot see. Without it the command refuses
+          # rather than guessing, and a wrong guess can nominate the
+          # writer to review its own branch.
+          #
+          # local-cli lanes are excluded because they cannot run here: the
+          # local Codex lane drives `codex exec` on a workstation, against
+          # a subscription this runner does not have. Choosing one would
+          # find no step to run, report success having reviewed nothing,
+          # and leave the verdict waiting for a review that cannot arrive.
           uv run --locked python -m services.agentops.cli reviewer \
-            --task "$task" > reviewer.json
+            --task "$task" --pull-request "$PR" --repo "$REPO" \
+            --exclude-mechanism local-cli \
+            > reviewer.json
           mechanism="$(jq -r '.mechanism // empty' reviewer.json)"
           login="$(jq -r '.review_bot_login // empty' reviewer.json)"
           if [ "$mechanism" = 'github-mention' ]; then
