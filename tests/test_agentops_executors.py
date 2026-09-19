@@ -99,11 +99,19 @@ class TestTheOpenCodeCommandLine(ExecutorCase):
         self.assertEqual(argv[1], "run")
         self.assertIn("--auto", argv)
 
-    def test_the_prompt_is_the_last_argument(self) -> None:
+    def test_the_prompt_arrives_on_stdin_rather_than_in_the_command(self) -> None:
+        """It used to be the last argument, and a real review prompt is too
+        big for one: Windows caps a command line at 32767 characters, so Task
+        17's reviewer was refused the spawn outright with WinError 206.
+
+        Measured against OpenCode 1.18.31 rather than assumed: prompt on
+        stdin, no message argument, answer returned, exit 0.
+        """
         command = self.executor.command(
             "deepseek/deepseek-v3", "implement", self.worktree, BUDGET, "do the thing"
         )
-        self.assertEqual(command[-1], "do the thing")
+        self.assertTrue(self.executor.prompt_on_stdin)
+        self.assertNotIn("do the thing", command)
 
 
 class TestOpenCodePermissions(ExecutorCase):
