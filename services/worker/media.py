@@ -966,15 +966,37 @@ def clip_export_job(job: jobs.Job, keep_going: Progress) -> None:
                     ).scalar_one()
                 )
             if not attached:
-                storage.delete_object(export.target_key)
+                _discard_unused_clip_object(export.target_key)
                 uploaded = False
     except Cancelled:
         if uploaded:
             try:
-                storage.delete_object(export.target_key)
+                _discard_unused_clip_object(export.target_key)
             except storage.StorageError:
                 pass
         raise
+
+
+def _discard_unused_clip_object(target_key: str) -> None:
+    """Remove this attempt's upload, unless something is now relying on it.
+
+    A clip's storage key is derived from its judgment and clip version, so a
+    job that is retried against the same clip row uploads to the same key. A
+    worker that lost its lease mid-upload therefore shares a key with the
+    worker that replaced it, and deleting unconditionally on the way out would
+    take the replacement's finished clip with it -- leaving a publication
+    pointing at an object that is no longer there, permanently pending. So the
+    object is removed only while nothing claims it.
+    """
+    with jobs.transaction() as connection:
+        unused = bool(
+            connection.execute(
+                text("SELECT private.evidence_clip_object_unused(:key)"),
+                {"key": target_key},
+            ).scalar_one()
+        )
+    if unused:
+        storage.delete_object(target_key)
 
 
 def _fail_if_final(job: jobs.Job, video_id: UUID) -> None:

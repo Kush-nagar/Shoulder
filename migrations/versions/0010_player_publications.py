@@ -39,6 +39,7 @@ COACH_TRANSITIONS = (
 WORKER_FUNCTIONS = (
     "private.clip_export_input(uuid,text)",
     "private.complete_evidence_clip(uuid,text,integer,bigint,text)",
+    "private.evidence_clip_object_unused(text)",
 )
 FUNCTIONS = PLAYER_HELPERS + COACH_TRANSITIONS + WORKER_FUNCTIONS
 
@@ -962,6 +963,7 @@ def _create_retry_cancel_withdraw_functions() -> None:
             v_player uuid;
             v_publication uuid;
             v_clip uuid;
+            v_withdrawn integer;
         BEGIN
             SELECT j.* INTO v_judgment
             FROM app.judgment j
@@ -987,6 +989,17 @@ def _create_retry_cancel_withdraw_functions() -> None:
                 current_revision_id = NULL, current_clip_id = NULL,
                 published_at = NULL, updated_at = now()
             WHERE id = p_judgment_id AND publication_status = 'published';
+            -- Nothing was published, so nothing is being withdrawn, and the
+            -- cancellation below must not run. It cancels every exporting or
+            -- failed publication for this game and player, which is right when
+            -- a published judgment is pulled out from under an in-flight
+            -- replacement and wrong for anything else: withdrawing an
+            -- unrelated draft would otherwise cancel a live export and its
+            -- queued jobs for a player whose evidence nobody touched.
+            GET DIAGNOSTICS v_withdrawn = ROW_COUNT;
+            IF v_withdrawn = 0 THEN
+                RETURN;
+            END IF;
             IF v_publication IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM app.judgment
                 WHERE current_publication_id = v_publication
@@ -1051,6 +1064,23 @@ def _create_worker_functions() -> None:
         $$
     """)
     op.execute("""
+        CREATE FUNCTION private.evidence_clip_object_unused(p_storage_key text)
+        RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+        SET search_path = '' AS $$
+            SELECT NOT EXISTS (
+                SELECT 1 FROM app.evidence_clip c
+                WHERE c.storage_key = p_storage_key
+                  AND (
+                      c.status = 'ready'
+                      OR EXISTS (
+                          SELECT 1 FROM app.judgment j
+                          WHERE j.current_clip_id = c.id
+                      )
+                  )
+            )
+        $$
+    """)
+    op.execute("""
         CREATE FUNCTION private.complete_evidence_clip(
             p_job_id uuid, p_worker_id text, p_duration_ms integer,
             p_size_bytes bigint, p_sha256 text
@@ -1061,6 +1091,20 @@ def _create_worker_functions() -> None:
             v_expected integer;
         BEGIN
             SELECT * INTO v_input FROM private.clip_export_input(p_job_id, p_worker_id);
+            IF NOT FOUND THEN RETURN false; END IF;
+            -- Take the publication row before anything is marked ready. The
+            -- snapshot above was read without holding it, so a cancellation or
+            -- a withdrawal could land in between: it sets the publication to
+            -- cancelled and gives the clip a deletion deadline, and this
+            -- function would then clear that deadline, mark the clip ready and
+            -- attach it to a publication nobody will finalise. The object would
+            -- be left uploaded, with no current pointer and nothing scheduled
+            -- to remove it -- footage kept past its deadline, which is the one
+            -- outcome the retention rule does not allow. Locking here makes the
+            -- cancellation wait for this transaction or this one see it.
+            PERFORM 1 FROM app.review_publication
+            WHERE id = v_input.publication_id AND status = 'exporting'
+            FOR UPDATE;
             IF NOT FOUND THEN RETURN false; END IF;
             v_expected := v_input.clip_end_ms - v_input.clip_start_ms;
             IF p_duration_ms <= 0 OR abs(p_duration_ms - v_expected) > 100

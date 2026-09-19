@@ -201,10 +201,17 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "retry_review_publication",
     "cancel_review_publication",
     "withdraw_judgment",
+    "evidence_clip_object_unused",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
-EXPECTED_WORKER_FUNCTIONS = {"clip_export_input", "complete_evidence_clip"}
+EXPECTED_WORKER_FUNCTIONS = {
+    "clip_export_input",
+    "complete_evidence_clip",
+    # Asked before a worker deletes its own upload, so a worker that lost its
+    # lease cannot remove the clip its replacement finished.
+    "evidence_clip_object_unused",
+}
 
 
 class MutationGuardTests(unittest.TestCase):
