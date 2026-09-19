@@ -69,20 +69,50 @@ def create_observation(
     row = connection.execute(
         text(f"""
             INSERT INTO app.observation (
-                video_id, player_id, t_start_ms, t_end_ms, source, created_by
+                id, video_id, player_id, t_start_ms, t_end_ms, source, created_by
             ) VALUES (
+                COALESCE(CAST(:client_id AS uuid), gen_random_uuid()),
                 :video_id, :player_id, :t_start_ms, :t_end_ms,
                 'coach_manual', private.current_user_id()
             )
+            ON CONFLICT (id) DO NOTHING
             RETURNING {OBSERVATION_COLUMNS.replace("o.", "")}
         """),
         {
+            "client_id": str(request.client_id) if request.client_id else None,
             "video_id": str(video_id),
             "player_id": str(request.player_id),
             "t_start_ms": request.t_start_ms,
             "t_end_ms": request.t_end_ms,
         },
-    ).one()
+    ).one_or_none()
+    if row is None:
+        row = connection.execute(
+            text(f"""
+                SELECT {OBSERVATION_COLUMNS}
+                FROM app.observation o
+                WHERE o.id = :client_id
+                  AND o.video_id = :video_id
+                  AND o.player_id = :player_id
+                  AND o.t_start_ms = :t_start_ms
+                  AND o.t_end_ms = :t_end_ms
+                  AND o.source = 'coach_manual'
+                  AND o.created_by = private.current_user_id()
+            """),
+            {
+                "client_id": str(request.client_id),
+                "video_id": str(video_id),
+                "player_id": str(request.player_id),
+                "t_start_ms": request.t_start_ms,
+                "t_end_ms": request.t_end_ms,
+            },
+        ).one_or_none()
+        if row is None:
+            raise Problem(
+                409,
+                "That draft identifier is already in use.",
+                "observation-client-id-conflict",
+            )
     return observation_model(row)
 
 

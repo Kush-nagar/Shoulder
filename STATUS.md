@@ -10,15 +10,15 @@ against Git and GitHub before editing anything.
 | Field | Value |
 |---|---|
 | Last verified `main` | `6cf1c5d` (PR #36; carries #35, #33 and #31 before it) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
-| Current block | Block 04. Task 14 merged; Task 15 implemented and verified on this branch, awaiting merge; Task 16 not started. |
-| Current worker / branch | Task 15 coach judgments / `block-04-t15-coach-judgments` |
-| Open PRs | #32 Task 15 coach judgments (this branch). #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and is far behind a much-changed `main`; it needs a rebase and its own verification before it can land. #31, #33, #35 and #36 are merged; #34 was withdrawn after review showed the fix inert. |
-| Database revision | `0008_coach_judgments` on this branch, applied and downgraded against a local Postgres 17.6; `main` is on `0007_manual_observations`; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | Task 15, 2026-09-17 on this branch at `46984d4` and after: 1303 Python tests against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff, mypy, contracts, Node suites, production build and Chromium/Firefox/WebKit smoke all clean. Six independent review rounds, nineteen findings, all resolved. Merged `main` on 2026-09-19 brings the AgentOps three-writer work; its own evidence index is `docs/agentops-three-writer-verification.md`. |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14-15 merged, Task 16 implemented and verified on this branch. |
+| Current block | Block 04. Task 16 draft preservation and conflict recovery is implemented and locally verified, awaiting review and merge. |
+| Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
+| Open PRs | #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work and requires its own rebase and verification. Task 16 has no PR yet. |
+| Database revision | `0009_draft_recovery` on this branch; local Postgres 17.6 applied it and passed the database/RLS suite. `Shoulder Dev` is still on `0005_video_ingest`. |
+| Last full verification | Task 16, 2026-09-19: 1,397 Python tests against Postgres 17.6 passed with 2 documented unrelated skips; draft recovery passed 9/9 real browser tests across Chromium, Firefox, and WebKit; `scripts/check.ps1` passed lint, types, unit tests, generated-contract drift, production build, bundle scan, and 3/3 browser smoke tests. |
 | Blockers | none that require a human before Task 23 |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it any more - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Merge PR #32 once its independent review lands, then reconcile and let the coordinator select Task 16. Task 16 first needs its stale `blocked` lease cleared in `.agentops/local/leases.json`: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the local Codex lane now takes at `xhigh`. The local runtime needs no owner action; `.\agentops.ps1` starts it. |
+| Next action | Review and merge Task 16, then start Task 17 player-only clip export and batch publication. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -147,12 +147,11 @@ block, not inside it.
 
 ## Current state
 
-- Current phase: Phase C — Coach review. Task 14 is merged (PR #21). Task 15 —
-  coach judgments — is implemented and verified on
-  `block-04-t15-coach-judgments` and awaits merge on PR #32: migration 0008
-  adds `app.judgment` and the immutable `app.judgment_revision` behind one
-  SECURITY DEFINER write path, with SELECT-only grants for the runtime role.
-  Task 16 has not started.
+- Current phase: Phase C — Coach review. Tasks 14 and 15 are merged. Task 16
+  is implemented and verified on
+  `block-04-t16-draft-preservation-and-conflict-recovery`: local drafts save
+  on every change, retry interrupted observation creation by client UUID,
+  restore after reload/offline, and preserve both sides of version conflicts.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
 - Checkout: `D:\Shoulder` sits on `main`; Task 15 is written in its own
   worktree, `D:\Shoulder-agents\block-04-t15-coach-judgments`, on branch

@@ -1003,6 +1003,18 @@
       },
       "ObservationCreate": {
         "properties": {
+          "client_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
           "player_id": {
             "format": "uuid",
             "title": "Player Id",
@@ -2238,6 +2250,59 @@
           }
         ],
         "summary": "Me"
+      }
+    },
+    "/v1/observations/{observation_id}/judgment": {
+      "get": {
+        "operationId": "load_observation_judgment_v1_observations__observation_id__judgment_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Observation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Judgment"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Load Observation Judgment V1 Observations  Observation Id  Judgment Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Load Observation Judgment"
       }
     },
     "/v1/observations/{observation_id}/judgments": {

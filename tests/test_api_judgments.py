@@ -171,6 +171,33 @@ class JudgmentApiTests(DatabaseTestCase):
         self.assertEqual(body["verdict"], "applied")
         self.assertEqual(response.headers["ETag"], '"1"')
 
+    def test_coach_loads_current_judgment_for_an_observation(self) -> None:
+        client = self.client_for(self.coach)
+        created = client.post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        )
+        loaded = client.get(f"/v1/observations/{self.observation}/judgment")
+        self.assertEqual(loaded.status_code, 200, loaded.text)
+        self.assertEqual(loaded.json(), created.json())
+        self.assertEqual(loaded.headers["ETag"], '"1"')
+
+    def test_missing_observation_judgment_is_an_empty_success(self) -> None:
+        response = self.client_for(self.coach).get(
+            f"/v1/observations/{self.observation}/judgment"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json())
+
+    def test_player_cannot_load_a_draft_judgment_by_observation(self) -> None:
+        self.client_for(self.coach).post(
+            f"/v1/observations/{self.observation}/judgments", json=self.payload()
+        )
+        response = self.client_for(self.player_account).get(
+            f"/v1/observations/{self.observation}/judgment"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json())
+
     def test_a_spoofed_author_is_rejected_not_ignored(self) -> None:
         """Task 15 requires a spoofed author to be rejected.
 

@@ -40,7 +40,7 @@ function quoted(value) {
 
 function resetLocalWorkspace() {
   psql(
-    "TRUNCATE app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
+    "TRUNCATE app.judgment_revision, app.judgment, app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
   );
 }
 
@@ -211,7 +211,7 @@ async function readyReview(page, context, request) {
   await page.waitForFunction(
     () => (document.querySelector("video")?.duration ?? 0) > 0,
   );
-  return { video, videoId };
+  return { video, videoId, gameId, playerId };
 }
 
 test("a coach marks and saves a valid clip in under six seconds without a mouse", async ({
@@ -267,4 +267,120 @@ test("I and O type normally in a text field and create no observation", async ({
       ),
     ),
   ).toBe(0);
+});
+
+test("five judgment drafts survive a lost response, reload, and stale edit without loss", async ({
+  page,
+  context,
+  request,
+}) => {
+  const { video, videoId } = await readyReview(page, context, request);
+
+  for (let index = 0; index < 4; index += 1) {
+    await video.evaluate((element, seconds) => {
+      element.currentTime = seconds;
+    }, index * 2);
+    await page.keyboard.press("i");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("o");
+    await expect(page.getByRole("listitem")).toHaveCount(index + 1);
+  }
+
+  let interrupted = false;
+  await page.route("**/api/videos/*/observations", async (route) => {
+    if (!interrupted && route.request().method() === "POST") {
+      interrupted = true;
+      await route.fetch();
+      await route.abort("connectionfailed");
+      return;
+    }
+    await route.continue();
+  });
+  await video.evaluate((element) => {
+    element.currentTime = 8;
+  });
+  await page.keyboard.press("i");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("o");
+  await expect(page.getByRole("listitem")).toHaveCount(5);
+  await context.setOffline(true);
+  await expect(page.getByRole("status")).toHaveText(
+    "Offline — saved on this device",
+  );
+
+  const comments = Array.from(
+    { length: 5 },
+    (_, index) => `Exact coach comment ${index + 1}`,
+  );
+  for (let index = 0; index < 5; index += 1) {
+    const item = page.getByRole("listitem").nth(index);
+    await item
+      .getByLabel(
+        index === 4
+          ? "Not relevant"
+          : index % 2
+            ? "Chance to do this"
+            : "You did this",
+      )
+      .check();
+    await item
+      .getByLabel(`Coach comment for clip ${index + 1}`)
+      .fill(comments[index]);
+  }
+
+  await page.unroute("**/api/videos/*/observations");
+  await context.setOffline(false);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await expect(page.getByRole("listitem")).toHaveCount(5);
+  for (let index = 0; index < 5; index += 1) {
+    const item = page.getByRole("listitem").nth(index);
+    await expect(
+      item.getByLabel(`Coach comment for clip ${index + 1}`),
+    ).toHaveValue(comments[index]);
+    await expect(item.getByText("Saved", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+  expect(
+    Number(
+      psql(
+        `SELECT count(*) FROM app.observation WHERE video_id = ${quoted(videoId)}`,
+      ),
+    ),
+  ).toBe(5);
+  expect(
+    Number(
+      psql(
+        `SELECT count(*) FROM app.judgment j JOIN app.observation o ON o.id = j.observation_id WHERE o.video_id = ${quoted(videoId)}`,
+      ),
+    ),
+  ).toBe(5);
+
+  const other = await context.newPage();
+  await other.goto(page.url());
+  const otherFirst = other.getByRole("listitem").first();
+  await otherFirst
+    .getByLabel("Coach comment for clip 1")
+    .fill("Server session edit");
+  await expect(otherFirst.getByText("Saved", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await other.close();
+
+  const first = page.getByRole("listitem").first();
+  await first
+    .getByLabel("Coach comment for clip 1")
+    .fill("Preserve my local edit");
+  await expect(first.getByRole("alert")).toContainText(
+    "Preserve my local edit",
+  );
+  await expect(first.getByRole("alert")).toContainText("Server session edit");
+  await first.getByRole("button", { name: "Keep my draft" }).click();
+  await expect(first.getByText("Saved", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(first.getByLabel("Coach comment for clip 1")).toHaveValue(
+    "Preserve my local edit",
+  );
 });

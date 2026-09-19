@@ -13,6 +13,9 @@ from services.api.judgment_service import create_judgment as create_judgment_ser
 from services.api.judgment_service import edit_judgment as edit_judgment_service
 from services.api.judgment_service import list_revisions as list_revisions_service
 from services.api.judgment_service import load_judgment as load_judgment_service
+from services.api.judgment_service import (
+    load_observation_judgment as load_observation_judgment_service,
+)
 from services.api.problems import Problem
 from services.api.routes import PRIVATE, unavailable
 from services.api.schemas import (
@@ -146,6 +149,27 @@ def create_judgment(
             )
     except DBAPIError:
         raise unavailable() from None
+    _etag(response, result["version"])
+    return Judgment(**result)
+
+
+@router.get(
+    "/observations/{observation_id}/judgment",
+    response_model=Judgment | None,
+    dependencies=PRIVATE,
+)
+def load_observation_judgment(
+    observation_id: UUID,
+    response: Response,
+    user_id: Annotated[str, Depends(authenticated_identity)],
+) -> Judgment | None:
+    try:
+        with user_transaction(user_id) as connection:
+            result = load_observation_judgment_service(connection, observation_id)
+    except DBAPIError:
+        raise unavailable() from None
+    if result is None:
+        return None
     _etag(response, result["version"])
     return Judgment(**result)
 

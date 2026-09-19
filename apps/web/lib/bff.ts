@@ -20,7 +20,7 @@ import { verifiedToken } from "./auth/server";
 export async function forward(
   request: NextRequest,
   path: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
 ): Promise<NextResponse> {
   const auth = routeAuth(request);
   const config = authConfig(process.env);
@@ -40,6 +40,9 @@ export async function forward(
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(request.headers.get("If-Match")
+          ? { "If-Match": request.headers.get("If-Match") as string }
+          : {}),
       },
       body: body || undefined,
       cache: "no-store",
@@ -55,6 +58,9 @@ export async function forward(
         headers: {
           "Content-Type":
             upstream.headers.get("content-type") ?? "application/json",
+          ...(upstream.headers.get("etag")
+            ? { ETag: upstream.headers.get("etag") as string }
+            : {}),
         },
       }) as NextResponse,
     );

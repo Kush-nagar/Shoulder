@@ -5,6 +5,11 @@ import {
   reviewShortcut,
   validClipBounds,
 } from "../apps/web/lib/marking.ts";
+import {
+  draftStorageKey,
+  restoreDrafts,
+  serializeDrafts,
+} from "../apps/web/lib/review-drafts.ts";
 
 test("I and O mark clip bounds regardless of letter case", () => {
   assert.deepEqual(reviewShortcut("i", false, false), { type: "mark-in" });
@@ -30,6 +35,30 @@ test("review shortcuts are suppressed while editing text", () => {
   }
   assert.deepEqual(reviewShortcut("Escape", false, true), {
     type: "focus-video",
+  });
+  assert.deepEqual(reviewShortcut("Enter", false, true), {
+    type: "save-draft",
+  });
+});
+
+test("judgment shortcuts select verdict, comment, and save", () => {
+  assert.deepEqual(reviewShortcut("1", false, false), {
+    type: "select-verdict",
+    verdict: "applied",
+  });
+  assert.deepEqual(reviewShortcut("2", false, false), {
+    type: "select-verdict",
+    verdict: "opportunity",
+  });
+  assert.deepEqual(reviewShortcut("3", false, false), {
+    type: "select-verdict",
+    verdict: "not_relevant",
+  });
+  assert.deepEqual(reviewShortcut("c", false, false), {
+    type: "focus-comment",
+  });
+  assert.deepEqual(reviewShortcut("Enter", false, false), {
+    type: "save-draft",
   });
 });
 
@@ -58,4 +87,57 @@ test("clip bounds must be ordered, non-negative, and within the video", () => {
   assert.equal(validClipBounds(4_000, 4_000, 10_000), false);
   assert.equal(validClipBounds(5_000, 4_000, 10_000), false);
   assert.equal(validClipBounds(1_000, 10_001, 10_000), false);
+});
+
+test("five complete review drafts survive an exact storage round trip", () => {
+  const scope = {
+    videoId: "10000000-0000-4000-8000-000000000001",
+    playerId: "20000000-0000-4000-8000-000000000002",
+    goalId: "30000000-0000-4000-8000-000000000003",
+  };
+  const drafts = Array.from({ length: 5 }, (_, index) => ({
+    localId: `60000000-0000-4000-8000-00000000000${index}`,
+    observationId: `40000000-0000-4000-8000-00000000000${index}`,
+    judgmentId: `50000000-0000-4000-8000-00000000000${index}`,
+    position: index,
+    clipStartMs: index * 2_000,
+    clipEndMs: index * 2_000 + 1_500,
+    verdict:
+      index === 4 ? "not_relevant" : index % 2 ? "opportunity" : "applied",
+    commentText: `Coach comment ${index}`,
+    version: index + 1,
+    synced: {
+      clipStartMs: index * 2_000,
+      clipEndMs: index * 2_000 + 1_500,
+      verdict:
+        index === 4 ? "not_relevant" : index % 2 ? "opportunity" : "applied",
+      commentText: `Coach comment ${index}`,
+      version: index + 1,
+    },
+    saveState: "saved",
+    conflict: null,
+  }));
+
+  const stored = serializeDrafts(scope, drafts);
+  assert.deepEqual(restoreDrafts(stored, scope), drafts);
+  assert.equal(
+    draftStorageKey(scope),
+    "shoulder:review-drafts:v1:10000000-0000-4000-8000-000000000001:20000000-0000-4000-8000-000000000002",
+  );
+});
+
+test("draft restore fails closed for corrupt or mismatched local data", () => {
+  const scope = { videoId: "video-a", playerId: "player-a", goalId: "goal-a" };
+  assert.deepEqual(restoreDrafts("not json", scope), []);
+  assert.deepEqual(
+    restoreDrafts(
+      JSON.stringify({
+        schema: 1,
+        scope: { ...scope, playerId: "player-b" },
+        drafts: [],
+      }),
+      scope,
+    ),
+    [],
+  );
 });

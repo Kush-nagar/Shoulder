@@ -194,6 +194,24 @@ def load_judgment(connection: Connection, judgment_id: UUID) -> dict[str, Any] |
     return judgment_model(row, _revision_snapshot(connection, row.id, row.version))
 
 
+def load_observation_judgment(
+    connection: Connection, observation_id: UUID
+) -> dict[str, Any] | None:
+    """Load coach-only current draft state for review restoration."""
+    row = connection.execute(
+        text(f"""
+            SELECT {JUDGMENT_COLUMNS}
+            FROM app.judgment j
+            WHERE j.observation_id = :observation_id
+              AND private.is_judgment_coach(j.id)
+        """),
+        {"observation_id": str(observation_id)},
+    ).one_or_none()
+    if row is None:
+        return None
+    return judgment_model(row, _revision_snapshot(connection, row.id, row.version))
+
+
 def list_revisions(connection: Connection, judgment_id: UUID) -> Sequence[Any]:
     """Immutable revision history, for the coaching team only.
 

@@ -129,6 +129,24 @@ class ObservationApiTests(DatabaseTestCase):
         self.assertEqual(listed.status_code, 200, listed.text)
         self.assertEqual([row["id"] for row in listed.json()], [body["id"]])
 
+    def test_client_id_makes_an_interrupted_create_safe_to_retry(self) -> None:
+        client = self.client_for(self.coach)
+        client_id = uuid4()
+        payload = self.payload(client_id=str(client_id))
+
+        first = client.post(f"/v1/videos/{self.video}/observations", json=payload)
+        second = client.post(f"/v1/videos/{self.video}/observations", json=payload)
+
+        self.assertEqual(first.status_code, 201, first.text)
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(first.json()["id"], str(client_id))
+        listed = client.get(
+            f"/v1/videos/{self.video}/observations",
+            params={"player_id": str(self.player)},
+        )
+        self.assertEqual(len(listed.json()), 1)
+
     def test_wrong_team_player_is_rejected(self) -> None:
         response = self.client_for(self.coach).post(
             f"/v1/videos/{self.video}/observations",

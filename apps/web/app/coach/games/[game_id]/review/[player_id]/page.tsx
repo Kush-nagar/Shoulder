@@ -72,6 +72,7 @@ export default async function ReviewPage({
         <CoachPlayer
           videoId={ready.id}
           playerId={player.id}
+          goalId={player.active_goal?.id ?? null}
           label={`${player.display_name} · ${context}`}
           initialObservations={observations}
         />

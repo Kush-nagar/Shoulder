@@ -10,6 +10,12 @@ export type ReviewShortcut =
   | { type: "seek"; seconds: number }
   | { type: "mark-in" }
   | { type: "mark-out" }
+  | {
+      type: "select-verdict";
+      verdict: "applied" | "opportunity" | "not_relevant";
+    }
+  | { type: "focus-comment" }
+  | { type: "save-draft" }
   | { type: "focus-video" };
 
 export function isTextEntryTarget(target: TextEntryTarget | null): boolean {
@@ -25,6 +31,7 @@ export function reviewShortcut(
   shiftKey: boolean,
   editingText: boolean,
 ): ReviewShortcut | null {
+  if (key === "Enter") return { type: "save-draft" };
   if (editingText) {
     return key === "Escape" ? { type: "focus-video" } : null;
   }
@@ -49,6 +56,15 @@ export function reviewShortcut(
     case "o":
     case "O":
       return { type: "mark-out" };
+    case "1":
+      return { type: "select-verdict", verdict: "applied" };
+    case "2":
+      return { type: "select-verdict", verdict: "opportunity" };
+    case "3":
+      return { type: "select-verdict", verdict: "not_relevant" };
+    case "c":
+    case "C":
+      return { type: "focus-comment" };
     case "Escape":
       return { type: "focus-video" };
     default:
