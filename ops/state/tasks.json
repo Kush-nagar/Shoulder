@@ -1,4 +1,47 @@
 {
   "$comment": "Active task leases. One writer per task, per branch, per checkout.",
-  "leases": {}
+  "leases": {
+    "15": {
+      "abandoned_at": "2026-09-15T07:41:29+00:00",
+      "abandoned_reason": "no heartbeat within the stale window",
+      "acquired_at": "2026-09-15T02:30:31+00:00",
+      "assignment": {
+        "capability_class": "FRONTIER_REASONING",
+        "effort": "high",
+        "fallbacks": [
+          [
+            "codex_cloud",
+            "openai/gpt-5.4-pro"
+          ],
+          [
+            "openrouter",
+            "deepseek/deepseek-v4-pro-0813"
+          ]
+        ],
+        "harness": "claude-code-action",
+        "harness_model": "claude-sonnet-5",
+        "lane": "claude_subscription",
+        "mechanism": "workflow-dispatch",
+        "model": "anthropic/claude-sonnet-5",
+        "model_enforced": true,
+        "reason": "backend/CRITICAL -> FRONTIER_REASONING; strongest qualified model in lane claude_subscription at $2.000/Mtok in",
+        "rejections": [
+          "codex_api: lane is disabled in policy"
+        ],
+        "representative_model": "anthropic/claude-sonnet-5"
+      },
+      "attempts": 1,
+      "branch": "block-04-t15-coach-judgments",
+      "checkpoint": null,
+      "expires_at": "2026-09-15T04:00:31+00:00",
+      "heartbeat_at": "2026-09-15T02:30:59+00:00",
+      "owner": "run-34921416961",
+      "released_at": "2026-09-19T08:47:29+00:00",
+      "run_id": "34921416961",
+      "state": "merged",
+      "task_id": 15,
+      "worker_run_attempt": "1",
+      "worker_run_id": "34921450581"
+    }
+  }
 }

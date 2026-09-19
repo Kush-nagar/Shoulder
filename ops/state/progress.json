@@ -3,7 +3,8 @@
   "completed_blocks": [
     1,
     2,
-    3
+    3,
+    4
   ],
   "completed_tasks": [
     1,
@@ -19,7 +20,9 @@
     11,
     12,
     13,
-    14
+    14,
+    15,
+    16
   ],
   "evidence": {
     "1": "docs/task-1-verification.md (PR #1)",
@@ -28,6 +31,8 @@
     "12": "docs/projects/project-03-media-playback-verification.md (PR #13)",
     "13": "docs/projects/project-03-media-playback-verification.md (PR #13)",
     "14": "merged branch block-04-t14-manual-clip-marking (pull request for the canonical task branch was merged into main)",
+    "15": "merged branch block-04-t15-coach-judgments (pull request for the canonical task branch was merged into main)",
+    "16": "merged branch block-04-t16-draft-preservation-and-conflict-recovery (pull request for the canonical task branch was merged into main)",
     "2": "docs/task-2-verification.md",
     "3": "docs/task-3-verification.md (PR #3)",
     "4": "docs/task-4-verification.md (PR #5)",
@@ -42,5 +47,5 @@
     "real_use_gate": false
   },
   "last_verified_main": "dab524f9c75c3e8dfac430422f717e57ef61985f",
-  "updated_at": "2026-09-14T21:08:23+00:00"
+  "updated_at": "2026-09-19T12:58:08+00:00"
 }

@@ -2,36 +2,41 @@
   "$comment": "Per-lane health. The coordinator writes this; a lane returns to AVAILABLE only after a health check succeeds. codex_cloud has no secret: it is reached through the Codex GitHub integration, so it is gated on lane_qualified rather than on a credential.",
   "lanes": {
     "claude_subscription": {
-      "changed_at": "2026-09-14T20:47:52+00:00",
+      "changed_at": "2026-09-19T15:22:08+00:00",
       "failure_count": 0,
-      "last_success": "2026-09-14T20:47:52+00:00",
-      "reason": "CLAUDE_CODE_OAUTH_TOKEN is configured",
+      "last_success": "2026-09-19T15:22:08+00:00",
+      "reason": "local claude-cli answered on 2026-09-19: a 30-turn worker run at 14:56 UTC and a direct sonnet-5 probe at 15:00 UTC, both end_turn. The DEGRADED mark was cloud worker run 34921450581 on 2026-09-15.",
       "status": "AVAILABLE"
     },
     "codex_api": {
-      "changed_at": "2026-09-14T20:47:52+00:00",
+      "changed_at": "2026-09-19T15:21:58+00:00",
       "reason": "lane is disabled in policy",
       "status": "DISABLED"
     },
     "codex_cloud": {
-      "changed_at": "2026-09-14T20:47:52+00:00",
+      "changed_at": "2026-09-19T15:21:58+00:00",
       "failure_count": 0,
       "lane_qualification_evidence": "Codex Cloud reviewed PR #16 via the GitHub integration on 2026-09-13: reacted, then posted a review on commit ba08745 with 7 inline findings. Full round trip through @codex, subscription-backed, no API key.",
       "lane_qualified": true,
       "lane_qualified_at": "2026-09-13T15:37:06+00:00",
-      "last_success": "2026-09-14T20:47:52+00:00",
+      "last_success": "2026-09-19T15:21:58+00:00",
       "reason": "subscription lane; availability is proven by use",
       "status": "AVAILABLE"
     },
     "codex_local": {
+      "changed_at": "2026-09-19T15:21:58+00:00",
+      "failure_count": 0,
       "lane_qualification_evidence": "Codex CLI 0.154.0 driven locally by services.agentops.executors.CodexCliExecutor on 2026-09-19. Writable smoke run on a throwaway worktree: edited a tracked file and returned turn.completed with usage, 15.4s. Read-only review run at high effort read a real 1500-line diff of commit d5fd09a and returned four findings, three of which were genuine defects that are fixed in 47bcf7c. Subscription-backed via codex login, no API key. Model and effort are passed as -m and -c model_reasoning_effort, so unlike codex_cloud the routed tier is applied rather than advisory.",
       "lane_qualified": true,
-      "lane_qualified_at": "2026-09-19T07:49:10+00:00"
+      "lane_qualified_at": "2026-09-19T15:22:31+00:00",
+      "last_success": "2026-09-19T15:21:58+00:00",
+      "reason": "subscription lane; availability is proven by use",
+      "status": "AVAILABLE"
     },
     "openrouter": {
-      "changed_at": "2026-09-14T20:47:52+00:00",
+      "changed_at": "2026-09-19T15:21:58+00:00",
       "failure_count": 0,
-      "last_success": "2026-09-14T20:47:52+00:00",
+      "last_success": "2026-09-19T15:21:58+00:00",
       "privacy_confirmation_note": "ZDR-only routing and training disabled in account privacy settings",
       "privacy_confirmed": true,
       "privacy_confirmed_at": "2026-09-13T16:02:46+00:00",
