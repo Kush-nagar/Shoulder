@@ -468,9 +468,25 @@ class TestReviewWorkflow(unittest.TestCase):
 
     def test_the_reviewer_is_actually_run(self) -> None:
         """The assignment used to be logged and never executed."""
-        self.assertIn("cli reviewer --task", self.text)
+        self.assertIn("cli reviewer", self.text)
         for lane in ("claude_subscription", "openrouter", "codex_cloud"):
             self.assertIn(f"needs.choose.outputs.lane == '{lane}'", self.text)
+
+    def test_the_reviewer_is_asked_for_one_this_runner_can_start(self) -> None:
+        """A lane with no step here reviews nothing and stalls the verdict.
+
+        `codex_local` drives `codex exec` on a workstation, against a
+        subscription this runner does not have, so there is deliberately no
+        step for it. Chosen anyway, the review job would report success having
+        done nothing and the verdict would wait for a review that cannot come.
+        """
+        self.assertEqual(self.text.count("--exclude-mechanism local-cli"), 2)
+        self.assertNotIn("needs.choose.outputs.lane == 'codex_local'", self.text)
+
+    def test_the_reviewer_is_told_which_pull_request_it_is(self) -> None:
+        """Without it the writer cannot be established, and a guess can name
+        the writer as its own reviewer."""
+        self.assertEqual(self.text.count('--task "$task" --pull-request "$PR"'), 2)
 
     def test_orchestrator_code_runs_from_the_base_revision(self) -> None:
         """A writer's branch must not run its own orchestrator with secrets.

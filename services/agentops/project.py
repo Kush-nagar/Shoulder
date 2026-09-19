@@ -369,14 +369,54 @@ def push_branch(worktree: Path, branch: str) -> None:
         )
 
 
+# How a pull request says which lane wrote it. An HTML comment, so it is
+# invisible in the rendered body and cannot be confused with the brief.
+WRITER_MARKER = "agentops:writer-lane"
+WRITER_PATTERN = re.compile(
+    rf"<!--\s*{re.escape(WRITER_MARKER)}\s*=\s*([A-Za-z0-9_-]{{1,64}})\s*-->"
+)
+
+
+def writer_marker(lane: str) -> str:
+    return f"<!-- {WRITER_MARKER}={lane} -->"
+
+
+def writer_lane_of(body: str) -> str:
+    """The lane a pull request body says wrote it, or "" if it does not say.
+
+    The last marker wins, so an edit that appends a correction supersedes the
+    original rather than being silently ignored.
+    """
+    found = WRITER_PATTERN.findall(body or "")
+    return found[-1] if found else ""
+
+
 def ensure_pull_request(
-    root: Path, task_id: int, title: str, branch: str, *, repo: str
+    root: Path,
+    task_id: int,
+    title: str,
+    branch: str,
+    *,
+    repo: str,
+    writer_lane: str = "",
 ) -> int:
     """Open the pull request, or find the one that is already open.
 
-    The body is the canonical brief, which is what the cloud reviewer reads.
+    The body is the canonical brief, which is what the cloud reviewer reads,
+    plus a marker naming the lane that wrote the branch.
+
+    That marker is a safety property, not bookkeeping. Choosing an independent
+    reviewer means excluding the writer's provider family, so it depends on
+    knowing who the writer was -- and the lease that records it lives in the
+    local runtime's ignored state, which the review workflow cannot see. Left
+    to guess, that workflow recomputed the writer from current routing, and a
+    wrong guess is not a harmless one: on Task 15 it concluded Codex had
+    written a branch Claude wrote, and nominated Claude to review its own work.
+    The pull request travels with the branch, so the answer travels with it too.
     """
     body = brief_mod.render(root, task_id)
+    if writer_lane:
+        body = f"{body}\n\n{writer_marker(writer_lane)}\n"
     number, detail = delegate.ensure_pull_request(
         root, task_id, title, branch, body, repo=repo, draft=False
     )
@@ -657,6 +697,12 @@ def repair_in_worktree(
 # --------------------------------------------------------------------------
 
 
+def _writer_lane(paths: localstate.LocalPaths, task_id: int) -> str:
+    """The lane that actually wrote this task, from the worker's own record."""
+    record = localstate.worker_records(paths).get(str(task_id)) or {}
+    return str(record.get("lane") or "")
+
+
 def ship(
     root: Path,
     paths: localstate.LocalPaths,
@@ -682,7 +728,14 @@ def ship(
     commit_task_changes(root, worktree, task_id, title, base=base)
     push_branch(worktree, branch)
 
-    number = ensure_pull_request(root, task_id, title, branch, repo=repo)
+    number = ensure_pull_request(
+        root,
+        task_id,
+        title,
+        branch,
+        repo=repo,
+        writer_lane=_writer_lane(paths, task_id),
+    )
     save(paths, pull_request=number, phase="waiting_for_ci")
 
     for cycle in range(max_cycles + 1):

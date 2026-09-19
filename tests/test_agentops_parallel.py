@@ -897,6 +897,152 @@ class TestTheLeaseLedgerSurvivesThreeWriters(unittest.TestCase):
         self.assertEqual(sorted(on_disk), ["99"])
 
 
+class TestTheReviewerIsNeverTheWriter(unittest.TestCase):
+    """Independence has to be established, not assumed.
+
+    Choosing an independent reviewer means excluding the writer's provider
+    family, so it depends on knowing who the writer was. The lease that records
+    that lives in the local runtime's ignored state, which the review workflow
+    cannot see -- and left to guess, it recomputed the writer from current
+    routing. On Task 15 that guess said Codex had written a branch Claude
+    wrote, so Claude was nominated to review its own work and the merge gate
+    would have accepted it as the independent review.
+    """
+
+    def test_a_pull_request_body_carries_the_writer_lane(self) -> None:
+        marker = project.writer_marker("codex_local")
+        body = "the brief" + "\n\n" + marker + "\n"
+        self.assertEqual(project.writer_lane_of(body), "codex_local")
+
+    def test_a_body_without_a_marker_names_nobody(self) -> None:
+        self.assertEqual(project.writer_lane_of("just the brief"), "")
+        self.assertEqual(project.writer_lane_of(""), "")
+
+    def test_the_marker_is_invisible_in_the_rendered_body(self) -> None:
+        marker = project.writer_marker("claude_subscription")
+        self.assertTrue(marker.startswith("<!--") and marker.endswith("-->"))
+
+    def test_a_later_marker_supersedes_an_earlier_one(self) -> None:
+        """So a correction can be appended rather than having to be edited in."""
+        first = project.writer_marker("claude_subscription")
+        second = project.writer_marker("codex_local")
+        body = first + "\n" + second
+        self.assertEqual(project.writer_lane_of(body), "codex_local")
+
+    def test_a_forged_marker_cannot_name_a_lane_that_is_not_one(self) -> None:
+        """The value is matched narrowly, and the caller checks it is a lane."""
+        self.assertEqual(project.writer_lane_of("<!-- agentops:writer-lane= -->"), "")
+        self.assertEqual(
+            project.writer_lane_of("<!-- agentops:writer-lane=a lane -->"), ""
+        )
+
+    def test_an_unknown_writer_is_a_refusal_not_a_guess(self) -> None:
+        """The whole point: no writer, no provable independence, no answer."""
+        from services.agentops import cli
+
+        args = cli.build_parser().parse_args(
+            ["--root", str(REPO_ROOT), "reviewer", "--task", "15"]
+        )
+        with mock.patch("builtins.print") as printed:
+            code = args.func(args)
+        self.assertEqual(code, 1)
+        payload = json.loads(printed.call_args[0][0])
+        self.assertFalse(payload["ok"])
+        self.assertIn("independent", payload["reason"])
+
+    def test_a_recorded_writer_yields_a_reviewer_of_another_family(self) -> None:
+        from services.agentops import cli, coordinator
+
+        ctx = coordinator.load_context(REPO_ROOT)
+        lanes = ctx.policy["lanes"]
+        for writer_lane in ("claude_subscription", "codex_local"):
+            with self.subTest(writer_lane):
+                args = cli.build_parser().parse_args(
+                    ["--root", str(REPO_ROOT), "reviewer", "--task", "15"]
+                )
+                with (
+                    mock.patch.object(
+                        cli,
+                        "_writer_lane_from_pull_request",
+                        return_value=writer_lane,
+                    ),
+                    mock.patch("builtins.print") as printed,
+                ):
+                    args.pull_request = 32
+                    args.repo = "owner/name"
+                    code = args.func(args)
+                self.assertEqual(code, 0)
+                payload = json.loads(printed.call_args[0][0])
+                self.assertEqual(payload["writer_lane"], writer_lane)
+                self.assertEqual(payload["writer_source"], "pull-request")
+                self.assertNotEqual(
+                    lanes[payload["lane"]]["provider"],
+                    lanes[writer_lane]["provider"],
+                )
+
+    def test_claude_reviews_a_branch_codex_wrote(self) -> None:
+        """And the reverse. Neither is a self-review."""
+        from services.agentops import cli
+
+        args = cli.build_parser().parse_args(
+            ["--root", str(REPO_ROOT), "reviewer", "--task", "15"]
+        )
+        with (
+            mock.patch.object(
+                cli, "_writer_lane_from_pull_request", return_value="codex_local"
+            ),
+            mock.patch("builtins.print") as printed,
+        ):
+            args.pull_request = 32
+            args.repo = "owner/name"
+            args.func(args)
+        payload = json.loads(printed.call_args[0][0])
+        self.assertEqual(payload["lane"], "claude_subscription")
+
+    def test_a_lane_the_caller_cannot_start_is_not_offered(self) -> None:
+        """GitHub Actions cannot run `codex exec`, so it must not be chosen.
+
+        Task 15 is written by Claude, so the independent reviewer is whatever
+        is left that is not Anthropic. Unfiltered that is the local Codex lane,
+        which has no step in the review workflow: it would report success
+        having reviewed nothing and the verdict would wait forever. Asked only
+        for lanes this caller can start, it is DeepSeek, which is independent
+        and really runs.
+        """
+        from services.agentops import cli
+
+        def choose(*exclusions: str) -> dict[str, Any]:
+            argv = [
+                "--root",
+                str(REPO_ROOT),
+                "reviewer",
+                "--task",
+                "15",
+                "--pull-request",
+                "32",
+                "--repo",
+                "owner/name",
+            ]
+            for mechanism in exclusions:
+                argv += ["--exclude-mechanism", mechanism]
+            args = cli.build_parser().parse_args(argv)
+            with (
+                mock.patch.object(
+                    cli,
+                    "_writer_lane_from_pull_request",
+                    return_value="claude_subscription",
+                ),
+                mock.patch("builtins.print") as printed,
+            ):
+                args.func(args)
+            return dict(json.loads(printed.call_args[0][0]))
+
+        self.assertEqual(choose()["lane"], "codex_local")
+        filtered = choose("local-cli")
+        self.assertEqual(filtered["lane"], "openrouter")
+        self.assertEqual(filtered["mechanism"], "workflow-dispatch")
+
+
 class TestTheCapIsReadNotHardCoded(unittest.TestCase):
     def test_the_loop_reads_the_cap_from_policy(self) -> None:
         self.assertEqual(project.writer_cap(REPO_ROOT), 3)
