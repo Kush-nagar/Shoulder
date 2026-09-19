@@ -831,5 +831,135 @@ class TestABlockedPlanIsNotRun(LoopCase):
         self.assertIn("reviewer", result["reason"])
 
 
+class TestTheTaskBaseline(unittest.TestCase):
+    """What a branch changed is measured from where it left main.
+
+    The baseline used to be a snapshot: whatever HEAD was the first time a
+    task ran, stored and thereafter only read. That holds inside one attempt
+    and fails across them, because a worktree outlives the attempt that made
+    it. Task 16 was picked up two days later with a baseline from before four
+    merges, so the governance guard was shown every commit main had gained in
+    between and refused the branch for editing `ops/policy.json` and
+    `.github/workflows` -- neither of which its worker had touched.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.repo = Path(self.tmp) / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q", "-b", "main")
+        self.write("app.py", "start\n")
+        self.git("add", "-A")
+        self.commit("first")
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    def commit(self, message: str) -> str:
+        self.git("-c", "user.email=a@b", "-c", "user.name=c", "commit", "-qm", message)
+        return self.git("rev-parse", "HEAD").stdout.strip()
+
+    def write(self, name: str, body: str) -> None:
+        path = self.repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def paths(self) -> localstate.LocalPaths:
+        return localstate.ensure(localstate.LocalPaths(Path(self.tmp) / "state"))
+
+    def test_it_is_where_the_branch_left_main(self) -> None:
+        diverged = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "-b", "task")
+        self.write("app.py", "changed\n")
+        self.git("add", "-A")
+        self.commit("work")
+        self.assertEqual(local.merge_base(self.repo), diverged)
+
+    def test_it_does_not_move_as_the_branch_commits(self) -> None:
+        diverged = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "-b", "task")
+        for n in range(3):
+            self.write("app.py", f"change {n}\n")
+            self.git("add", "-A")
+            self.commit(f"work {n}")
+            self.assertEqual(local.merge_base(self.repo), diverged)
+
+    def test_it_does_not_move_as_main_moves_ahead(self) -> None:
+        """The failure this replaced, stated directly.
+
+        Main gaining commits must not make them look like the branch's work.
+        """
+        diverged = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "-b", "task")
+        self.write("app.py", "branch work\n")
+        self.git("add", "-A")
+        self.commit("branch work")
+
+        self.git("checkout", "-q", "main")
+        self.write("ops/policy.json", '{"autonomy": {}}\n')
+        self.git("add", "-A")
+        self.commit("policy change on main")
+        self.git("checkout", "-q", "task")
+
+        self.assertEqual(local.merge_base(self.repo), diverged)
+        changed = local.changed_paths(self.repo, self.repo, base=diverged)
+        self.assertNotIn("ops/policy.json", changed)
+        self.assertIn("app.py", changed)
+
+    def test_a_stale_recorded_baseline_is_not_believed(self) -> None:
+        """The Task 16 refusal, reproduced and then not reproduced."""
+        stale = self.git("rev-parse", "HEAD").stdout.strip()
+        self.write("ops/policy.json", '{"autonomy": {}}\n')
+        self.git("add", "-A")
+        self.commit("policy change that lands on main")
+        self.git("checkout", "-q", "-b", "task")
+        self.write("app.py", "branch work\n")
+        self.git("add", "-A")
+        self.commit("branch work")
+
+        paths = self.paths()
+        localstate.save_worker(paths, "16", {"base_sha": stale})
+
+        # Measured from the stale snapshot, the branch looks like it edited policy.
+        self.assertIn(
+            "ops/policy.json", local.changed_paths(self.repo, self.repo, base=stale)
+        )
+
+        base = local.task_baseline(paths, 16, worktree=self.repo)
+        self.assertNotEqual(base, stale)
+        self.assertNotIn(
+            "ops/policy.json", local.changed_paths(self.repo, self.repo, base=base)
+        )
+
+    def test_the_corrected_baseline_is_written_back(self) -> None:
+        stale = self.git("rev-parse", "HEAD").stdout.strip()
+        self.write("app.py", "moved on\n")
+        self.git("add", "-A")
+        self.commit("main moves")
+        self.git("checkout", "-q", "-b", "task")
+
+        paths = self.paths()
+        localstate.save_worker(paths, "16", {"base_sha": stale})
+        base = local.task_baseline(paths, 16, worktree=self.repo)
+        stored = localstate.worker_records(paths)["16"]["base_sha"]
+        self.assertEqual(stored, base)
+        self.assertNotEqual(stored, stale)
+
+    def test_a_checkout_git_cannot_answer_for_keeps_what_was_recorded(self) -> None:
+        """Losing the baseline entirely would measure the whole branch as new."""
+        paths = self.paths()
+        localstate.save_worker(paths, "16", {"base_sha": "recorded0"})
+        nowhere = Path(self.tmp) / "not-a-repo"
+        nowhere.mkdir()
+        self.assertEqual(local.task_baseline(paths, 16, worktree=nowhere), "recorded0")
+
+
 if __name__ == "__main__":
     unittest.main()

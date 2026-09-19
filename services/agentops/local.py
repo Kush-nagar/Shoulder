@@ -848,6 +848,15 @@ def diff_of(
 # --------------------------------------------------------------------------
 
 
+def merge_base(worktree: Path, *, runner: Runner | None = None) -> str:
+    """Where this branch diverged from what it will be merged into."""
+    for base in ("origin/main", "main"):
+        found = _git(worktree, ["merge-base", "HEAD", base], runner=runner)
+        if found.returncode == 0 and (found.stdout or "").strip():
+            return (found.stdout or "").strip()
+    return ""
+
+
 def task_baseline(
     paths: localstate.LocalPaths,
     task_id: int,
@@ -855,20 +864,43 @@ def task_baseline(
     worktree: Path,
     runner: Runner | None = None,
 ) -> str:
-    """The commit this task started from, recorded once and never moved.
+    """The commit this task's branch diverged from.
 
     Every judgement about what a task changed is a range starting here, so it
-    has to survive the worker committing, a repair committing on top, a
-    restart, and a dashboard read. It is therefore written on first use and
-    only ever read afterwards: a baseline that drifts forward is a governance
-    check that sees less each time it runs.
+    has to survive the worker committing, a repair committing on top, and a
+    restart. It used to be a snapshot: whatever HEAD was the first time this
+    ran, stored and thereafter only read, on the reasoning that a baseline
+    which drifts forward is a governance check that sees less each time.
+
+    That reasoning holds inside one attempt and fails across them. A worktree
+    outlives the attempt that created it, so a task picked up again days later
+    kept a baseline from before everything that had merged in between -- and
+    the governance guard, asked what the branch changed, was shown every
+    commit main had gained since. Task 16 was refused for editing
+    `ops/policy.json` and `.github/workflows`, neither of which its worker had
+    touched.
+
+    So it is derived rather than remembered. The merge base is where this
+    branch actually left main: it does not move as the branch commits, it does
+    not move as main moves ahead, and it moves forward only when the branch
+    genuinely merges main in -- which is exactly when those commits stop being
+    this branch's changes. The recorded value is kept as a fallback for a
+    checkout git cannot answer for.
     """
     record = localstate.worker_records(paths).get(str(task_id)) or {}
     recorded = str(record.get("base_sha") or "")
-    if recorded:
-        return recorded
-    base = head_sha(worktree, runner=runner)
-    localstate.save_worker(paths, str(task_id), {"base_sha": base})
+    # Ordered by how much each answer knows. The merge base is derived from
+    # the branch itself and cannot go stale; a previously recorded value is
+    # the next best thing for a checkout git will not answer for; and HEAD is
+    # the original behaviour, which is still right for a worktree that has
+    # just been created and has no divergence to measure yet.
+    base = (
+        merge_base(worktree, runner=runner)
+        or recorded
+        or head_sha(worktree, runner=runner)
+    )
+    if base and base != recorded:
+        localstate.save_worker(paths, str(task_id), {"base_sha": base})
     return base
 
 

@@ -1,9 +1,17 @@
 """RFC 9457 problem details for every error this service returns.
 
-A body carries `type`, `title`, `status`, `detail`, and `instance` and nothing
-else. It never carries a player name, an email address, a jersey number, SQL, a
-SQLSTATE, a token, or a provider message: an error page is not a place to leak
-roster data, and a 404 must not become an existence oracle.
+A body carries `type`, `title`, `status`, `detail`, and `instance`. It never
+carries a player name, an email address, a jersey number, SQL, a SQLSTATE, a
+token, or a provider message: an error page is not a place to leak roster data,
+and a 404 must not become an existence oracle.
+
+One route may add RFC 9457 extension members, and only where a specification
+requires the client to recover from the error with data it is already
+authorised to read. `docs/04-api.md` requires the judgment edit conflict to
+return the latest coach-authored snapshot, because a coach whose draft lost a
+race cannot merge it back without seeing what it lost to. The reader is the
+team's own coach and row-level security has already decided that. Nothing is
+added implicitly: a route passes the member, or the body has none.
 """
 
 from typing import Any
@@ -29,6 +37,8 @@ DEFAULTS: dict[int, tuple[str, str]] = {
     503: ("service-unavailable", "Service unavailable"),
 }
 GENERIC = ("error", "Error")
+# The standard members. An extension may not shadow one of these.
+RESERVED = ("type", "title", "status", "detail", "instance")
 
 
 class Problem(Exception):
@@ -40,12 +50,14 @@ class Problem(Exception):
         detail: str,
         slug: str | None = None,
         title: str | None = None,
+        extensions: dict[str, Any] | None = None,
     ) -> None:
         default_slug, default_title = DEFAULTS.get(status, GENERIC)
         self.status = status
         self.slug = slug or default_slug
         self.title = title or default_title
         self.detail = detail
+        self.extensions = extensions or {}
         super().__init__(detail)
 
 
@@ -56,6 +68,7 @@ def render(
     title: str,
     detail: str,
     headers: dict[str, str] | None = None,
+    extensions: dict[str, Any] | None = None,
 ) -> Response:
     return JSONResponse(
         status_code=status,
@@ -68,6 +81,8 @@ def render(
             "detail": detail,
             # The path only. A query string could carry a caller-supplied value.
             "instance": request.url.path,
+            # Never overwrite a standard member with an extension.
+            **{k: v for k, v in (extensions or {}).items() if k not in RESERVED},
         },
     )
 
@@ -75,7 +90,14 @@ def render(
 def problem_handler(request: Request, exc: Exception) -> Response:
     if not isinstance(exc, Problem):  # pragma: no cover - registered for Problem
         exc = Problem(500, "The request could not be completed.")
-    return render(request, exc.status, exc.slug, exc.title, exc.detail)
+    return render(
+        request,
+        exc.status,
+        exc.slug,
+        exc.title,
+        exc.detail,
+        extensions=exc.extensions,
+    )
 
 
 def http_exception_handler(request: Request, exc: Exception) -> Response:

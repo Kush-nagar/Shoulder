@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `9d12581` (PR #37; carries #36 and #35) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8); Block 02 (Tasks 8-10, PR #10, status sync PR #11); Block 03 (Tasks 11-13, PR #13); Block 04 Task 14 (PR #21) |
-| Current block | Block 04. Task 15 is implemented and waiting in PR #32. No later product task is started. |
-| Current worker / branch | AgentOps three-writer upgrade / `agentops/verdict-sees-clean-review` |
-| Open PRs | #32 Task 15, now choosing an independent reviewer (DeepSeek, since Claude wrote it); #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and 8 commits behind a much-changed `main`; needs a rebase and its own verification before it can land |
-| Database revision | `0007_manual_observations` locally; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-19 on `agentops/verdict-sees-clean-review`: `scripts/check.ps1` end to end, exit 0 - 1334 Python tests (289 skipped, all Docker or remote dependent), of which 976 are AgentOps'; Node suites; contracts regenerated with no drift; production build; Chromium, Firefox and WebKit smoke; `git diff --check` clean. Evidence index: `docs/agentops-three-writer-verification.md`. |
+| Last verified `main` | `5ec99a9` (PR #40; carries #32, #35 to #39 before it) |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14 (PR #21) and 15 (PR #32) |
+| Current block | Block 04. Task 15 merged and reconciled. Task 16 is implemented on its branch by the local Codex lane and is being taken through verification and review by the loop. |
+| Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
+| Open PRs | #38 this record; #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and far behind a much-changed `main`; it needs a rebase and its own verification before it can land |
+| Database revision | `0008_coach_judgments` on `main`; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | Task 15, on its branch at `46984d4` and after: 1303 Python tests against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, migration 0008 downgraded to base and cleanly re-upgraded, six independent review rounds with nineteen findings all resolved; then reviewed independently by DeepSeek in CI and merged. The AgentOps work carries its own index at `docs/agentops-three-writer-verification.md`, last run green at 1398 tests. |
 | Blockers | none that require a human before Task 23 |
-| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's. Reconnect it only for Codex Cloud reviews specifically. |
-| Next action | Merge #32 once its independent review lands. Task 16 then needs its stale `blocked` lease cleared: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the new Codex lane fixes. The coordinator selects tasks by itself; do not dispatch by hand. |
+| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
+| Next action | None by hand. The loop is running and selects tasks itself; it carries Task 16 through verification, review, CI and merge, then Task 17. Tasks 23 and later stop until a human sets `gates.real_use_gate`. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -147,10 +147,16 @@ block, not inside it.
 
 ## Current state
 
-- Current phase: Phase C — Coach review. Task 14 is implemented on PR #21 and
-  awaits review and merge. Task 15 has not started.
+- Current phase: Phase C — Coach review. Task 14 is merged (PR #21). Task 15 —
+  coach judgments — is implemented and verified on
+  `block-04-t15-coach-judgments` and awaits merge on PR #32: migration 0008
+  adds `app.judgment` and the immutable `app.judgment_revision` behind one
+  SECURITY DEFINER write path, with SELECT-only grants for the runtime role.
+  Task 16 has not started.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: `D:\Shoulder`, branch `block-04-t14-manual-clip-marking`; one writer.
+- Checkout: `D:\Shoulder` sits on `main`; Task 15 is written in its own
+  worktree, `D:\Shoulder-agents\block-04-t15-coach-judgments`, on branch
+  `block-04-t15-coach-judgments`. One writer per checkout.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
 - Last verified: 2026-09-08; Task 5 local migration cycle, 75 database tests, 6 auth browser tests and full check passed. Hosted isolation was independently verified. All review verification blockers are resolved; see `docs/task-5-verification.md`.

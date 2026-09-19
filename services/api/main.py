@@ -3,6 +3,7 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from services.api.judgment_routes import router as judgment_router
 from services.api.observation_routes import router as observation_router
 from services.api.problems import install_problem_handlers
 from services.api.routes import router
@@ -12,6 +13,7 @@ app = FastAPI(title="Shoulder API", version="0.1.0", docs_url=None, redoc_url=No
 app.include_router(router)
 app.include_router(video_router)
 app.include_router(observation_router)
+app.include_router(judgment_router)
 install_problem_handlers(app)
 
 

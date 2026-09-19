@@ -937,7 +937,25 @@ def run(
 
 
 def worker_image(executor: Executor | None = None) -> str:
-    """The process image a recorded pid should still be running."""
+    """The process image a recorded pid should still be running.
+
+    The name of the harness is not the answer on Windows. `codex` and
+    `opencode` are installed by npm as `.CMD` shims, and a shim is executed by
+    `cmd.exe` -- so the pid this runtime records and later asks about belongs
+    to cmd, not to the harness. Answering "codex.exe" made `process_alive`
+    report a live worker as dead, which is worse than it sounds: a lease whose
+    owner looks gone is a lease another writer may take, and two writers on one
+    branch is the exact failure leases exist to prevent.
+
+    So the resolved path decides. Only Claude Code escaped this, by happening
+    to install a real `.exe`.
+    """
     name = getattr(executor, "name", "claude-cli")
     base = {"opencode": "opencode", "codex-cli": "codex"}.get(name, "claude")
-    return f"{base}.exe" if sys.platform == "win32" else base
+    if sys.platform != "win32":
+        return base
+    binary = getattr(executor, "binary", "") or base
+    resolved = shutil.which(binary) or ""
+    if resolved.lower().endswith((".cmd", ".bat")):
+        return "cmd.exe"
+    return f"{base}.exe"
