@@ -1613,6 +1613,10 @@ def run_once(
         )
 
     # ---------------------------------------------------- implement + verify
+    # What the attempt before this one wrote, and empty before any has run.
+    # The prompt for a retry is chosen from it, so it has to survive the turn
+    # of the loop rather than being bound inside one.
+    changed: list[str] = []
     for attempt in range(max_implementation):
         if attempt:
             # Escalation is the existing ladder: more effort first, then a
@@ -1653,7 +1657,20 @@ def run_once(
                 )
 
         _record(paths, task_id, phase="implementing")
-        if attempt == 0:
+        if not changed:
+            # Nothing on the branch yet: either this is the first attempt, or
+            # the one before it wrote nothing. Both get the ordinary
+            # implementation brief rather than a repair one, because a repair
+            # brief opens by telling the writer that a previous
+            # attempt is already on the branch and that its job is to fix the
+            # findings below and nothing else. After an empty implementation
+            # none of that is true: there is no diff, no pull request and no
+            # finding. Task 17 is why. One writer delegated the work to a
+            # background agent and returned having changed nothing, and both
+            # retries were then handed a repair brief, correctly found nothing
+            # to repair, and exited in under four seconds each -- so a single
+            # empty implementation spent every attempt the task had and blocked
+            # it. The task still had its whole implementation ahead of it.
             prompt = build_prompt(root, task_id, "implement")
         elif verdict.get("findings"):
             prompt = repair_prompt(

@@ -47,6 +47,11 @@ DISCIPLINE = """## Working rules
   diff, and a worker that finishes without changing a file has not done the
   task. Plan privately if it helps, then write the code.
 
+- Edit the files yourself, in this turn. Do not hand the implementation to a
+  background agent and report that it is running: nothing is watching for it,
+  this process is the run, and when it exits the work goes with it. A
+  subagent may read or search on your behalf; every write is yours.
+
 - Stay inside this task. Do not redesign adjacent systems or start a later task.
 - Public API types come from the FastAPI OpenAPI document. Never hand-write them.
 - Any schema change uses Alembic and includes RLS and grants in this task.
