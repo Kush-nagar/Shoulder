@@ -184,8 +184,13 @@ class TestTheHappyPath(ReviewLoopCase):
 class TestReviewCannotBeSkipped(ReviewLoopCase):
     def test_a_task_without_review_never_reports_ready_for_pr(self) -> None:
         """`--no-review` is a diagnostic, and diagnostics do not ship code."""
-        with mock.patch.object(local, "run_worker") as worker:
-            worker.return_value = {
+
+        def wrote(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            # Writes, like the other fixtures here: a worker that changes
+            # nothing is an implementation failure now, and this test is about
+            # --no-review rather than about an empty run.
+            (kwargs["worktree"] / "CHANGED.md").write_text("x\n", encoding="utf-8")
+            return {
                 "ok": True,
                 "outcome": "completed",
                 "run_id": "r",
@@ -193,6 +198,8 @@ class TestReviewCannotBeSkipped(ReviewLoopCase):
                 "cost_usd": 0.0,
                 "last_action": "done",
             }
+
+        with mock.patch.object(local, "run_worker", side_effect=wrote) as worker:
             with mock.patch.object(
                 local, "verify", return_value={"ok": True, "steps": [], "failed": None}
             ):

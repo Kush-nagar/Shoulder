@@ -1065,18 +1065,33 @@ def classify_outcome(
     run: Mapping[str, Any],
     verification: Mapping[str, Any] | None,
     violations: list[str],
+    changed: list[str] | None = None,
 ) -> str:
     """One word for what happened, in the order these things override each other.
 
     Governance comes first: a branch that edited what this system is permitted
     to do is refused whether or not its tests pass, because passing tests are
     not the question being asked.
+
+    A writer that changed nothing comes next, and it is a failure however
+    cheerfully the harness exited. Task 17 is why: the worker ran twenty-eight
+    turns, delegated to a planning agent, returned a plan, and reported
+    success. Verification then passed -- trivially, because an unchanged tree
+    is whatever `main` already was -- so the task went to review with an empty
+    diff, the reviewer had nothing to read, and the loop stopped on a task
+    nobody had written. Naming it here sends it back through the repair path
+    instead, which is what an implementation that did not happen deserves.
+
+    `changed` is optional only because callers that have not computed it yet
+    ask this the same question about a run that already failed.
     """
     if violations:
         return "governance_refused"
     if run.get("outcome") == "timeout":
         return "timeout"
     if not run.get("ok"):
+        return "implementation_failed"
+    if changed is not None and not changed:
         return "implementation_failed"
     if verification is None:
         return "unverified"
@@ -1663,10 +1678,22 @@ def run_once(
         if violations:
             outcome = "governance_refused"
             return finish(outcome, ", ".join(violations))
-        if not run["ok"]:
-            outcome = classify_outcome(run, None, [])
+        if not run["ok"] or not changed:
+            outcome = classify_outcome(run, None, [], changed)
+            detail = (
+                "implementation attempts exhausted"
+                if run["ok"] is False
+                else "the writer finished without changing anything"
+            )
             if attempt + 1 >= max_implementation:
-                return finish(outcome, "implementation attempts exhausted")
+                return finish(outcome, detail)
+            localstate.append_event(
+                paths,
+                "empty_implementation" if run["ok"] else "implementation_failed",
+                task_id=task_id,
+                attempt=attempt + 1,
+                last_action=str(run.get("last_action") or "")[:300],
+            )
             continue
 
         _record(paths, task_id, phase="verifying", changed_files=changed)
