@@ -54,10 +54,7 @@
       "privacy_enforcement": "account",
       "requires_privacy_confirmation": true,
       "$comment_privacy": "Because enforcement is account-level and this repository cannot read that setting, the lane stays ineligible until the account owner confirms it with `cli confirm-privacy --lane openrouter`. Failing closed is the point: Shoulder handles minors' data.",
-      "banned_namespaces": [
-        "anthropic",
-        "openai"
-      ],
+      "banned_namespaces": ["anthropic", "openai"],
       "$comment_banned": "Owner policy: Anthropic models are consumed only through claude_subscription and OpenAI models only through codex_cloud, both subscription-backed. A model in these families is ineligible on this lane at any price, even if the catalogue offers it and it is qualified. Enforced in routing as well as in the catalogue, so a stale or hand-edited state file cannot reintroduce one.",
       "reject_meta_routers": true,
       "$comment_meta": "A meta-router such as openrouter/auto picks a model at request time, so it could select an Anthropic or OpenAI model and break the rule above. It also makes the qualification verdict and the privacy contract describe a model that is not the one which runs."
@@ -138,10 +135,7 @@
       "effort": "low",
       "$comment": "Ceiling admits the cheap tier of every family (Haiku-class, nano-class, flash-class) and excludes mid and frontier tiers.",
       "prefer": "cheapest",
-      "prefer_lanes": [
-        "openrouter",
-        "claude_subscription"
-      ],
+      "prefer_lanes": ["openrouter", "claude_subscription"],
       "$comment_lanes": "Mechanical and exploratory work goes to the cheap OpenRouter tier first. Spending a subscription allowance on a rename is spending it twice."
     },
     "ROUTINE_CODING": {
@@ -152,10 +146,7 @@
       "max_input_usd_per_mtok": 2.0,
       "effort": "medium",
       "prefer": "cheapest",
-      "prefer_lanes": [
-        "claude_subscription",
-        "openrouter"
-      ]
+      "prefer_lanes": ["claude_subscription", "openrouter"]
     },
     "STRONG_CODING": {
       "min_context": 200000,
@@ -166,10 +157,7 @@
       "effort": "high",
       "prefer": "strongest",
       "$comment": "Above this class the ceiling caps waste and `prefer` picks the strongest model under it. Cheapest-first would send a task classified as strong to the cheap tier, which is the whole ladder collapsing into one rung.",
-      "prefer_lanes": [
-        "codex_local",
-        "claude_subscription"
-      ]
+      "prefer_lanes": ["codex_local", "claude_subscription"]
     },
     "FRONTIER_REASONING": {
       "min_context": 200000,
@@ -179,10 +167,7 @@
       "max_input_usd_per_mtok": 30.0,
       "effort": "xhigh",
       "prefer": "strongest",
-      "prefer_lanes": [
-        "codex_local",
-        "claude_subscription"
-      ],
+      "prefer_lanes": ["codex_local", "claude_subscription"],
       "$comment_lanes": "Security, authorisation, RLS, destructive behaviour and migrations all land here through the classifier's risk overrides, and they are the work this system can least afford to get wrong. Codex takes them first.",
       "$comment_effort": "Only CRITICAL complexity reaches this class, and CRITICAL is only reached by a security, destructive or migration risk, or by a task touching more surface than any other. None of those is a simple task, so the top of the ladder is not waste here. Everything ordinary stops at ROUTINE_CODING."
     },
@@ -194,9 +179,7 @@
       "max_input_usd_per_mtok": 30.0,
       "effort": "high",
       "prefer": "strongest",
-      "prefer_lanes": [
-        "codex_local"
-      ]
+      "prefer_lanes": ["codex_local"]
     },
     "LONG_HORIZON_AGENT": {
       "min_context": 400000,
@@ -206,10 +189,7 @@
       "max_input_usd_per_mtok": 30.0,
       "effort": "xhigh",
       "prefer": "strongest",
-      "prefer_lanes": [
-        "codex_local",
-        "claude_subscription"
-      ]
+      "prefer_lanes": ["codex_local", "claude_subscription"]
     }
   },
   "classification_to_class": {
@@ -235,12 +215,7 @@
       "EXTREME": "LONG_HORIZON_AGENT"
     }
   },
-  "effort_ladder": [
-    "low",
-    "medium",
-    "high",
-    "xhigh"
-  ],
+  "effort_ladder": ["low", "medium", "high", "xhigh"],
   "escalation": {
     "max_implementation_attempts": 3,
     "max_effort_escalations": 2,
@@ -264,9 +239,7 @@
     "$comment": "Ceilings for metered lanes only. Subscription lanes (Claude, Codex Cloud) spend an included allowance rather than API money and are never blocked by a dollar ceiling. Raising a ceiling is a deliberate human edit."
   },
   "qualification": {
-    "required_states": [
-      "QUALIFIED"
-    ],
+    "required_states": ["QUALIFIED"],
     "$comment": "A newly discovered model is CANDIDATE until it passes the synthetic suite, then QUALIFIED, or QUARANTINED on failure. Promotion happens only at a task boundary, never mid-task.",
     "requalify_after_days": 30
   },
