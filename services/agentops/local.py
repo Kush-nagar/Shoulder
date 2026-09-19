@@ -56,23 +56,30 @@ OPENCODE_BINARY = executors.OPENCODE_BINARY
 OPENROUTER_BASE_URL = executors.OPENROUTER_BASE_URL
 OPENROUTER_KEY_ENV = executors.OPENROUTER_KEY_ENV
 
-PROVIDERS = ("claude", "openrouter", "auto", "claude-first")
+PROVIDERS = ("claude", "codex", "openrouter", "auto", "claude-first")
 
 # What the operator's provider choice means for lane selection. Without this
 # the setting only changed a status line: routing still walked every policy
 # lane in priority order, so choosing `openrouter` kept running Claude.
 #
-# `claude-first` permits the same two lanes as `auto`. The difference is not
-# which lanes may run but what happens when the subscription allowance runs
-# out mid-task: see `failover_on_exhaustion`.
+# `claude-first` permits the same lanes as `auto`. The difference is not which
+# lanes may run but what happens when the subscription allowance runs out
+# mid-task: see `failover_on_exhaustion`.
+#
+# `codex_local` joined both on 2026-09-18. It is a separate subscription, so a
+# run with only Claude and OpenRouter permitted would leave an entire included
+# allowance unused -- and would have no lane at all for frontend work, which
+# policy no longer lets Claude write.
 PROVIDER_LANES: dict[str, tuple[str, ...]] = {
     "claude": ("claude_subscription",),
+    "codex": ("codex_local",),
     "openrouter": ("openrouter",),
-    "auto": ("claude_subscription", "openrouter"),
-    "claude-first": ("claude_subscription", "openrouter"),
+    "auto": ("claude_subscription", "codex_local", "openrouter"),
+    "claude-first": ("claude_subscription", "codex_local", "openrouter"),
 }
 
 CLAUDE_LANE = "claude_subscription"
+CODEX_LANE = "codex_local"
 
 # The subscription's rolling allowance window, used when the harness does not
 # print an explicit reset instant. Five hours is what Claude meters against and
@@ -364,7 +371,9 @@ def provider_status(config: Mapping[str, Any]) -> dict[str, Any]:
             "lanes": list(provider_lanes(config)),
         }
     executor = executors.for_lane(
-        "openrouter" if provider == "openrouter" else "claude_subscription"
+        {"openrouter": "openrouter", "codex": CODEX_LANE}.get(
+            provider, "claude_subscription"
+        )
     )
     ok, reason = executor.available()
     return {
@@ -421,9 +430,10 @@ def executor_argv(
     worktree: Path,
     config: Mapping[str, Any],
     lane: str = "claude_subscription",
+    effort: str = "",
 ) -> list[str]:
     """The harness command line for this lane, without the prompt."""
-    executor = executors.for_lane(lane)
+    executor = executors.for_lane(lane, effort=effort)
     return executor.argv(model, role, worktree, role_budget(config, role))
 
 
@@ -453,6 +463,7 @@ def run_worker(
     worktree: Path,
     config: Mapping[str, Any],
     lane: str = "claude_subscription",
+    effort: str = "",
     run_id: str | None = None,
     popen: Callable[..., Any] | None = None,
     on_spawn: Callable[[int], None] | None = None,
@@ -461,9 +472,13 @@ def run_worker(
 
     Which harness is not a new decision: the router already chose the lane, and
     policy already confines each model family to a lane, so the lane says which
-    of the two harnesses starts.
+    of the three harnesses starts.
+
+    `effort` is the tier the router picked. Only the Codex lane can act on it;
+    the others ignore it, which is why it is passed rather than folded into the
+    role budget that every harness reads.
     """
-    executor = executors.for_lane(lane)
+    executor = executors.for_lane(lane, effort=effort)
     return executors.run(
         executor,
         paths,
@@ -889,8 +904,44 @@ def load_leases(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
     return seeded
 
 
-def save_leases(paths: localstate.LocalPaths, tasks: dict[str, Any]) -> None:
-    localstate.write(paths.leases, tasks)
+def save_leases(
+    paths: localstate.LocalPaths,
+    tasks: dict[str, Any],
+    *,
+    task_id: int | None = None,
+) -> None:
+    """Persist the lease ledger, without discarding anyone else's entry.
+
+    `tasks` is one worker's in-memory snapshot, taken when that worker started.
+    Writing the whole of it back was correct while one writer existed and is a
+    data-loss bug now: a worker that began before its neighbour acquired a
+    lease has never seen that lease, so writing its snapshot deletes it. The
+    neighbour then holds a branch the ledger says nobody holds, the writer cap
+    counts one worker short, and the next coordinator hands the same task out
+    again -- two writers on one branch, which is the failure the lease exists
+    to prevent.
+
+    So a caller that changed one task says which, and only that entry is
+    merged into whatever is on disk now. A caller that legitimately owns the
+    whole document -- the reclaim sweep, or the claim path, both of which hold
+    the schedule lock while they read it -- passes nothing and writes it whole.
+    Either way the read and the write happen under one lock.
+    """
+    if task_id is None:
+        localstate.mutate(paths, paths.leases, lambda stored: stored.update(tasks))
+        return
+
+    key = str(task_id)
+    mine = (tasks.get("leases") or {}).get(key)
+
+    def change(stored: dict[str, Any]) -> None:
+        leases_on_disk = stored.setdefault("leases", {})
+        if mine is None:
+            leases_on_disk.pop(key, None)
+        else:
+            leases_on_disk[key] = mine
+
+    localstate.mutate(paths, paths.leases, change, {"leases": {}})
 
 
 def changed_paths(
@@ -1041,7 +1092,7 @@ def _finish(
         state_name = "ready_for_pr" if outcome != UNREVIEWED else UNREVIEWED
         lease["state"] = state_name
         lease["heartbeat_at"] = localstate.now()
-        save_leases(paths, tasks)
+        save_leases(paths, tasks, task_id=task_id)
         return {"lease_state": state_name, "escalated": False}
 
     if outcome == WAITING_PROVIDER:
@@ -1050,12 +1101,12 @@ def _finish(
         # task parked for one usage window never came back and its worktree
         # sat there forever.
         leases.park(tasks, task_id, reason="provider allowance exhausted")
-        save_leases(paths, tasks)
+        save_leases(paths, tasks, task_id=task_id)
         return {"lease_state": leases.WAITING_PROVIDER, "escalated": False}
 
     if outcome in ("governance_refused", "blocked"):
         leases.release(tasks, task_id, "blocked")
-        save_leases(paths, tasks)
+        save_leases(paths, tasks, task_id=task_id)
         return {"lease_state": "blocked", "escalated": False}
 
     if outcome in REPAIRABLE:
@@ -1063,18 +1114,18 @@ def _finish(
             leases.begin_repair(
                 tasks, dict(policy), task_id, reason="ci", once_key=once_key
             )
-            save_leases(paths, tasks)
+            save_leases(paths, tasks, task_id=task_id)
             return {"lease_state": "repairing", "escalated": True}
         except leases.RepairBudgetExhausted as exhausted:
             leases.release(tasks, task_id, "blocked")
-            save_leases(paths, tasks)
+            save_leases(paths, tasks, task_id=task_id)
             return {
                 "lease_state": "blocked",
                 "escalated": False,
                 "reason": str(exhausted),
             }
 
-    save_leases(paths, tasks)
+    save_leases(paths, tasks, task_id=task_id)
     return {"lease_state": lease.get("state"), "escalated": False}
 
 
@@ -1111,7 +1162,7 @@ def implement_once(
             if lease is not None:
                 lease["pid"] = pid
                 lease["image"] = image
-                save_leases(paths, tasks)
+                save_leases(paths, tasks, task_id=task_id)
 
     run = run_worker(
         root,
@@ -1122,6 +1173,7 @@ def implement_once(
         worktree=worktree,
         config=config,
         lane=assignment.lane,
+        effort=getattr(assignment, "effort", ""),
         popen=popen,
         on_spawn=lambda pid: on_spawn(pid, assignment.lane),
     )
@@ -1130,6 +1182,11 @@ def implement_once(
         task_id,
         model=assignment.harness_model,
         lane=assignment.lane,
+        # Recorded because on one lane it is applied rather than advisory:
+        # `codex exec -c model_reasoning_effort` really does set it, so a
+        # dashboard that omitted it would hide half of what was chosen.
+        effort=getattr(assignment, "effort", ""),
+        capability_class=getattr(assignment, "capability_class", ""),
         harness=run.get("harness"),
         provider=run.get("provider"),
         usage=run.get("usage"),
@@ -1274,7 +1331,12 @@ def reclaim_abandoned(
         lease["reclaimed_from"] = {"pid": pid, "at": localstate.now()}
         reclaimed.append(int(key))
     if reclaimed:
-        save_leases(paths, tasks)
+        # One entry at a time, because this sweep runs outside the schedule
+        # lock as well as inside it. Writing the whole ledger from a snapshot
+        # taken before the sweep began would delete any lease acquired since
+        # -- reclaiming an abandoned worker by abandoning a live one.
+        for reclaimed_id in reclaimed:
+            save_leases(paths, tasks, task_id=reclaimed_id)
         localstate.append_event(paths, "leases_reclaimed", tasks=reclaimed)
     return reclaimed
 
@@ -1400,7 +1462,7 @@ def run_once(
         return {"dispatched": False, "reason": str(conflict)}
     except leases.AttemptsExhausted as exhausted:
         leases.release(ctx.tasks, candidate.task.id, "blocked")
-        save_leases(paths, ctx.tasks)
+        save_leases(paths, ctx.tasks, task_id=candidate.task.id)
         return {"dispatched": False, "reason": f"BLOCKED_AUTOMATION: {exhausted}"}
 
     task_id = candidate.task.id
@@ -1605,6 +1667,7 @@ def run_once(
                 worktree=worktree,
                 config=config,
                 lane=plan.reviewer.lane,
+                effort=getattr(plan.reviewer, "effort", ""),
                 popen=popen,
             )
             if not review_run.get("ok"):
@@ -1656,7 +1719,7 @@ def run_once(
                     reason="review",
                     once_key=f"{run_id}-review-{cycle}",
                 )
-                save_leases(paths, ctx.tasks)
+                save_leases(paths, ctx.tasks, task_id=task_id)
             except leases.RepairBudgetExhausted as exhausted:
                 return finish("blocked", str(exhausted))
 

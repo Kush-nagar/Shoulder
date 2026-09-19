@@ -50,8 +50,10 @@ def task(
 def inputs(**overrides: object) -> routing.RoutingInputs:
     """Routing inputs with every lane usable unless a test says otherwise.
 
-    codex_cloud is qualified here because its gate is a proven end-to-end run
-    rather than a per-model verdict; TestCodexCloudLane covers the ungated case.
+    Both Codex lanes are qualified here because their gate is a proven
+    end-to-end run rather than a per-model verdict -- the OpenRouter catalogue
+    does not list the models a ChatGPT subscription runs, so it cannot issue a
+    verdict on them. TestCodexCloudLane covers the ungated case.
     """
     models = model_pool()
     base: dict[str, Any] = {
@@ -60,7 +62,7 @@ def inputs(**overrides: object) -> routing.RoutingInputs:
         "qualification": qualification(models),
         "provider_health": {},
         "budget_blocked": frozenset(),
-        "qualified_lanes": frozenset({"codex_cloud"}),
+        "qualified_lanes": frozenset({"codex_cloud", "codex_local"}),
     }
     base.update(overrides)
     return routing.RoutingInputs(**base)
@@ -115,7 +117,14 @@ class TestCostAwareSelection(unittest.TestCase):
             inputs(), classification("backend", "CRITICAL", security_risk=True)
         )
         self.assertEqual(chosen.capability_class, "FRONTIER_REASONING")
-        self.assertEqual(chosen.effort, "high")
+        # Owner decision, 2026-09-18: security, destructive and migration work
+        # starts at the top of the ladder instead of climbing to it. This class
+        # is only ever reached by a CRITICAL classification, and the classifier
+        # only reaches CRITICAL through a risk override or a task touching more
+        # surface than any other -- so there is no simple task here to waste it
+        # on, and a second attempt at RLS is more expensive than a better first.
+        self.assertEqual(chosen.effort, "xhigh")
+        self.assertEqual(chosen.lane, "codex_local")
 
     def test_selection_picks_the_cheapest_model_that_clears_the_bar(self) -> None:
         candidates = routing.eligible_models(
@@ -130,18 +139,29 @@ class TestCostAwareSelection(unittest.TestCase):
 class TestFrontendHardPolicy(unittest.TestCase):
     """14-17. Who may write the interface, and what may never be routed around.
 
-    The owner changed one rule on 2026-09-14: Claude became the primary writer
-    for functional interface work, so a canonical task containing UI no longer
-    stalls the autonomous loop. Everything else here is unchanged, and the
-    parts that are actually load bearing -- OpenRouter never writes frontend,
-    an unavailable lane never falls through to a forbidden one -- are asserted
-    harder than before, because a policy change is exactly when a restriction
-    gets loosened by accident.
+    The owner moved this rule twice. On 2026-09-14 Claude became the writer for
+    functional interface work, because no subscription-backed Codex worker
+    could run on this machine and a UI task would otherwise stall the loop. On
+    2026-09-18 the Codex CLI was installed and driven locally, so the reason
+    expired and frontend went back to Codex.
+
+    What never moved is the part that is actually load bearing: OpenRouter
+    never writes frontend, and an unavailable lane never falls through to a
+    forbidden one. Those are asserted harder than before, because a policy
+    change is exactly when a restriction gets loosened by accident.
     """
 
-    def test_claude_writes_the_interface_a_task_requires(self) -> None:
+    def test_codex_writes_the_interface_a_task_requires(self) -> None:
         chosen = routing.select(inputs(), classification("frontend", "ROUTINE"))
-        self.assertEqual(chosen.lane, "claude_subscription")
+        self.assertEqual(chosen.lane, "codex_local")
+        self.assertEqual(policy()["lanes"][chosen.lane]["provider"], "openai")
+
+    def test_claude_no_longer_writes_frontend(self) -> None:
+        """The 2026-09-14 exception is closed, and closed in policy."""
+        self.assertFalse(policy()["lanes"]["claude_subscription"]["may_write_frontend"])
+        for complexity in ("TRIVIAL", "ROUTINE", "COMPLEX", "CRITICAL", "EXTREME"):
+            chosen = routing.select(inputs(), classification("frontend", complexity))
+            self.assertNotEqual(chosen.lane, "claude_subscription", complexity)
 
     def test_deepseek_never_writes_frontend_code(self) -> None:
         """Unchanged by the owner decision, which covered the Claude lane only."""
@@ -156,9 +176,21 @@ class TestFrontendHardPolicy(unittest.TestCase):
         self.assertFalse(routing._lane_may_write(lane, "mixed", "implement"))
 
     def test_frontend_falls_to_codex_not_to_openrouter(self) -> None:
-        """Claude being down must not promote a lane forbidden to write UI."""
+        """A lane being down must not promote a lane forbidden to write UI."""
         chosen = routing.select(
             inputs(provider_health={"claude_subscription": "UNAVAILABLE"}),
+            classification("frontend", "ROUTINE"),
+        )
+        self.assertEqual(chosen.lane, "codex_local")
+        # And with the local CLI down too, the cloud mention lane -- still
+        # never OpenRouter.
+        chosen = routing.select(
+            inputs(
+                provider_health={
+                    "claude_subscription": "UNAVAILABLE",
+                    "codex_local": "UNAVAILABLE",
+                }
+            ),
             classification("frontend", "ROUTINE"),
         )
         self.assertEqual(chosen.lane, "codex_cloud")
@@ -170,6 +202,7 @@ class TestFrontendHardPolicy(unittest.TestCase):
                 inputs(
                     provider_health={
                         "claude_subscription": "UNAVAILABLE",
+                        "codex_local": "UNAVAILABLE",
                         "codex_cloud": "UNAVAILABLE",
                     }
                 ),
@@ -203,9 +236,39 @@ class TestEffortLadder(unittest.TestCase):
     def test_lowest_effort_is_chosen_initially(self) -> None:
         self.assertEqual(routing.effort_for(policy(), "CHEAP_MECHANICAL", 0), "low")
 
+    # Two classes now start at the top, and both are deliberate. A task only
+    # reaches FRONTIER_REASONING through a security, destructive or migration
+    # risk, or by being the largest thing in the backlog; it only reaches
+    # LONG_HORIZON_AGENT after two failed attempts, which is the escalation
+    # this principle was written about. Everything an ordinary task can reach
+    # still starts low and still has to earn its way up.
+    STARTS_AT_MAX_EFFORT = ("FRONTIER_REASONING", "LONG_HORIZON_AGENT")
+
     def test_max_effort_is_never_the_initial_default(self) -> None:
         for name in policy()["capability_classes"]:
+            if name in self.STARTS_AT_MAX_EFFORT:
+                continue
             self.assertNotEqual(routing.effort_for(policy(), name, 0), "xhigh", name)
+
+    def test_the_classes_that_start_at_max_effort_are_only_reached_by_risk(
+        self,
+    ) -> None:
+        """The exemption above is bounded by the classifier, not by trust.
+
+        If a future edit lets an ordinary task reach one of these classes, this
+        fails -- which is the point. The exemption is safe only while the only
+        routes in are a risk override or a repeated failure.
+        """
+        table = policy()["classification_to_class"]
+        for category, by_complexity in table.items():
+            for complexity, class_name in by_complexity.items():
+                if class_name not in self.STARTS_AT_MAX_EFFORT:
+                    continue
+                self.assertIn(
+                    complexity,
+                    ("CRITICAL", "EXTREME"),
+                    f"{category}/{complexity} reaches {class_name} without risk",
+                )
 
     def test_effort_escalates_one_step_at_a_time(self) -> None:
         self.assertEqual(routing.effort_for(policy(), "ROUTINE_CODING", 0), "medium")
@@ -250,7 +313,10 @@ class TestProviderFailover(unittest.TestCase):
     def test_budget_exhaustion_removes_an_api_lane(self) -> None:
         chosen = routing.select(
             inputs(
-                provider_health={"claude_subscription": "UNAVAILABLE"},
+                provider_health={
+                    "claude_subscription": "UNAVAILABLE",
+                    "codex_local": "UNAVAILABLE",
+                },
                 budget_blocked=frozenset({"openrouter"}),
             ),
             classification("backend", "ROUTINE"),
@@ -265,16 +331,13 @@ class TestProviderFailover(unittest.TestCase):
         self.assertEqual(chosen.lane, "claude_subscription")
 
     def test_every_lane_unavailable_blocks_safely(self) -> None:
+        # Every lane in policy, not a list written out here. A lane added later
+        # is covered the day it is added; a hand-written roster would have gone
+        # on passing while the new lane quietly took the work.
+        down = dict.fromkeys(policy()["lanes"], "UNAVAILABLE")
         with self.assertRaises(routing.RoutingBlocked) as raised:
             routing.select(
-                inputs(
-                    provider_health={
-                        "claude_subscription": "UNAVAILABLE",
-                        "codex_cloud": "AUTH_FAILED",
-                        "openrouter": "BUDGET_EXHAUSTED",
-                    }
-                ),
-                classification("backend", "ROUTINE"),
+                inputs(provider_health=down), classification("backend", "ROUTINE")
             )
         self.assertIn("BLOCKED_PROVIDER", raised.exception.reason)
         self.assertEqual(len(raised.exception.rejections), len(policy()["lanes"]))
@@ -508,11 +571,12 @@ class TestIndependentReview(unittest.TestCase):
         )
 
     def test_frontend_work_still_gets_a_non_openai_reviewer(self) -> None:
+        """Codex writes the interface now, so the reviewer must not be Codex."""
         routing_inputs = inputs()
         current = classification("frontend", "ROUTINE")
         writer = routing.select(routing_inputs, current)
         reviewer = routing.select_reviewer(routing_inputs, current, writer)
-        self.assertEqual(writer.lane, "claude_subscription")
+        self.assertEqual(writer.lane, "codex_local")
         # The point is independence, not a particular pair: the reviewer must
         # never be the family that wrote the branch.
         self.assertNotEqual(reviewer.lane, writer.lane)
@@ -608,8 +672,16 @@ class TestRealBacklogRouting(unittest.TestCase):
         routing_inputs = inputs(models=future, qualification=qualification(future))
         # Names the orchestrator has never seen still land in the right lane.
         frontend = routing.select(routing_inputs, classification("frontend", "ROUTINE"))
-        self.assertEqual(frontend.model, "anthropic/claude-next")
-        codex_only = routing.select(
+        self.assertEqual(frontend.lane, "codex_local")
+        # The lane runs the slug policy names, not one the catalogue picked:
+        # a ChatGPT subscription does not run OpenRouter's inventory. The
+        # catalogue entry is only the evidence that the class is satisfiable.
+        self.assertEqual(frontend.representative_model, "openai/gpt-next")
+        self.assertEqual(
+            frontend.harness_model,
+            policy()["lanes"]["codex_local"]["harness_model"],
+        )
+        claude_out = routing.select(
             inputs(
                 models=future,
                 qualification=qualification(future),
@@ -617,9 +689,14 @@ class TestRealBacklogRouting(unittest.TestCase):
             ),
             classification("frontend", "ROUTINE"),
         )
-        self.assertEqual(codex_only.model, "openai/gpt-next")
+        self.assertEqual(claude_out.lane, "codex_local")
+        # Mechanical work is the one class routed to the metered lane on
+        # purpose, to keep the subscription window for work that needs it.
         backend = routing.select(routing_inputs, classification("backend", "TRIVIAL"))
-        self.assertEqual(backend.model, "anthropic/claude-next")
+        self.assertEqual(backend.capability_class, "CHEAP_MECHANICAL")
+        self.assertEqual(backend.model, "deepseek/deepseek-v9")
+        real = routing.select(routing_inputs, classification("backend", "ROUTINE"))
+        self.assertEqual(real.model, "anthropic/claude-next")
         overflow = routing.select(
             routing_inputs,
             classification("backend", "TRIVIAL"),
@@ -627,12 +704,39 @@ class TestRealBacklogRouting(unittest.TestCase):
         )
         self.assertEqual(overflow.model, "deepseek/deepseek-v9")
 
-    def test_subscription_capacity_is_preferred_over_a_cheaper_api_lane(self) -> None:
+    def test_real_work_prefers_already_paid_subscription_capacity(self) -> None:
         """Already-paid capacity beats a lower per-token price on a metered lane.
 
         Spending API money while subscription allowance sits unused is the more
-        expensive choice, not the cheaper one, so lane priority decides first
-        and price decides within a lane.
+        expensive choice, not the cheaper one, so the lane decides first and
+        price decides within it.
+        """
+        pool = [
+            model("anthropic/claude-sonnet-5", "claude_subscription", price_in=2.0),
+            model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01),
+        ]
+        routing_inputs = inputs(models=pool, qualification=qualification(pool))
+        chosen = routing.select(routing_inputs, classification("backend", "ROUTINE"))
+        self.assertEqual(chosen.lane, "claude_subscription")
+        self.assertEqual(policy()["lanes"][chosen.lane]["billing"], "subscription")
+        self.assertEqual(
+            chosen.fallbacks, (("openrouter", "deepseek/deepseek-v4-flash"),)
+        )
+
+    def test_mechanical_work_deliberately_spends_metered_cents_instead(self) -> None:
+        """The one class where the rule above is inverted, on purpose.
+
+        Owner decision, 2026-09-18. The reasoning above treats dollars as the
+        scarce resource, and for real work it is. For mechanical work it is
+        not: a subscription's five-hour window is the thing that actually runs
+        out, and when it does every writer stalls at once, including the
+        security task that had no cheaper option. Renames and test scaffolding
+        are worth a fraction of a cent to keep that window for work that needs
+        it -- and with three writers running at a time, it is the window rather
+        than the invoice that binds first.
+
+        The subscription lane stays in the chain, so nothing is lost if the
+        cheap lane is unavailable.
         """
         pool = [
             model("anthropic/claude-haiku-4.5", "claude_subscription", price_in=1.0),
@@ -640,11 +744,28 @@ class TestRealBacklogRouting(unittest.TestCase):
         ]
         routing_inputs = inputs(models=pool, qualification=qualification(pool))
         chosen = routing.select(routing_inputs, classification("backend", "TRIVIAL"))
-        self.assertEqual(chosen.lane, "claude_subscription")
-        self.assertEqual(policy()["lanes"][chosen.lane]["billing"], "subscription")
-        self.assertEqual(
-            chosen.fallbacks, (("openrouter", "deepseek/deepseek-v4-flash"),)
+        self.assertEqual(chosen.capability_class, "CHEAP_MECHANICAL")
+        self.assertEqual(chosen.lane, "openrouter")
+        self.assertIn(
+            ("claude_subscription", "anthropic/claude-haiku-4.5"), chosen.fallbacks
         )
+
+    def test_mechanical_work_falls_back_to_the_subscription_when_metered_is_out(
+        self,
+    ) -> None:
+        pool = [
+            model("anthropic/claude-haiku-4.5", "claude_subscription", price_in=1.0),
+            model("deepseek/deepseek-v4-flash", "openrouter", price_in=0.01),
+        ]
+        chosen = routing.select(
+            inputs(
+                models=pool,
+                qualification=qualification(pool),
+                provider_health={"openrouter": "COOLDOWN"},
+            ),
+            classification("backend", "TRIVIAL"),
+        )
+        self.assertEqual(chosen.lane, "claude_subscription")
 
 
 if __name__ == "__main__":
@@ -739,6 +860,7 @@ class TestReviewFindings(unittest.TestCase):
             qualification=qualification(pool),
             provider_health={
                 "claude_subscription": "UNAVAILABLE",
+                "codex_local": "UNAVAILABLE",
                 "codex_cloud": "UNAVAILABLE",
             },
         )
@@ -807,13 +929,17 @@ class TestCodexCloudLane(unittest.TestCase):
     def qualified(self, **overrides: object) -> routing.RoutingInputs:
         """Inputs that actually reach this lane.
 
-        Claude is cooled rather than the assertions changed. These tests are
-        about Codex Cloud's mechanics -- mention delivery, advisory tier, lane
-        qualification -- and frontend work was only ever the vehicle for
-        getting here. Since 2026-09-14 Claude writes frontend too, so the
-        vehicle needed replacing; what each test checks did not.
+        The other lanes are cooled rather than the assertions changed. These
+        tests are about Codex Cloud's own mechanics -- mention delivery,
+        advisory tier, lane qualification -- and frontend work was only ever
+        the vehicle for getting here. The vehicle has been replaced twice now:
+        Claude took frontend in 2026-09-14, and the local Codex CLI took it in
+        2026-09-18 and outranks this lane. What each test checks did not change.
         """
-        overrides.setdefault("provider_health", {"claude_subscription": "COOLDOWN"})
+        overrides.setdefault(
+            "provider_health",
+            {"claude_subscription": "COOLDOWN", "codex_local": "COOLDOWN"},
+        )
         return inputs(**overrides)
 
     def test_frontend_work_goes_to_the_subscription_lane(self) -> None:
@@ -910,6 +1036,7 @@ class TestCodexExhaustion(unittest.TestCase):
                 self.qualified(
                     provider_health={
                         "codex_cloud": "COOLDOWN",
+                        "codex_local": "COOLDOWN",
                         "claude_subscription": "COOLDOWN",
                     }
                 ),
@@ -1210,21 +1337,46 @@ class TestAdvisoryModelReporting(unittest.TestCase):
     """A lane that cannot pick a model must not report one as if it did."""
 
     def _non_enforcing(self, complexity: str) -> routing.Assignment:
-        """Reach the lane that cannot be told which model to run.
+        """Reach Codex Cloud, the lane that cannot be told which model to run.
 
-        Codex Cloud is the non-enforcing lane, and frontend work used to be the
-        only way in. Since 2026-09-14 Claude writes frontend too, so this cools
-        Claude instead of changing what the tests below assert.
+        Frontend work used to be the only way in. Claude took frontend in
+        2026-09-14 and the local Codex CLI took it in 2026-09-18, so both are
+        cooled here rather than changing what the tests below assert.
         """
         return routing.select(
-            inputs(provider_health={"claude_subscription": "COOLDOWN"}),
+            inputs(
+                provider_health={
+                    "claude_subscription": "COOLDOWN",
+                    "codex_local": "COOLDOWN",
+                }
+            ),
             classification("frontend", complexity),
         )
 
     def test_a_non_enforcing_lane_reports_no_harness_model(self) -> None:
         chosen = self._non_enforcing("COMPLEX")
+        self.assertEqual(chosen.lane, "codex_cloud")
         self.assertFalse(chosen.model_enforced)
         self.assertEqual(chosen.harness_model, "account-configured")
+
+    def test_a_lane_that_names_its_slug_reports_that_slug_instead(self) -> None:
+        """The other half of the same rule, and the reason it is not one rule.
+
+        codex_local is also not catalogue-chosen -- a ChatGPT subscription does
+        not run OpenRouter's inventory -- but `codex exec -m` does take a slug
+        and `-c model_reasoning_effort` does take the routed effort. Reporting
+        "account-configured" there would understate what was applied, in the
+        same way reporting a slug for the mention lane would overstate it.
+        """
+        chosen = routing.select(inputs(), classification("frontend", "COMPLEX"))
+        self.assertEqual(chosen.lane, "codex_local")
+        self.assertFalse(chosen.model_enforced)
+        self.assertEqual(
+            chosen.harness_model, policy()["lanes"]["codex_local"]["harness_model"]
+        )
+        self.assertNotIn("advisory", chosen.reason)
+        # The evidence that the tier was satisfiable is still a real entry.
+        self.assertTrue(chosen.representative_model)
 
     def test_it_still_records_evidence_the_tier_was_satisfiable(self) -> None:
         chosen = self._non_enforcing("COMPLEX")
@@ -1423,7 +1575,10 @@ class TestOpenRouterFamilyPolicy(unittest.TestCase):
         # COMPLEX, because gpt-5.5 at $5/Mtok sits above the ROUTINE_CODING
         # ceiling: the real Task 14 reaches this lane the same way.
         chosen = self._select(pool, category="frontend", complexity="COMPLEX")
-        self.assertEqual(chosen.lane, "codex_cloud")
+        # Which Codex lane takes it is a routing preference and has moved
+        # twice. That it is never OpenRouter is the rule under test.
+        self.assertNotEqual(chosen.lane, "openrouter")
+        self.assertEqual(policy()["lanes"][chosen.lane]["provider"], "openai")
 
     def test_frontend_work_blocks_when_only_openrouter_is_up(self) -> None:
         pool = [model("deepseek/deepseek-v4-flash-0731", "openrouter", price_in=0.04)]
@@ -1432,6 +1587,7 @@ class TestOpenRouterFamilyPolicy(unittest.TestCase):
                 pool,
                 category="frontend",
                 claude_subscription="UNAVAILABLE",
+                codex_local="UNAVAILABLE",
                 codex_cloud="UNAVAILABLE",
             )
 
@@ -1444,11 +1600,16 @@ class TestOpenRouterFamilyPolicy(unittest.TestCase):
         self.assertEqual(chosen.lane, "claude_subscription")
         self.assertEqual(chosen.model, "anthropic/claude-haiku-4.5")
 
-    def test_the_codex_cloud_lane_is_unaffected(self) -> None:
+    def test_the_codex_lanes_are_unaffected(self) -> None:
+        """The ban is on OpenRouter carrying an OpenAI model, not on OpenAI."""
         pool = [model("openai/gpt-5.5", "codex_cloud", price_in=5.0)]
         chosen = self._select(pool, category="frontend", complexity="COMPLEX")
-        self.assertEqual(chosen.lane, "codex_cloud")
+        self.assertEqual(policy()["lanes"][chosen.lane]["provider"], "openai")
         self.assertFalse(chosen.model_enforced)
+        cloud = self._select(
+            pool, category="frontend", complexity="COMPLEX", codex_local="COOLDOWN"
+        )
+        self.assertEqual(cloud.lane, "codex_cloud")
 
     def test_the_policy_states_the_ban_rather_than_relying_on_code(self) -> None:
         lane = policy()["lanes"]["openrouter"]

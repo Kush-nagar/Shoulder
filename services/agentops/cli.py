@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -395,6 +396,38 @@ def cmd_spend(args: argparse.Namespace) -> int:
     )
 
 
+def _writer_lane_from_pull_request(number: int, repo: str | None) -> str:
+    """The writer lane a pull request records in its own body.
+
+    Read from GitHub rather than from local state, because the review workflow
+    runs on a checkout that has neither the branch's lease nor its worktree.
+    A failure to read it is not an error here: the caller treats an unknown
+    writer as a refusal, which is the safe direction.
+    """
+    command = ["pr", "view", str(number), "--json", "body"]
+    if repo:
+        command += ["--repo", repo]
+    try:
+        result = subprocess.run(
+            ["gh", *command],
+            capture_output=True,
+            text=True,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return ""
+    return project.writer_lane_of(str(payload.get("body") or ""))
+
+
 def cmd_reviewer(args: argparse.Namespace) -> int:
     """Emit the independent reviewer assignment for a task.
 
@@ -416,17 +449,60 @@ def cmd_reviewer(args: argparse.Namespace) -> int:
     # since recovered, the writer could be named as its own reviewer.
     lease = ctx.tasks.get("leases", {}).get(str(args.task)) or {}
     recorded = (lease.get("assignment") or {}).get("lane")
+    source = "lease" if recorded else ""
+
+    # Failing that, what the pull request itself says. The lease that records
+    # the writer lives in the local runtime's ignored state, which the review
+    # workflow cannot see, so in this deployment the lease is almost never
+    # there and the fallback below is what actually runs.
+    if not recorded and getattr(args, "pull_request", None):
+        recorded = _writer_lane_from_pull_request(args.pull_request, args.repo)
+        source = "pull-request" if recorded else source
+
+    if not recorded or recorded not in ctx.policy["lanes"]:
+        # Deliberately not a guess. Recomputing the writer here is what put
+        # Claude forward to review a branch Claude had written: routing had
+        # changed since dispatch, so the recomputed writer was Codex, the
+        # Anthropic family looked independent, and the merge gate would have
+        # accepted a self-review as the independent one. An unknown writer
+        # means no reviewer can be shown to be independent, and saying so is
+        # the only safe answer.
+        _emit(
+            {
+                "ok": False,
+                "task": task.id,
+                "reason": (
+                    "cannot establish which lane wrote this branch, so no "
+                    "reviewer can be shown to be independent of it"
+                ),
+                "remedy": (
+                    "pass --pull-request so the writer marker in its body can "
+                    "be read, or run where the lease ledger is visible"
+                ),
+            }
+        )
+        return 1
+
+    # A lane the caller cannot actually start is not a reviewer. The local
+    # Codex lane runs `codex exec` on this workstation against a subscription
+    # that exists nowhere else, so a GitHub Actions job that chose it would
+    # find no step to run, report success having reviewed nothing, and leave
+    # the verdict waiting forever for a review that cannot arrive.
+    unusable = {
+        name
+        for name, lane in ctx.policy["lanes"].items()
+        if str(lane.get("mechanism", "")) in set(args.exclude_mechanism or ())
+    }
     try:
-        if recorded and recorded in ctx.policy["lanes"]:
-            writer_family = ctx.policy["lanes"][recorded]["provider"]
-            reviewer = routing.select(
-                inputs, classification, purpose="review", exclude_family=writer_family
-            )
-            writer_lane = recorded
-        else:
-            writer = routing.select(inputs, classification)
-            reviewer = routing.select_reviewer(inputs, classification, writer)
-            writer_lane = writer.lane
+        writer_family = ctx.policy["lanes"][recorded]["provider"]
+        reviewer = routing.select(
+            inputs,
+            classification,
+            purpose="review",
+            exclude_family=writer_family,
+            exclude_lanes=frozenset(unusable),
+        )
+        writer_lane = recorded
     except routing.RoutingBlocked as blocked:
         _emit({"ok": False, "reason": blocked.reason, "rejections": blocked.rejections})
         return 1
@@ -436,7 +512,8 @@ def cmd_reviewer(args: argparse.Namespace) -> int:
             "ok": True,
             "task": task.id,
             "writer_lane": writer_lane,
-            "writer_from_lease": bool(recorded),
+            "writer_source": source,
+            "writer_from_lease": source == "lease",
             "lane": reviewer.lane,
             "model": reviewer.harness_model,
             "effort": reviewer.effort,
@@ -1420,6 +1497,24 @@ def build_parser() -> argparse.ArgumentParser:
         "reviewer", help="print the independent reviewer assignment for a task"
     )
     reviewer.add_argument("--task", type=int, required=True)
+    reviewer.add_argument(
+        "--pull-request",
+        type=int,
+        help=(
+            "read the writer lane from this pull request's body when no lease "
+            "records it; without it an unknown writer is a refusal"
+        ),
+    )
+    reviewer.add_argument("--repo", help="owner/name, for --pull-request")
+    reviewer.add_argument(
+        "--exclude-mechanism",
+        action="append",
+        default=[],
+        help=(
+            "skip lanes reached this way, for a caller that cannot start them; "
+            "GitHub Actions passes local-cli"
+        ),
+    )
     reviewer.set_defaults(func=cmd_reviewer)
 
     lane_q = sub.add_parser(

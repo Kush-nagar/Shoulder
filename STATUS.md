@@ -9,17 +9,27 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `95cc6ae` (PR #33; carries PR #31 before it) |
+| Last verified `main` | `6cf1c5d` (PR #36; carries #35, #33 and #31 before it) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Task 14 (PR #21, `b64941d`) |
 | Current block | Block 04. Task 14 merged; Task 15 implemented and verified on this branch, awaiting merge; Task 16 not started. |
 | Current worker / branch | Task 15 coach judgments / `block-04-t15-coach-judgments` |
-| Open PRs | #32 Task 15 coach judgments (this branch). #31 and #33 are merged; #34 was withdrawn after review showed the fix inert. |
+| Open PRs | #32 Task 15 coach judgments (this branch). #27 live bootstrap hotfix from 2026-09-15 still holds unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and is far behind a much-changed `main`; it needs a rebase and its own verification before it can land. #31, #33, #35 and #36 are merged; #34 was withdrawn after review showed the fix inert. |
 | Database revision | `0008_coach_judgments` on this branch, applied and downgraded against a local Postgres 17.6; `main` is on `0007_manual_observations`; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | 2026-09-17 on `block-04-t15-coach-judgments`, rebased onto `95cc6ae`, at `46984d4` and after: 1303 Python tests passed against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff format, ruff lint and mypy clean; contracts regenerated with no drift; Node suites, production build and Chromium/Firefox/WebKit smoke pass. CI `quality` green. Six independent review rounds, nineteen findings, all answered and resolved. |
+| Last full verification | Task 15, 2026-09-17 on this branch at `46984d4` and after: 1303 Python tests against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, 93 skipped and none of them a judgment suite; migration 0008 downgraded to base and cleanly re-upgraded; ruff, mypy, contracts, Node suites, production build and Chromium/Firefox/WebKit smoke all clean. Six independent review rounds, nineteen findings, all resolved. Merged `main` on 2026-09-19 brings the AgentOps three-writer work; its own evidence index is `docs/agentops-three-writer-verification.md`. |
 | Blockers | none that require a human before Task 23 |
-| Bootstrap blocker | none; every owner action is complete (both secrets set, Claude GitHub App installed, Codex Cloud connected, OpenRouter privacy confirmed) |
-| Next action | Merge PR #32, then reconcile and let the coordinator select Task 16. The local runtime needs no owner action: `.\agentops.ps1` starts it. The cloud loop still does - add the GitHub Actions app (id 15368) as a bypass actor on the `main protection` ruleset, or the bot's `ops/state` pushes are rejected with GH013 - and `AUTONOMY_ENABLED` stays false until then. |
+| Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it any more - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
+| Next action | Merge PR #32 once its independent review lands, then reconcile and let the coordinator select Task 16. Task 16 first needs its stale `blocked` lease cleared in `.agentops/local/leases.json`: it dead-ended on 2026-09-17 with `BLOCKED_PROVIDER: no authorised lane can implement a mixed/EXTREME task`, which the local Codex lane now takes at `xhigh`. The local runtime needs no owner action; `.\agentops.ps1` starts it. |
 
+### Concurrency and routing, as of 2026-09-19
+
+`max_parallel_writers` is 3 and shared-ledger writes are locked, so three
+writable workers are safe. The canonical backlog cannot use them: Tasks 15 to
+22 are a strict chain, each waiting on the one before, so the scheduler
+correctly runs one writer. Every one of those tasks is either frontend or
+carries a security, destructive or migration risk, so all of them route to the
+local Codex lane; Claude writes none of the remainder and the whole chain sits
+on one subscription window. Tasks 23 and later cannot start at all:
+`gates.real_use_gate` is false and only a human sets it.
 
 The rows above are the human narrative. Completion and next-task selection are maintained below by the orchestrator; where the two disagree, the managed block is the one derived from Git.
 

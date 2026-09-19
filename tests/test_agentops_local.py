@@ -23,7 +23,7 @@ from unittest import mock
 
 from agentops_fixtures import REPO_ROOT, installed_harnesses
 
-from services.agentops import local, localstate
+from services.agentops import local, localstate, state
 
 
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -478,28 +478,38 @@ class TestTheRunLoopRefusesBeforeItStarts(LoopCase):
 
 class TestTheWriterCap(LoopCase):
     def test_the_cap_comes_from_policy_and_is_enforced(self) -> None:
-        """max_parallel_writers is 1 in the shipped policy. A second writer is
-        refused by the existing lease module, not by a local reimplementation."""
+        """A writer past the cap is refused by the existing lease module.
+
+        The cap is filled from policy rather than assumed to be one: it was
+        raised to three on 2026-09-19, and a test that hard-codes the old
+        number stops testing the ceiling and starts testing the constant.
+        """
         local.enable_local(self.paths, by="test")
         self.enterContext(installed_harnesses(claude=True, opencode=False))
+        cap = int(
+            state.load_policy(state.Paths(self.root))["autonomy"][
+                "max_parallel_writers"
+            ]
+        )
         localstate.write(
             self.paths.leases,
             {
                 "leases": {
-                    "99": {
-                        "task_id": 99,
-                        "owner": "someone-else",
-                        "branch": "block-99",
+                    str(90 + index): {
+                        "task_id": 90 + index,
+                        "owner": f"someone-else-{index}",
+                        "branch": f"block-{90 + index}",
                         "state": "implementing",
                         "heartbeat_at": localstate.now(),
                         "attempts": 1,
                     }
+                    for index in range(cap)
                 }
             },
         )
         result = local.run_once(self.root, self.paths)
         self.assertFalse(result["dispatched"])
-        self.assertIn("max_parallel_writers=1", result["reason"])
+        self.assertIn(f"max_parallel_writers={cap}", result["reason"])
 
     def test_the_cap_is_read_rather_than_hardcoded(self) -> None:
         """The runtime must keep working unchanged when the value becomes 2."""

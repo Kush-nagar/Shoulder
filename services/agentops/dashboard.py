@@ -130,15 +130,28 @@ def snapshot(root: Path, paths: localstate.LocalPaths) -> dict[str, Any]:
     except Exception as failure:  # noqa: BLE001 - the page must still render
         data["coordinator"] = {"error": str(failure)[:300]}
 
+    # Liveness and retry count live in the lease ledger rather than the worker
+    # record, and with several workers running at once "which of these is still
+    # beating" is the first question the page has to answer.
+    lease_rows = local.read_leases(root, paths).get("leases") or {}
+
     for key, record in sorted(localstate.worker_records(paths).items()):
+        lease = lease_rows.get(str(record.get("task_id", key))) or {}
         data["workers"].append(
             {
                 "task_id": record.get("task_id", key),
                 "title": record.get("task_title", ""),
                 "role": record.get("role", ""),
                 "model": record.get("model", ""),
+                "effort": record.get("effort", ""),
+                "capability_class": record.get("capability_class", ""),
                 "lane": record.get("lane", ""),
                 "provider": record.get("provider", ""),
+                "heartbeat": _elapsed(
+                    lease.get("heartbeat_at") or lease.get("acquired_at")
+                ),
+                "lease_state": lease.get("state", ""),
+                "attempts": int(lease.get("attempts") or 0),
                 "branch": record.get("branch", ""),
                 "worktree": record.get("worktree", ""),
                 "harness": record.get("harness", ""),
@@ -307,12 +320,16 @@ def page(data: dict[str, Any], control_panel: str = "") -> str:
                         ("title", worker.get("title")),
                         ("role", worker.get("role")),
                         ("model", worker.get("model")),
+                        ("effort", worker.get("effort") or "-"),
                         ("provider", worker.get("provider")),
                         ("harness", worker.get("harness")),
                         ("lane", worker.get("lane")),
                         ("branch", worker.get("branch")),
                         ("worktree", worker.get("worktree")),
                         ("elapsed", worker.get("elapsed")),
+                        ("heartbeat", worker.get("heartbeat") or "-"),
+                        ("lease", worker.get("lease_state") or "-"),
+                        ("attempts", worker.get("attempts")),
                         (
                             "verification",
                             "-"

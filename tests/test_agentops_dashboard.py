@@ -20,7 +20,7 @@ from unittest import mock
 
 from agentops_fixtures import REPO_ROOT, installed_harnesses
 
-from services.agentops import dashboard, localstate
+from services.agentops import dashboard, localstate, state
 
 
 class DashboardCase(unittest.TestCase):
@@ -150,7 +150,14 @@ class TestWhatThePageShows(DashboardCase):
         data = json.loads(body)
         self.assertIn("cloud_autonomy_enabled", data["coordinator"])
         self.assertFalse(data["local_execution"]["enabled"])
-        self.assertEqual(data["coordinator"]["max_parallel_writers"], 1)
+        self.assertEqual(
+            data["coordinator"]["max_parallel_writers"],
+            int(
+                state.load_policy(state.Paths(self.root))["autonomy"][
+                    "max_parallel_writers"
+                ]
+            ),
+        )
 
     def test_local_and_cloud_permissions_are_stated_separately(self) -> None:
         """Conflating them is what made the local runtime unusable while the
