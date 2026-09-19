@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `5ec99a9` (PR #40; carries #32, #35 to #39 before it) |
+| Last verified `main` | `9d3ba52` (PR #41; carries #32 and #35 to #40 before it) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14 (PR #21) and 15 (PR #32) |
-| Current block | Block 04. Task 15 merged and reconciled. Task 16 is implemented on its branch by the local Codex lane and is being taken through verification and review by the loop. |
+| Current block | Block 04. Task 15 merged and reconciled. Task 16 is implemented on this branch by the local Codex lane and is in review as PR #42. |
 | Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
-| Open PRs | #38 this record; #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and far behind a much-changed `main`; it needs a rebase and its own verification before it can land |
-| Database revision | `0008_coach_judgments` on `main`; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | Task 15, on its branch at `46984d4` and after: 1303 Python tests against Postgres 17.6 with `REQUIRE_DATABASE_TESTS=1` and `ALLOW_POLICY_MUTATION=1`, migration 0008 downgraded to base and cleanly re-upgraded, six independent review rounds with nineteen findings all resolved; then reviewed independently by DeepSeek in CI and merged. The AgentOps work carries its own index at `docs/agentops-three-writer-verification.md`, last run green at 1398 tests. |
-| Blockers | none that require a human before Task 23 |
+| Open PRs | #42 Task 16 (this branch), reviewed by Claude because Codex wrote it; #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and far behind a much-changed `main`; it needs a rebase and its own verification before it can land |
+| Database revision | `0009_draft_recovery` on this branch; `main` is on `0008_coach_judgments`; `Shoulder Dev` is still on `0005_video_ingest` |
+| Last full verification | Task 16, 2026-09-19 on this branch: `scripts/check-marking.ps1` against real Auth, Postgres and MinIO, 9 of 9 in Chromium, Firefox and WebKit, including "five judgment drafts survive a lost response, reload, and stale edit without loss" -- run twice, the second time with assertions strengthened to check each clip's bounds rather than only that five list items exist. `scripts/check.ps1` end to end, exit 0. Task 15 and the AgentOps work carry their own records; the latter is indexed at `docs/agentops-three-writer-verification.md`. |
+| Blockers | none that require a human before Task 23. See the standing CI gap below: it predates this task and does not block it. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | None by hand. The loop is running and selects tasks itself; it carries Task 16 through verification, review, CI and merge, then Task 17. Tasks 23 and later stop until a human sets `gates.real_use_gate`. |
+| Next action | None by hand. Task 16 goes through independent review, CI and merge, then the loop selects Task 17. Tasks 23 and later stop until a human sets `gates.real_use_gate`. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -46,6 +46,28 @@ Maintained by `services/agentops/reconcile.py`. Edit around this
 block, not inside it.
 
 <!-- agentops:progress:end -->
+
+### Standing gap: the Docker-backed suites do not run in CI
+
+`scripts/check.ps1`, which is what CI runs, executes the smoke suite only. The
+marking, player, roster, upload, auth and playback-budget suites each need the
+Supabase CLI stack with a real Auth server plus MinIO, and CI substitutes a
+bare `postgres` service. So four of the suites that carry load-bearing
+guarantees run on a workstation and nowhere else.
+
+This is not new and Task 16 did not introduce it: every task from 1 to 15
+shipped this way, including Task 14, which is the task that created
+`tests/marking.spec.mjs`. The worker on Task 16 read
+`docs/11-testing-quality.md`, concluded CI must invoke the suite, and stopped
+rather than editing `.github/workflows/` to add it -- which was the right call,
+because an autonomous branch editing workflow files is exactly what the
+governance guard refuses.
+
+It is recorded here rather than treated as a blocker, because the standard the
+repository actually holds is a local run of the suite, and that run was made:
+9 of 9 in three browsers, on 2026-09-19. Closing the gap means running the
+Supabase stack inside Actions, which is its own piece of work and needs an
+owner decision.
 
 ### Environment limitations on this workstation
 
@@ -147,12 +169,12 @@ block, not inside it.
 
 ## Current state
 
-- Current phase: Phase C — Coach review. Task 14 is merged (PR #21). Task 15 —
-  coach judgments — is implemented and verified on
-  `block-04-t15-coach-judgments` and awaits merge on PR #32: migration 0008
-  adds `app.judgment` and the immutable `app.judgment_revision` behind one
-  SECURITY DEFINER write path, with SELECT-only grants for the runtime role.
-  Task 16 has not started.
+- Current phase: Phase C — Coach review. Tasks 14 and 15 are merged. Task 16
+  is implemented and verified on
+  `block-04-t16-draft-preservation-and-conflict-recovery`: local drafts save
+  on every change, retry interrupted observation creation by client UUID,
+  reconcile accepted writes whose responses are lost, restore after
+  reload/offline, and preserve both sides of genuine version conflicts.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
 - Checkout: `D:\Shoulder` sits on `main`; Task 15 is written in its own
   worktree, `D:\Shoulder-agents\block-04-t15-coach-judgments`, on branch

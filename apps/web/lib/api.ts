@@ -20,6 +20,7 @@ export type VideoSummary = Schema["VideoSummary"];
 export type PlaybackUrl = Schema["PlaybackUrl"];
 export type Timeline = Schema["Timeline"];
 export type Observation = Schema["Observation"];
+export type Judgment = Schema["Judgment"];
 export type InviteResult = Schema["InviteResult"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */

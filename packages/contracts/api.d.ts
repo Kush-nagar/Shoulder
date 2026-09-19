@@ -168,6 +168,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/observations/{observation_id}/judgment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Load Observation Judgment */
+        get: operations["load_observation_judgment_v1_observations__observation_id__judgment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/observations/{observation_id}/judgments": {
         parameters: {
             query?: never;
@@ -951,6 +968,8 @@ export interface components {
         };
         /** ObservationCreate */
         ObservationCreate: {
+            /** Client Id */
+            client_id?: string | null;
             /**
              * Player Id
              * Format: uuid
@@ -1571,6 +1590,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    load_observation_judgment_v1_observations__observation_id__judgment_get: {
+        parameters: {
+            query: {
+                goal_id: string;
+            };
+            header?: never;
+            path: {
+                observation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Judgment"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchGame, fetchRoster, type VideoSummary } from "../../../../lib/api";
+import { requireCoachSession } from "../../session";
 import { PageHeader } from "../../shell";
-import { requireCoach } from "../../session";
 import { metadata, panel, sectionTitle } from "../../ui";
 import { CoachPlayer } from "./player";
 
@@ -51,7 +51,7 @@ export default async function GamePage({
 }: {
   params: Promise<{ game_id: string }>;
 }) {
-  const token = await requireCoach();
+  const { token, userId } = await requireCoachSession();
   const { game_id } = await params;
   const game = await fetchGame(token, game_id);
   // Absent and hidden share one surface, so a coach outside the team learns
@@ -67,7 +67,11 @@ export default async function GamePage({
       <div className="grid gap-6 px-5 py-6 md:px-6 lg:px-8">
         {ready ? (
           <>
-            <CoachPlayer videoId={ready.id} label={gameLabel(game)} />
+            <CoachPlayer
+              videoId={ready.id}
+              coachId={userId}
+              label={gameLabel(game)}
+            />
             <section className={`${panel} p-5`}>
               <h2 className={sectionTitle}>Mark clips for a player</h2>
               {roster?.length ? (

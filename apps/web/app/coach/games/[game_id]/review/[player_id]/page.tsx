@@ -5,7 +5,7 @@ import {
   fetchObservations,
   fetchRoster,
 } from "../../../../../../lib/api";
-import { requireCoach } from "../../../../session";
+import { requireCoachSession } from "../../../../session";
 import { focus, metadata } from "../../../../ui";
 import { CoachPlayer } from "../../player";
 
@@ -23,7 +23,7 @@ export default async function ReviewPage({
 }: {
   params: Promise<{ game_id: string; player_id: string }>;
 }) {
-  const token = await requireCoach();
+  const { token, userId } = await requireCoachSession();
   const { game_id: gameId, player_id: playerId } = await params;
   const game = await fetchGame(token, gameId);
   if (!game) notFound();
@@ -71,7 +71,9 @@ export default async function ReviewPage({
         </p>
         <CoachPlayer
           videoId={ready.id}
+          coachId={userId}
           playerId={player.id}
+          goalId={player.active_goal?.id ?? null}
           label={`${player.display_name} · ${context}`}
           initialObservations={observations}
         />

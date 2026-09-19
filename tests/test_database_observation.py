@@ -234,3 +234,21 @@ class ObservationIsolationTests(IsolationHarness):
                     self.as_user(connection, self.world.a.coach)
                     connection.execute(text(statement), {"id": observation})
                 self.assertEqual(sqlstate(caught.exception), INSUFFICIENT_PRIVILEGE)
+
+    def test_client_generated_id_still_obeys_observation_rls(self) -> None:
+        statement = """
+            INSERT INTO app.observation (
+                id, video_id, player_id, t_start_ms, t_end_ms, source, created_by
+            ) VALUES (
+                :id, :video, :player, 1000, 4000, 'coach_manual', :creator
+            )
+        """
+        state = self.refused_as(
+            self.world.b.coach,
+            statement,
+            id=uuid4(),
+            video=self.video_a,
+            player=self.world.a.rows[0],
+            creator=self.world.b.coach,
+        )
+        self.assertEqual(state, INSUFFICIENT_PRIVILEGE)

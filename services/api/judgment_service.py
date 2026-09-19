@@ -194,6 +194,33 @@ def load_judgment(connection: Connection, judgment_id: UUID) -> dict[str, Any] |
     return judgment_model(row, _revision_snapshot(connection, row.id, row.version))
 
 
+def load_observation_judgment(
+    connection: Connection, observation_id: UUID, goal_id: UUID
+) -> dict[str, Any] | None:
+    """Load coach-only current draft state for review restoration.
+
+    Scoped by goal as well as observation, because `app.judgment` is unique on
+    the pair and not on the observation alone. One observation legitimately
+    carries a judgment per goal -- a player who changes goals keeps the earlier
+    one -- so filtering on the observation could match more than one row.
+    `one_or_none` raises on that, the route turns it into a 503, and the draft
+    the coach was restoring never comes back.
+    """
+    row = connection.execute(
+        text(f"""
+            SELECT {JUDGMENT_COLUMNS}
+            FROM app.judgment j
+            WHERE j.observation_id = :observation_id
+              AND j.goal_id = :goal_id
+              AND private.is_judgment_coach(j.id)
+        """),
+        {"observation_id": str(observation_id), "goal_id": str(goal_id)},
+    ).one_or_none()
+    if row is None:
+        return None
+    return judgment_model(row, _revision_snapshot(connection, row.id, row.version))
+
+
 def list_revisions(connection: Connection, judgment_id: UUID) -> Sequence[Any]:
     """Immutable revision history, for the coaching team only.
 

@@ -365,6 +365,7 @@ class Timeline(BaseModel):
 
 
 class ObservationCreate(BaseModel):
+    client_id: UUID | None = None
     player_id: UUID
     t_start_ms: int = Field(ge=0)
     t_end_ms: int = Field(gt=0)
