@@ -22,6 +22,9 @@ export type Timeline = Schema["Timeline"];
 export type Observation = Schema["Observation"];
 export type Judgment = Schema["Judgment"];
 export type InviteResult = Schema["InviteResult"];
+export type EvidenceSet = Schema["EvidenceSet"];
+export type EvidenceItem = Schema["EvidenceItem"];
+export type ClipUrl = Schema["ClipUrl"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */
 /**
@@ -134,6 +137,19 @@ export async function fetchGoals(
   playerId: string,
 ): Promise<Goal[] | null> {
   return (await request<Goal[]>(token, `/v1/players/${playerId}/goals`)).data;
+}
+
+/** Current published snapshots. No video id, storage key, draft, or URL. */
+export async function fetchEvidence(
+  token: string,
+  goalId: string,
+): Promise<EvidenceSet[] | null> {
+  return (
+    await request<EvidenceSet[]>(
+      token,
+      `/v1/me/goals/${encodeURIComponent(goalId)}/evidence`,
+    )
+  ).data;
 }
 
 export async function fetchObservations(

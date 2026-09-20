@@ -9,11 +9,16 @@ $key = $status.PUBLISHABLE_KEY
 if (!$key) { $key = $status.ANON_KEY }
 if (!$key -or $status.API_URL -ne 'http://127.0.0.1:54321') { throw 'Unexpected local Auth configuration' }
 if (Test-Path apps/web/.env.local) { throw 'apps/web/.env.local already exists; preserve or update it explicitly.' }
-@(
+$authEnvironment = @(
     'APP_ORIGIN=http://127.0.0.1:3000',
     'AUTH_ALLOW_LOCAL_HTTP=true',
     'SUPABASE_URL=http://127.0.0.1:54321',
     "SUPABASE_PUBLISHABLE_KEY=$key",
     'API_BASE_URL=http://127.0.0.1:8000'
-) | Set-Content -Encoding utf8 apps/web/.env.local
+)
+[System.IO.File]::WriteAllLines(
+    (Join-Path $PWD 'apps/web/.env.local'),
+    $authEnvironment,
+    [System.Text.UTF8Encoding]::new($false)
+)
 Write-Host 'Local server-only Auth environment written; no privileged key was copied.'

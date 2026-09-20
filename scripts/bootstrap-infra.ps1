@@ -25,5 +25,9 @@ if (!(Test-Path supabase/.env.signing-keys.json)) {
     # Generate outside the project config, which already references the not-yet-created file.
     $signingKey = & .tools/supabase/supabase.exe gen signing-key --algorithm ES256 --workdir .tools
     if ($LASTEXITCODE) { throw 'Local Auth key generation failed' }
-    "[$signingKey]" | Set-Content -Encoding utf8 supabase/.env.signing-keys.json
+    [System.IO.File]::WriteAllText(
+        (Join-Path $PWD 'supabase/.env.signing-keys.json'),
+        "[$signingKey]`n",
+        [System.Text.UTF8Encoding]::new($false)
+    )
 }

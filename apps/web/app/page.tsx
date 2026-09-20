@@ -21,5 +21,6 @@ export default async function Home() {
   // API both land on the neutral signed-in page, which grants nothing.
   const me = await fetchMe(token);
   if (me?.roles.includes("coach")) redirect("/coach/roster");
+  if (me?.roles.includes("player") && me.player) redirect("/player");
   redirect("/auth/session");
 }
