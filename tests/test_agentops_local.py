@@ -303,6 +303,52 @@ class TestRunningAWorker(LocalCase):
         self.assertEqual(run["usage"]["input_tokens"], 10)
         self.assertEqual(run["last_action"], "done the thing")
 
+    def test_a_verdict_longer_than_the_label_survives_whole(self) -> None:
+        """Task 18's reviewer passed the branch and the task was blocked.
+
+        A verdict is JSON, and it runs past the length a progress label is
+        clipped to as soon as it carries one finding. Reading the verdict from
+        that label meant reading half a JSON document, which parses as
+        nothing, so a reviewed task was refused for having no verdict while
+        the verdict sat complete in the stream file.
+        """
+        verdict = json.dumps(
+            {
+                "verdict": "pass",
+                "summary": "player mobile flow scopes evidence per player",
+                "findings": [
+                    {
+                        "severity": "minor",
+                        "confidence": "medium",
+                        "file": "apps/web/app/player/session.ts",
+                        "line": 11,
+                        "requirement": "auth failures stay distinguishable",
+                        "repair": "x" * 400,
+                    }
+                ],
+            }
+        )
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": verdict}]},
+            }
+        )
+        run = local.run_worker(
+            self.root,
+            self.paths,
+            prompt="review",
+            model="claude-sonnet-5",
+            role="review",
+            worktree=self.worktree,
+            config=self.config,
+            popen=self.spawn([line, RESULT_LINE]),
+        )
+        self.assertGreater(len(verdict), 400, "the fixture must exceed the label clip")
+        self.assertLess(len(run["last_action"]), len(verdict))
+        self.assertEqual(run["final_message"], verdict)
+        self.assertEqual(json.loads(run["final_message"])["verdict"], "pass")
+
     def test_a_worker_runs_in_its_own_worktree(self) -> None:
         local.run_worker(
             self.root,

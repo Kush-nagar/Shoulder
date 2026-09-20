@@ -1759,7 +1759,13 @@ def run_once(
                     "blocked",
                     f"the reviewer did not complete: {review_run.get('outcome')}",
                 )
-            verdict = parse_findings(review_run.get("last_action", ""))
+            # `final_message`, not `last_action`: the verdict is JSON and the
+            # label it used to be read from is clipped to dashboard length, so
+            # any verdict carrying a finding arrived as half a document and
+            # parsed as nothing.
+            verdict = parse_findings(
+                review_run.get("final_message") or review_run.get("last_action", "")
+            )
             verdict["reviewer"] = plan.reviewer.harness_model
             verdict["independent"] = plan.reviewer_independent
             verdict["cycle"] = cycle
