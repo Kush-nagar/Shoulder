@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchGoals, fetchRoster, fetchTeams } from "../../../../lib/api";
+import {
+  fetchGoals,
+  fetchPlayerReflections,
+  fetchRoster,
+  fetchTeams,
+} from "../../../../lib/api";
 import { requireCoach } from "../../session";
 import { PageHeader } from "../../shell";
 import {
@@ -37,7 +42,7 @@ export default async function Player({
   params: Promise<{ player_id: string }>;
 }) {
   const { player_id } = await params;
-  const token = await requireCoach();
+  const token = await requireCoach(`/coach/players/${player_id}`);
   const team = (await fetchTeams(token))?.[0];
   // Archived rows are requested too: archiving is soft, the roster links to
   // them, and their goals stay readable.
@@ -45,7 +50,11 @@ export default async function Player({
   const player = roster?.find((row) => row.id === player_id);
   // Absent or hidden by policy both land on not-found.
   if (!player) notFound();
-  const goals = (await fetchGoals(token, player.id)) ?? [];
+  const [loadedGoals, reflections] = await Promise.all([
+    fetchGoals(token, player.id),
+    fetchPlayerReflections(token, player.id),
+  ]);
+  const goals = loadedGoals ?? [];
   const active = goals.find((goal) => goal.status === "active");
   const closed = goals.filter((goal) => goal.status !== "active");
 
@@ -138,12 +147,36 @@ export default async function Player({
         ) : null}
 
         <h2 className={`${sectionTitle} mt-8`}>Evidence and reflections</h2>
-        <div className={`${panel} mt-3 max-w-170 border-dashed p-5`}>
-          <p className="text-[15px] leading-[1.5] text-muted">
-            Published clips and player reflections are not part of this version
-            of Shoulder. This space is reserved for them.
+        {reflections === null ? (
+          <p role="alert" className={`${panel} mt-3 max-w-170 p-5`}>
+            Reflections could not be loaded. Try again in a moment.
           </p>
-        </div>
+        ) : reflections.length === 0 ? (
+          <p className={`${panel} mt-3 max-w-170 border-dashed p-5 text-muted`}>
+            No reflections yet.
+          </p>
+        ) : (
+          <ul className="mt-3 max-w-170 space-y-3">
+            {reflections.map((reflection) => (
+              <li key={reflection.id} className={`${panel} p-5`}>
+                <p className={metadata}>
+                  {day(reflection.updated_at)}
+                  {!reflection.evidence_available
+                    ? " · Clip unavailable"
+                    : reflection.is_for_earlier_version
+                      ? " · Written for an earlier version of this clip"
+                      : ""}
+                </p>
+                <blockquote className="mt-2 whitespace-pre-wrap text-[15px] leading-[1.5]">
+                  {reflection.text}
+                </blockquote>
+                <p className={`${metadata} mt-3`}>
+                  Player-authored · Read-only
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </>
   );

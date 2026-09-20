@@ -1,5 +1,6 @@
 """Tasks 17 and 19 publication, player-media, and reflection acceptance."""
 
+import os
 import sys
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from services.api import storage
 from services.api.auth import authenticated_identity
 from services.api.main import app
+from services.worker import delivery, jobs
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
@@ -279,6 +281,193 @@ class PublicationApiTests(DatabaseTestCase):
                 },
             ),
         )
+
+    def test_email_events_deduplicate_publications_and_replacements(self) -> None:
+        first = self.publish([0, 1, 2])
+        self.assertEqual(first.status_code, 202, first.text)
+        first_id = first.json()["id"]
+        self.finish(first_id)
+        # A duplicate finalization cannot create another provider event.
+        with self.admin.connect() as connection:
+            self.assertFalse(
+                connection.execute(
+                    text("SELECT private.finalize_review_publication(:publication)"),
+                    {"publication": first_id},
+                ).scalar_one()
+            )
+
+        replacement = self.publish([0, 1, 2], replaces=first_id)
+        self.assertEqual(replacement.status_code, 202, replacement.text)
+        replacement_id = replacement.json()["id"]
+        # Existing ready clips make this replacement finalize in its request.
+        self.assertEqual(replacement.json()["status"], "published")
+
+        with self.admin.connect() as connection:
+            deliveries = connection.execute(
+                text("""
+                    SELECT publication_id, event_key
+                    FROM app.email_delivery
+                    WHERE kind = 'evidence_ready'
+                      AND publication_id IN (:first, :replacement)
+                    ORDER BY publication_id
+                """),
+                {"first": first_id, "replacement": replacement_id},
+            ).all()
+            jobs = connection.execute(
+                text("""
+                    SELECT count(*) FROM app.processing_job
+                    WHERE email_delivery_id IN (
+                        SELECT id FROM app.email_delivery
+                        WHERE publication_id IN (:first, :replacement)
+                    )
+                """),
+                {"first": first_id, "replacement": replacement_id},
+            ).scalar_one()
+        self.assertEqual(len(deliveries), 2)
+        self.assertEqual(jobs, 2)
+        self.assertEqual(
+            {row.event_key for row in deliveries},
+            {
+                f"evidence-ready:{first_id}",
+                f"evidence-ready:{replacement_id}",
+            },
+        )
+
+    @unittest.skipUnless(
+        os.environ.get("WORKER_DATABASE_URL"),
+        "WORKER_DATABASE_URL is not configured",
+    )
+    def test_mocked_worker_send_records_the_provider_identity(self) -> None:
+        publication = self.publish([0, 1, 2])
+        publication_id = publication.json()["id"]
+        self.finish(publication_id)
+        jobs.get_engine.cache_clear()
+        self.addCleanup(jobs.get_engine.cache_clear)
+        job = jobs.claim("email-test", ("email_delivery",))
+        self.assertIsNotNone(job)
+        assert job is not None
+        environment = {
+            "APP_ORIGIN": "https://shoulder.example",
+            "RESEND_API_KEY": "re_test_placeholder",
+            "EMAIL_FROM": "Shoulder <updates@shoulder.example>",
+        }
+        with (
+            mock.patch.dict(os.environ, environment),
+            mock.patch.object(
+                delivery,
+                "send_with_resend",
+                return_value="provider-message-id",
+            ) as send,
+        ):
+            delivery.delivery_job(job, lambda _progress: True)
+        message = send.call_args.args[0]
+        self.assertEqual(
+            message.target_url,
+            f"https://shoulder.example/player/goals/{self.goal}"
+            f"?publication={publication_id}",
+        )
+        with self.admin.connect() as connection:
+            row = connection.execute(
+                text("""
+                    SELECT d.status, d.provider_message_id
+                    FROM app.email_delivery d
+                    WHERE d.id = :delivery
+                """),
+                {"delivery": job.email_delivery_id},
+            ).one()
+        self.assertEqual(
+            (row.status, row.provider_message_id),
+            ("sent", "provider-message-id"),
+        )
+        self.assertTrue(jobs.succeed(job.id, job.locked_by))
+
+    def test_reflection_delete_suppresses_stale_digest_without_text(self) -> None:
+        publication = self.publish([0, 1, 2])
+        self.finish(publication.json()["id"])
+        key = f"reflection-{uuid4()}"
+        private_text = "Private player words must never enter email metadata."
+        created = self.save_reflection(self.judgments[0]["id"], private_text, key=key)
+        self.assertEqual(created.status_code, 200, created.text)
+        reflection = created.json()
+        replay = self.save_reflection(self.judgments[0]["id"], private_text, key=key)
+        self.assertEqual(replay.status_code, 200, replay.text)
+
+        with self.admin.connect() as connection, connection.begin():
+            delivery = connection.execute(
+                text("""
+                    SELECT d.id, job.id AS job_id
+                    FROM app.email_delivery d
+                    JOIN app.email_reflection_event event
+                      ON event.delivery_id = d.id
+                    JOIN app.processing_job job ON job.email_delivery_id = d.id
+                    WHERE event.reflection_id = :reflection
+                """),
+                {"reflection": reflection["id"]},
+            ).one()
+            self.assertEqual(
+                connection.execute(
+                    text("""
+                        SELECT count(*) FROM app.email_reflection_event
+                        WHERE reflection_id = :reflection
+                    """),
+                    {"reflection": reflection["id"]},
+                ).scalar_one(),
+                1,
+            )
+            raw = connection.execute(
+                text("""
+                    SELECT row_to_json(d)::text, job.payload::text
+                    FROM app.email_delivery d
+                    JOIN app.processing_job job ON job.email_delivery_id = d.id
+                    WHERE d.id = :delivery
+                """),
+                {"delivery": delivery.id},
+            ).one()
+            self.assertNotIn(private_text, raw[0])
+            self.assertNotIn(private_text, raw[1])
+
+        deleted = self.client_for(self.player_account).request(
+            "DELETE",
+            f"/v1/me/judgments/{self.judgments[0]['id']}/reflection",
+            headers={"Idempotency-Key": f"delete-{uuid4()}"},
+            json={
+                "expected_reflection_id": reflection["id"],
+                "expected_etag": reflection["etag"],
+                "request_created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+
+        with self.admin.connect() as connection, connection.begin():
+            self.assertEqual(
+                connection.execute(
+                    text("""
+                        SELECT count(*) FROM app.email_reflection_event
+                        WHERE delivery_id = :delivery
+                    """),
+                    {"delivery": delivery.id},
+                ).scalar_one(),
+                0,
+            )
+            connection.execute(
+                text("""
+                    UPDATE app.processing_job SET
+                        status = 'running', attempts = 1,
+                        locked_at = now(), locked_by = 'email-test',
+                        heartbeat_at = now(), started_at = now()
+                    WHERE id = :job
+                """),
+                {"job": delivery.job_id},
+            )
+            sendable = connection.execute(
+                text("""
+                    SELECT sendable FROM private.email_delivery_input(
+                        :job, 'email-test'
+                    )
+                """),
+                {"job": delivery.job_id},
+            ).scalar_one()
+            self.assertFalse(sendable)
 
     def delete_reflection(
         self,

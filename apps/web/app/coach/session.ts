@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import { fetchMe } from "../../lib/api";
+import { verifiedRedirectPath } from "../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../lib/auth/server";
 
 /**
@@ -37,8 +38,8 @@ export const coachSession = cache(
 );
 
 /** Pages call this. Forbidden and absent share the one not-found surface. */
-export async function requireCoach(): Promise<string> {
-  return (await requireCoachSession()).token;
+export async function requireCoach(destination?: string): Promise<string> {
+  return (await requireCoachSession(destination)).token;
 }
 
 /**
@@ -49,12 +50,17 @@ export async function requireCoach(): Promise<string> {
  * otherwise share a key, and one could submit the other's unsent text under
  * their own name.
  */
-export async function requireCoachSession(): Promise<{
+export async function requireCoachSession(destination?: string): Promise<{
   token: string;
   userId: string;
 }> {
   const session = await coachSession();
-  if (!session) redirect("/auth/sign-in");
+  if (!session) {
+    const next = verifiedRedirectPath(destination);
+    redirect(
+      next ? `/auth/sign-in?next=${encodeURIComponent(next)}` : "/auth/sign-in",
+    );
+  }
   if (!session.coach) notFound();
   // An identity that resolved a role but no subject is not one drafts may be
   // filed under.

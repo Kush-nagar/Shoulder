@@ -1,16 +1,32 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { fetchMe } from "../../../lib/api";
+import { verifiedRedirectPath } from "../../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../../lib/auth/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function Session() {
+export default async function Session({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
   const store = await cookies();
   const client = createAuthClient({ getAll: () => store.getAll() });
   const token = await verifiedToken(client);
   if (!token) redirect("/auth/sign-in");
   const me = await fetchMe(token);
+  const next = verifiedRedirectPath((await searchParams).next);
+  if (next?.startsWith("/coach/") && me?.roles.includes("coach")) {
+    redirect(next);
+  }
+  if (
+    next?.startsWith("/player/") &&
+    me?.roles.includes("player") &&
+    me.player
+  ) {
+    redirect(next);
+  }
   if (me?.roles.includes("coach")) redirect("/coach/roster");
   if (me?.roles.includes("player") && me.player) redirect("/player");
   return (

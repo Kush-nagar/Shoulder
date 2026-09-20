@@ -146,6 +146,58 @@ class VideoWorld(IsolationHarness):
 
 
 class VideoSchemaTests(VideoWorld):
+    def test_video_outcomes_queue_one_coach_email_per_event(self) -> None:
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("UPDATE app.video SET status = 'ready' WHERE id = :video"),
+                {"video": self.video_a},
+            )
+            # Rewriting the same state is not a second event.
+            connection.execute(
+                text("UPDATE app.video SET status = 'ready' WHERE id = :video"),
+                {"video": self.video_a},
+            )
+            connection.execute(
+                text("UPDATE app.video SET status = 'failed' WHERE id = :video"),
+                {"video": self.video_b},
+            )
+        with self.admin.connect() as connection:
+            rows = connection.execute(
+                text("""
+                    SELECT kind, event_key, recipient_user_id
+                    FROM app.email_delivery
+                    WHERE video_id IN (:ready, :failed)
+                    ORDER BY kind
+                """),
+                {"ready": self.video_a, "failed": self.video_b},
+            ).all()
+            queued = connection.execute(
+                text("""
+                    SELECT count(*) FROM app.processing_job
+                    WHERE email_delivery_id IN (
+                        SELECT id FROM app.email_delivery
+                        WHERE video_id IN (:ready, :failed)
+                    )
+                """),
+                {"ready": self.video_a, "failed": self.video_b},
+            ).scalar_one()
+        self.assertEqual(
+            [(row.kind, row.event_key, row.recipient_user_id) for row in rows],
+            [
+                (
+                    "video_failed",
+                    f"video-failed:{self.video_b}",
+                    self.world.b.coach,
+                ),
+                (
+                    "video_ready",
+                    f"video-ready:{self.video_a}",
+                    self.world.a.coach,
+                ),
+            ],
+        )
+        self.assertEqual(queued, 2)
+
     def test_every_new_table_enables_and_forces_row_level_security(self) -> None:
         with self.admin.connect() as connection:
             for table in NEW_TABLES:

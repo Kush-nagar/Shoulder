@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   authConfig,
+  verifiedRedirectPath,
   validClaims,
   validOrigin,
 } from "../apps/web/lib/auth/policy.ts";
@@ -67,5 +68,33 @@ test("verified claims still require the intended issuer, audience, expiry, and U
     { exp: 1 },
   ]) {
     assert.equal(validClaims({ ...claims, ...patch }, env.SUPABASE_URL), false);
+  }
+});
+
+test("email redirects allow only exact authenticated product routes", () => {
+  const goal = "00000000-0000-4000-8000-000000000001";
+  const publication = "00000000-0000-4000-8000-000000000002";
+  const game = "00000000-0000-4000-8000-000000000003";
+  const player = "00000000-0000-4000-8000-000000000004";
+  for (const path of [
+    `/player/goals/${goal}`,
+    `/player/goals/${goal}?publication=${publication}`,
+    `/coach/games/${game}`,
+    `/coach/players/${player}`,
+  ]) {
+    assert.equal(verifiedRedirectPath(path), path);
+  }
+  for (const unsafe of [
+    "https://evil.invalid/player/goals/00000000-0000-4000-8000-000000000001",
+    "//evil.invalid/player/goals/00000000-0000-4000-8000-000000000001",
+    "/\\evil.invalid",
+    `/player/goals/${goal}?publication=${publication}&next=https://evil.invalid`,
+    `/player/goals/${goal}?publication=not-a-uuid`,
+    `/coach/games/${game}?next=https://evil.invalid`,
+    `/coach/players/${player}#https://evil.invalid`,
+    "/auth/session",
+    "/player",
+  ]) {
+    assert.equal(verifiedRedirectPath(unsafe), null, unsafe);
   }
 });
