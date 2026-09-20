@@ -23,7 +23,7 @@ from unittest import mock
 
 from agentops_fixtures import REPO_ROOT, installed_harnesses
 
-from services.agentops import executors, local, localstate, state
+from services.agentops import executors, local, localstate, state, toolchain
 
 
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -773,6 +773,43 @@ class TestVerificationRouting(LoopCase):
         self.assertTrue(result["ok"])
         self.assertFalse(result["locked"])
         self.assertFalse((self.paths.locks / "infra.lock").exists())
+
+    def test_the_gated_suite_runs_the_powershell_this_machine_has(self) -> None:
+        """Naming `pwsh` alone assumed PowerShell 7 was installed.
+
+        This workstation has Windows PowerShell 5.1 and no `pwsh`, so the
+        gated verification could not start, and a missing executable raises
+        instead of returning an exit code -- which took the project loop down
+        after task 18 had been implemented, verified and reviewed.
+        """
+        seen: list[list[str]] = []
+
+        def runner(command, **kwargs):  # type: ignore[no-untyped-def]
+            seen.append(command)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        local.verify(
+            self.root, self.paths, self.root, kind="gated", runner=runner, uv=Path("uv")
+        )
+        self.assertEqual(len(seen), 1)
+        shell = Path(seen[0][0]).stem.lower()
+        self.assertIn(shell, toolchain.POWERSHELL_NAMES)
+        self.assertIsNotNone(
+            shutil.which(seen[0][0]) or shutil.which(shell),
+            f"verification would spawn {seen[0][0]}, which is not installed",
+        )
+
+    def test_a_check_that_cannot_start_fails_rather_than_raising(self) -> None:
+        """It runs on a worker thread, so the exception came back out of the
+        future and ended the whole run rather than the one step."""
+
+        def runner(command, **kwargs):  # type: ignore[no-untyped-def]
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+
+        result = toolchain.run_commands(self.root, [["nosuchtool"]], runner=runner)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failed"], ["nosuchtool"])
+        self.assertIn("could not start nosuchtool", result["steps"][0]["tail"][0])
 
     def test_the_gated_suite_is_serialised(self) -> None:
         def runner(command, **kwargs):  # type: ignore[no-untyped-def]

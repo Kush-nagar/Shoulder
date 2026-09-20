@@ -1039,7 +1039,12 @@ def verify(
         # repository copy verified the coordinator's tree instead of the
         # branch under test -- and could write to it.
         commands = [
-            ["pwsh", "-NoProfile", "-File", str(worktree / "scripts" / "check.ps1")]
+            [
+                toolchain.powershell(),
+                "-NoProfile",
+                "-File",
+                str(worktree / "scripts" / "check.ps1"),
+            ]
         ]
     else:
         raise ValueError(f"unknown verification kind: {kind}")

@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -162,6 +163,29 @@ def _probe(path: Path) -> str:
 def _version_of(output: str) -> str:
     match = re.search(r"\b(\d+\.\d+\.\d+)\b", output or "")
     return match.group(1) if match else ""
+
+
+# PowerShell 7 first, because that is what CI runs and what the scripts are
+# written against, then the Windows PowerShell every Windows machine already
+# has. Naming only `pwsh` assumed an install that is not standard anywhere:
+# this workstation has 5.1 and no `pwsh`, so the gated verification could not
+# start at all, and because a missing executable raises rather than returning
+# a failing exit code it took the whole project loop down with it -- after the
+# task had been implemented, verified and reviewed.
+POWERSHELL_NAMES = ("pwsh", "powershell")
+
+
+def powershell() -> str:
+    """The PowerShell this machine actually has.
+
+    Falls back to the first name when neither resolves, so the caller fails on
+    the command it meant to run and says which one was missing.
+    """
+    for name in POWERSHELL_NAMES:
+        found = shutil.which(name)
+        if found:
+            return found
+    return POWERSHELL_NAMES[0]
 
 
 def resolve_uv(
@@ -374,19 +398,35 @@ def run_commands(
     execute = runner or subprocess.run
     steps: list[dict[str, Any]] = []
     for command in commands:
-        result = execute(
-            command,
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-            # None means inherit, which is what every caller but the gated
-            # verification wants.
-            env=dict(env) if env is not None else None,
-        )
+        try:
+            result = execute(
+                command,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
+                # None means inherit, which is what every caller but the gated
+                # verification wants.
+                env=dict(env) if env is not None else None,
+            )
+        except OSError as problem:
+            # A tool that is not installed raises rather than returning an
+            # exit code, and this runs on a worker thread, so the exception
+            # came back out of the future and ended the whole project loop --
+            # a task that was implemented, verified and reviewed was lost to a
+            # missing `pwsh`. A check that cannot start is a check that
+            # failed, and it names what was missing.
+            steps.append(
+                {
+                    "command": command,
+                    "returncode": -1,
+                    "tail": [f"could not start {command[0]}: {problem}"],
+                }
+            )
+            return {"ok": False, "steps": steps, "failed": command}
         tail = ((result.stdout or "") + (result.stderr or "")).strip().splitlines()
         steps.append(
             {
