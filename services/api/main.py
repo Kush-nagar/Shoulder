@@ -7,6 +7,7 @@ from services.api.judgment_routes import router as judgment_router
 from services.api.observation_routes import router as observation_router
 from services.api.problems import install_problem_handlers
 from services.api.publication_routes import router as publication_router
+from services.api.reflection_routes import router as reflection_router
 from services.api.routes import router
 from services.api.video import router as video_router
 
@@ -16,6 +17,7 @@ app.include_router(video_router)
 app.include_router(observation_router)
 app.include_router(judgment_router)
 app.include_router(publication_router)
+app.include_router(reflection_router)
 install_problem_handlers(app)
 
 

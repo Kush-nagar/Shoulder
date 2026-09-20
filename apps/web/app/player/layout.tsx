@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ShoulderMark } from "../../components/brand";
 import { requirePlayerSession } from "./session";
+import { PlayerSignOutForm } from "./sign-out-form";
 
 const focus =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
@@ -34,14 +35,13 @@ export default async function PlayerLayout({
               Menu
             </summary>
             <div className="absolute right-0 z-20 mt-2 w-36 rounded-xl border border-line bg-surface p-2">
-              <form action="/auth/sign-out" method="post">
-                <button
-                  type="submit"
-                  className={`min-h-11 w-full rounded-lg px-3 text-left text-[16px] hover:bg-surface-subtle ${focus}`}
-                >
-                  Sign out
-                </button>
-              </form>
+              <Link
+                href="/player/progress"
+                className={`flex min-h-11 items-center rounded-lg px-3 text-[16px] hover:bg-surface-subtle ${focus}`}
+              >
+                Reflections
+              </Link>
+              <PlayerSignOutForm />
             </div>
           </details>
         </div>

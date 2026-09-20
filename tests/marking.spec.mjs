@@ -40,7 +40,7 @@ function quoted(value) {
 
 function resetLocalWorkspace() {
   psql(
-    "TRUNCATE app.judgment_revision, app.judgment, app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
+    "TRUNCATE app.player_reflection_request, app.player_reflection, app.judgment_revision, app.judgment, app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
   );
 }
 

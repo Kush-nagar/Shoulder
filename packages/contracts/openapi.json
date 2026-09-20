@@ -1317,6 +1317,158 @@
         "title": "PlayerPatch",
         "type": "object"
       },
+      "PlayerReflection": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_published_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Published Version"
+          },
+          "etag": {
+            "format": "uuid",
+            "title": "Etag",
+            "type": "string"
+          },
+          "evidence_available": {
+            "title": "Evidence Available",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_for_earlier_version": {
+            "title": "Is For Earlier Version",
+            "type": "boolean"
+          },
+          "judgment_id": {
+            "format": "uuid",
+            "title": "Judgment Id",
+            "type": "string"
+          },
+          "judgment_version_at_save": {
+            "title": "Judgment Version At Save",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "judgment_id",
+          "text",
+          "judgment_version_at_save",
+          "etag",
+          "created_at",
+          "updated_at",
+          "evidence_available",
+          "current_published_version",
+          "is_for_earlier_version"
+        ],
+        "title": "PlayerReflection",
+        "type": "object"
+      },
+      "ReflectionDeleteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_etag": {
+            "format": "uuid",
+            "title": "Expected Etag",
+            "type": "string"
+          },
+          "expected_reflection_id": {
+            "format": "uuid",
+            "title": "Expected Reflection Id",
+            "type": "string"
+          },
+          "request_created_at": {
+            "format": "date-time",
+            "title": "Request Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_reflection_id",
+          "expected_etag",
+          "request_created_at"
+        ],
+        "title": "ReflectionDeleteRequest",
+        "type": "object"
+      },
+      "ReflectionSaveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_etag": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Etag"
+          },
+          "expected_reflection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Reflection Id"
+          },
+          "intent": {
+            "enum": [
+              "create",
+              "edit"
+            ],
+            "title": "Intent",
+            "type": "string"
+          },
+          "request_created_at": {
+            "format": "date-time",
+            "title": "Request Created At",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "text",
+          "request_created_at"
+        ],
+        "title": "ReflectionSaveRequest",
+        "type": "object"
+      },
       "ReviewPublication": {
         "properties": {
           "cancelled_at": {
@@ -2828,6 +2980,152 @@
         "summary": "Player Clip Url"
       }
     },
+    "/v1/me/judgments/{judgment_id}/reflection": {
+      "delete": {
+        "operationId": "remove_reflection_v1_me_judgments__judgment_id__reflection_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReflectionDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Reflection"
+      },
+      "put": {
+        "operationId": "put_reflection_v1_me_judgments__judgment_id__reflection_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReflectionSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerReflection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Reflection"
+      }
+    },
+    "/v1/me/reflections": {
+      "get": {
+        "operationId": "list_own_reflections_v1_me_reflections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerReflection"
+                  },
+                  "title": "Response List Own Reflections V1 Me Reflections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Own Reflections"
+      }
+    },
     "/v1/observations/{observation_id}/judgment": {
       "get": {
         "operationId": "load_observation_judgment_v1_observations__observation_id__judgment_get",
@@ -3204,6 +3502,55 @@
           }
         ],
         "summary": "Invite Player"
+      }
+    },
+    "/v1/players/{player_id}/reflections": {
+      "get": {
+        "operationId": "list_player_reflections_v1_players__player_id__reflections_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerReflection"
+                  },
+                  "title": "Response List Player Reflections V1 Players  Player Id  Reflections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Player Reflections"
       }
     },
     "/v1/review-publications/{publication_id}": {

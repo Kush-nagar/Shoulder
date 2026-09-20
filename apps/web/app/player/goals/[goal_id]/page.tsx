@@ -1,5 +1,9 @@
 import { notFound } from "next/navigation";
-import { fetchEvidence, fetchGoals } from "../../../../lib/api";
+import {
+  fetchEvidence,
+  fetchGoals,
+  fetchReflections,
+} from "../../../../lib/api";
 import { requirePlayerSession } from "../../session";
 import { EvidenceSequence } from "./evidence-sequence";
 
@@ -21,7 +25,10 @@ export default async function GoalEvidencePage({
   }
   const goal = goals.find((item) => item.id === goalId);
   if (!goal) notFound();
-  const evidence = await fetchEvidence(token, goalId);
+  const [evidence, reflections] = await Promise.all([
+    fetchEvidence(token, goalId),
+    fetchReflections(token),
+  ]);
   if (evidence === null) {
     return (
       <p role="alert">Your clips could not be loaded. Try again in a moment.</p>
@@ -31,7 +38,10 @@ export default async function GoalEvidencePage({
     <EvidenceSequence
       goalId={goalId}
       goalTitle={goal.title}
+      playerId={player.id}
       initialEvidence={evidence}
+      initialReflections={reflections ?? []}
+      reflectionsLoaded={reflections !== null}
       initialPublicationId={publication}
     />
   );
