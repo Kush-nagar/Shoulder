@@ -219,6 +219,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/judgments/{judgment_id}/reflection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Reflection */
+        put: operations["put_reflection_v1_me_judgments__judgment_id__reflection_put"];
+        post?: never;
+        /** Remove Reflection */
+        delete: operations["remove_reflection_v1_me_judgments__judgment_id__reflection_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/reflections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Own Reflections */
+        get: operations["list_own_reflections_v1_me_reflections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/observations/{observation_id}/judgment": {
         parameters: {
             query?: never;
@@ -325,6 +360,23 @@ export interface paths {
          * @description Link an account to a roster row. Delivery is a later task, not this one.
          */
         post: operations["invite_player_v1_players__player_id__invite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/players/{player_id}/reflections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Player Reflections */
+        get: operations["list_player_reflections_v1_players__player_id__reflections_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1215,6 +1267,81 @@ export interface components {
             /** Position */
             position?: string | null;
         };
+        /** PlayerReflection */
+        PlayerReflection: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Published Version */
+            current_published_version: number | null;
+            /**
+             * Etag
+             * Format: uuid
+             */
+            etag: string;
+            /** Evidence Available */
+            evidence_available: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is For Earlier Version */
+            is_for_earlier_version: boolean;
+            /**
+             * Judgment Id
+             * Format: uuid
+             */
+            judgment_id: string;
+            /** Judgment Version At Save */
+            judgment_version_at_save: number;
+            /** Text */
+            text: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ReflectionDeleteRequest */
+        ReflectionDeleteRequest: {
+            /**
+             * Expected Etag
+             * Format: uuid
+             */
+            expected_etag: string;
+            /**
+             * Expected Reflection Id
+             * Format: uuid
+             */
+            expected_reflection_id: string;
+            /**
+             * Request Created At
+             * Format: date-time
+             */
+            request_created_at: string;
+        };
+        /** ReflectionSaveRequest */
+        ReflectionSaveRequest: {
+            /** Expected Etag */
+            expected_etag?: string | null;
+            /** Expected Reflection Id */
+            expected_reflection_id?: string | null;
+            /**
+             * Intent
+             * @enum {string}
+             */
+            intent: "create" | "edit";
+            /**
+             * Request Created At
+             * Format: date-time
+             */
+            request_created_at: string;
+            /** Text */
+            text: string;
+        };
         /** ReviewPublication */
         ReviewPublication: {
             /** Cancelled At */
@@ -1994,6 +2121,98 @@ export interface operations {
             };
         };
     };
+    put_reflection_v1_me_judgments__judgment_id__reflection_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                judgment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReflectionSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerReflection"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_reflection_v1_me_judgments__judgment_id__reflection_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                judgment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReflectionDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_own_reflections_v1_me_reflections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerReflection"][];
+                };
+            };
+        };
+    };
     load_observation_judgment_v1_observations__observation_id__judgment_get: {
         parameters: {
             query: {
@@ -2216,6 +2435,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InviteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_player_reflections_v1_players__player_id__reflections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerReflection"][];
                 };
             };
             /** @description Validation Error */
