@@ -115,6 +115,39 @@ def _text_of(event: Mapping[str, Any]) -> str:
     return ""
 
 
+def _whole_text_of(event: Mapping[str, Any]) -> str:
+    """One event's prose, uncut, or "" when the event carries none.
+
+    Deliberately narrower than `_text_of`: only what the model actually wrote,
+    never a "tool: ..." stand-in, because a caller wanting the whole message
+    wants an answer rather than a breadcrumb.
+    """
+    item = event.get("item")
+    if isinstance(item, Mapping) and isinstance(item.get("text"), str):
+        return str(item["text"]).strip()
+    message = event.get("message")
+    parts: Any = message.get("content") if isinstance(message, Mapping) else None
+    if parts is None:
+        parts = event.get("content") or event.get("parts")
+    if isinstance(parts, str):
+        return parts.strip()
+    if isinstance(parts, list):
+        for part in parts:
+            if not isinstance(part, Mapping):
+                continue
+            if part.get("type") == "text" and isinstance(part.get("text"), str):
+                return str(part["text"]).strip()
+    if isinstance(event.get("text"), str):
+        return str(event["text"]).strip()
+    return ""
+
+
+def _whole_result_text(result_event: Mapping[str, Any]) -> str:
+    """The final event's own text, for harnesses that answer only there."""
+    value = result_event.get("result")
+    return str(value).strip() if isinstance(value, str) else ""
+
+
 def terminate_tree(process: Any) -> None:
     """Stop the worker and anything it started.
 
@@ -922,6 +955,14 @@ def run(
     # exit code. Both are read: an exit code alone cannot tell a failed turn
     # from a harness that crashed after a good one.
     failed_turn = False
+    # The last thing the worker actually said, whole. `last_action` is a
+    # progress label and is clipped to fit one, which is right for a dashboard
+    # and wrong for an answer: a reviewer's verdict is JSON, it runs past that
+    # clip as soon as it carries a finding, and half a JSON document parses as
+    # nothing. Task 17 and Task 18 both reached review, were both reviewed,
+    # and were both blocked as "the reviewer's verdict could not be read" --
+    # with the complete verdict sitting in the stream file the whole time.
+    final_message = ""
     for event in events:
         kind = str(event.get("type") or event.get("event") or "")
         if kind in ("assistant", "message", "step", "item.completed"):
@@ -929,6 +970,9 @@ def run(
             text = _text_of(event)
             if text:
                 last_action = text
+            whole = _whole_text_of(event)
+            if whole:
+                final_message = whole
         elif kind in ("result", "done", "finish", "summary", "turn.completed"):
             result_event = event
         elif kind == "turn.failed":
@@ -975,6 +1019,9 @@ def run(
         "cost_usd": cost,
         "cost_known": cost_known,
         "last_action": last_action,
+        # What `last_action` would be if it were not a label. Read it where a
+        # worker's answer is the point, as a review verdict is.
+        "final_message": final_message or _whole_result_text(result_event),
         # Kept on the record, not only in the log file: a provider that refuses
         # for allowance reasons says so here, and the caller has to be able to
         # tell that apart from a failing test. This is the harness's own error
