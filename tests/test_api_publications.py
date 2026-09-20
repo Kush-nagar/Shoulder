@@ -539,6 +539,33 @@ class PublicationApiTests(DatabaseTestCase):
         )
         self.assertEqual(expired.status_code, 409, expired.text)
 
+    def test_coach_evidence_timeline_is_discrete_and_role_scoped(self) -> None:
+        publication = self.publish([0, 1, 2]).json()
+        self.finish(publication["id"])
+        path = f"/v1/players/{self.player}/goals/{self.goal}/evidence"
+
+        response = self.client_for(self.coach).get(path)
+        self.assertEqual(response.status_code, 200, response.text)
+        groups = response.json()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(
+            set(groups[0]),
+            {"publication_id", "game_id", "game_label", "published_at", "items"},
+        )
+        self.assertEqual(len(groups[0]["items"]), 3)
+        for item in groups[0]["items"]:
+            self.assertEqual(set(item), {"judgment_id", "verdict"})
+            self.assertIn(item["verdict"], {"applied", "opportunity"})
+
+        self.assertEqual(
+            self.client_for(self.player_account).get(path).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client_for(self.other_player_account).get(path).status_code,
+            404,
+        )
+
     def test_reflection_author_crud_coach_read_only_and_other_player_denied(
         self,
     ) -> None:

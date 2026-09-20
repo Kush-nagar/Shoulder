@@ -346,6 +346,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/players/{player_id}/goals/{goal_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Coach Player Evidence */
+        get: operations["coach_player_evidence_v1_players__player_id__goals__goal_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/players/{player_id}/invite": {
         parameters: {
             query?: never;
@@ -783,6 +800,41 @@ export interface components {
              * Format: uuid
              */
             expected_published_revision_id: string;
+        };
+        /** CoachEvidenceSet */
+        CoachEvidenceSet: {
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Game Label */
+            game_label: string;
+            /** Items */
+            items: components["schemas"]["EvidenceDot"][];
+            /**
+             * Publication Id
+             * Format: uuid
+             */
+            publication_id: string;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+        };
+        /** EvidenceDot */
+        EvidenceDot: {
+            /**
+             * Judgment Id
+             * Format: uuid
+             */
+            judgment_id: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "applied" | "opportunity";
         };
         /** EvidenceItem */
         EvidenceItem: {
@@ -2400,6 +2452,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Goal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    coach_player_evidence_v1_players__player_id__goals__goal_id__evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+                goal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachEvidenceSet"][];
                 };
             };
             /** @description Validation Error */

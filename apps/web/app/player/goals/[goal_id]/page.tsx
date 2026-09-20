@@ -12,10 +12,10 @@ export default async function GoalEvidencePage({
   searchParams,
 }: {
   params: Promise<{ goal_id: string }>;
-  searchParams: Promise<{ publication?: string }>;
+  searchParams: Promise<{ publication?: string; judgment?: string }>;
 }) {
   const { goal_id: goalId } = await params;
-  const { publication } = await searchParams;
+  const { publication, judgment } = await searchParams;
   const { token, player } = await requirePlayerSession();
   const goals = await fetchGoals(token, player.id);
   if (goals === null) {
@@ -43,6 +43,7 @@ export default async function GoalEvidencePage({
       initialReflections={reflections ?? []}
       reflectionsLoaded={reflections !== null}
       initialPublicationId={publication}
+      initialJudgmentId={judgment}
     />
   );
 }

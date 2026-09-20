@@ -167,6 +167,55 @@ def evidence_sets(connection: Connection, goal_id: UUID) -> Sequence[Any]:
     ).all()
 
 
+def coach_evidence_sets(
+    connection: Connection, player_id: UUID, goal_id: UUID
+) -> Sequence[Any] | None:
+    """Current publication pointers for one coached player and goal."""
+    allowed = connection.execute(
+        text("""
+            SELECT private.is_player_coach(:player_id)
+               AND EXISTS (
+                   SELECT 1 FROM app.development_goal g
+                   WHERE g.id = :goal_id AND g.player_id = :player_id
+               )
+        """),
+        {"player_id": str(player_id), "goal_id": str(goal_id)},
+    ).scalar_one()
+    if not allowed:
+        return None
+    return connection.execute(
+        text("""
+            SELECT p.id AS publication_id, p.game_id,
+                   CASE WHEN g.opponent IS NULL THEN initcap(g.kind)
+                        ELSE 'vs ' || g.opponent END AS game_label,
+                   p.published_at, i.ordinal, j.id AS judgment_id, r.verdict
+            FROM app.review_publication p
+            JOIN app.game g ON g.id = p.game_id
+            JOIN app.review_publication_item i ON i.publication_id = p.id
+            JOIN app.judgment j ON j.id = i.judgment_id
+            JOIN app.judgment_revision r ON r.id = i.judgment_revision_id
+            JOIN app.evidence_clip c ON c.id = i.evidence_clip_id
+            JOIN app.observation o ON o.id = j.observation_id
+            JOIN app.video v ON v.id = o.video_id
+            WHERE p.player_id = :player_id
+              AND p.goal_id = :goal_id
+              AND p.status = 'published'
+              AND j.publication_status = 'published'
+              AND j.current_publication_id = p.id
+              AND j.current_revision_id = r.id
+              AND j.current_clip_id = c.id
+              AND c.judgment_id = j.id
+              AND c.judgment_revision_id = r.id
+              AND c.status = 'ready'
+              AND (c.delete_after IS NULL OR c.delete_after > now())
+              AND v.status = 'ready'
+              AND v.derivatives_expires_at > now()
+            ORDER BY g.played_at DESC, p.id, i.ordinal
+        """),
+        {"player_id": str(player_id), "goal_id": str(goal_id)},
+    ).all()
+
+
 def clip_for_signing(
     connection: Connection, judgment_id: UUID, expected_revision_id: UUID
 ) -> Any | None:

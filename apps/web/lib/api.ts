@@ -24,6 +24,7 @@ export type Judgment = Schema["Judgment"];
 export type InviteResult = Schema["InviteResult"];
 export type EvidenceSet = Schema["EvidenceSet"];
 export type EvidenceItem = Schema["EvidenceItem"];
+export type CoachEvidenceSet = Schema["CoachEvidenceSet"];
 export type ClipUrl = Schema["ClipUrl"];
 export type PlayerReflection = Schema["PlayerReflection"];
 
@@ -153,11 +154,37 @@ export async function fetchEvidence(
   ).data;
 }
 
+/** Current published pointers for one player and goal, readable by their coach. */
+export async function fetchCoachEvidence(
+  token: string,
+  playerId: string,
+  goalId: string,
+): Promise<CoachEvidenceSet[] | null> {
+  return (
+    await request<CoachEvidenceSet[]>(
+      token,
+      `/v1/players/${encodeURIComponent(playerId)}/goals/${encodeURIComponent(goalId)}/evidence`,
+    )
+  ).data;
+}
+
 /** Own reflections include withdrawn evidence but never withdrawn coach text. */
 export async function fetchReflections(
   token: string,
 ): Promise<PlayerReflection[] | null> {
   return (await request<PlayerReflection[]>(token, "/v1/me/reflections")).data;
+}
+
+export async function fetchPlayerReflections(
+  token: string,
+  playerId: string,
+): Promise<PlayerReflection[] | null> {
+  return (
+    await request<PlayerReflection[]>(
+      token,
+      `/v1/players/${encodeURIComponent(playerId)}/reflections`,
+    )
+  ).data;
 }
 
 export async function fetchObservations(

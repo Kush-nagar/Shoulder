@@ -193,6 +193,68 @@
         "title": "ClipUrlRequest",
         "type": "object"
       },
+      "CoachEvidenceSet": {
+        "properties": {
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "game_label": {
+            "title": "Game Label",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDot"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "publication_id": {
+            "format": "uuid",
+            "title": "Publication Id",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publication_id",
+          "game_id",
+          "game_label",
+          "published_at",
+          "items"
+        ],
+        "title": "CoachEvidenceSet",
+        "type": "object"
+      },
+      "EvidenceDot": {
+        "properties": {
+          "judgment_id": {
+            "format": "uuid",
+            "title": "Judgment Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "applied",
+              "opportunity"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "judgment_id",
+          "verdict"
+        ],
+        "title": "EvidenceDot",
+        "type": "object"
+      },
       "EvidenceItem": {
         "properties": {
           "clip_duration_ms": {
@@ -3446,6 +3508,65 @@
           }
         ],
         "summary": "Create Goal"
+      }
+    },
+    "/v1/players/{player_id}/goals/{goal_id}/evidence": {
+      "get": {
+        "operationId": "coach_player_evidence_v1_players__player_id__goals__goal_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Goal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CoachEvidenceSet"
+                  },
+                  "title": "Response Coach Player Evidence V1 Players  Player Id  Goals  Goal Id  Evidence Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Coach Player Evidence"
       }
     },
     "/v1/players/{player_id}/invite": {

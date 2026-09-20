@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchGoals, fetchRoster, fetchTeams } from "../../../../lib/api";
+import { DevelopmentTimeline } from "../../../../components/development-timeline";
+import {
+  fetchCoachEvidence,
+  fetchGoals,
+  fetchPlayerReflections,
+  fetchRoster,
+  fetchTeams,
+} from "../../../../lib/api";
+import type { TimelineGoal } from "../../../../lib/development-timeline";
 import { requireCoach } from "../../session";
 import { PageHeader } from "../../shell";
 import {
@@ -45,7 +53,43 @@ export default async function Player({
   const player = roster?.find((row) => row.id === player_id);
   // Absent or hidden by policy both land on not-found.
   if (!player) notFound();
-  const goals = (await fetchGoals(token, player.id)) ?? [];
+  const goalsResult = await fetchGoals(token, player.id);
+  const goals = goalsResult ?? [];
+  const [evidence, reflections] = await Promise.all([
+    Promise.all(
+      goals.map((goal) => fetchCoachEvidence(token, player.id, goal.id)),
+    ),
+    fetchPlayerReflections(token, player.id),
+  ]);
+  const evidenceUnavailable =
+    goalsResult === null || evidence.some((sets) => sets === null);
+  const timeline: TimelineGoal[] = evidenceUnavailable
+    ? []
+    : goals.map((goal, goalIndex) => ({
+        id: goal.id,
+        title: goal.title,
+        active: goal.status === "active",
+        games: (evidence[goalIndex] ?? []).map((set) => ({
+          publicationId: set.publication_id,
+          gameLabel: set.game_label,
+          publishedAt: set.published_at,
+          dots: set.items.map((item) => ({
+            judgmentId: item.judgment_id,
+            verdict: item.verdict,
+            href: `/coach/games/${set.game_id}/review/${player.id}?judgment=${item.judgment_id}`,
+          })),
+          reflections: (reflections ?? [])
+            .filter((reflection) =>
+              set.items.some(
+                (item) => item.judgment_id === reflection.judgment_id,
+              ),
+            )
+            .map((reflection) => ({
+              judgmentId: reflection.judgment_id,
+              text: reflection.text,
+            })),
+        })),
+      }));
   const active = goals.find((goal) => goal.status === "active");
   const closed = goals.filter((goal) => goal.status !== "active");
 
@@ -138,11 +182,21 @@ export default async function Player({
         ) : null}
 
         <h2 className={`${sectionTitle} mt-8`}>Evidence and reflections</h2>
-        <div className={`${panel} mt-3 max-w-170 border-dashed p-5`}>
-          <p className="text-[15px] leading-[1.5] text-muted">
-            Published clips and player reflections are not part of this version
-            of Shoulder. This space is reserved for them.
-          </p>
+        <div className={`${panel} mt-3 max-w-170 p-5`}>
+          {evidenceUnavailable || reflections === null ? (
+            <p role="alert" className="text-[15px] leading-[1.5] text-error">
+              Evidence and reflections could not be loaded. Try again.
+            </p>
+          ) : timeline.every((goal) => goal.games.length === 0) ? (
+            <p className="text-[15px] leading-[1.5] text-muted">
+              No evidence has been published for this player.
+            </p>
+          ) : (
+            <DevelopmentTimeline
+              goals={timeline}
+              reflectionLabel="Player reflection"
+            />
+          )}
         </div>
       </section>
     </>

@@ -98,6 +98,7 @@ export function CoachPlayer({
   playerId,
   goalId = null,
   initialObservations = [],
+  initialJudgmentId,
 }: {
   videoId: string;
   label: string;
@@ -106,6 +107,7 @@ export function CoachPlayer({
   playerId?: string;
   goalId?: string | null;
   initialObservations?: Observation[];
+  initialJudgmentId?: string;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const requestedTimeSeconds = useRef(0);
@@ -450,6 +452,18 @@ export function CoachPlayer({
         if (retry) scheduleSync(localId, 0);
       }
       setDraftsReady(true);
+      const requested = draftsRef.current.find(
+        (draft) => draft.judgmentId === initialJudgmentId,
+      );
+      if (requested) {
+        setSelectedDraftId(requested.localId);
+        setCurrentMs(requested.clipStartMs);
+        requestedTimeSeconds.current = requested.clipStartMs / 1000;
+        seekingToSeconds.current = requested.clipStartMs / 1000;
+        if (video.current) {
+          video.current.currentTime = requested.clipStartMs / 1000;
+        }
+      }
       for (const draft of draftsRef.current) {
         if (["pending", "offline"].includes(draft.saveState)) {
           scheduleSync(draft.localId, 0);
@@ -462,6 +476,7 @@ export function CoachPlayer({
   }, [
     commitDrafts,
     goalId,
+    initialJudgmentId,
     initialObservations,
     replaceDraft,
     scheduleSync,
