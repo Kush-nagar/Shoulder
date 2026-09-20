@@ -445,6 +445,19 @@ test("linked player sees only current clips across phone viewports", async ({
     await expect(currentVideo).toHaveAttribute("preload", "metadata");
     await expect(page.locator("video[aria-hidden='true']")).toHaveCount(1);
     await expect(page.locator("video")).toHaveCount(2);
+
+    await currentVideo.dispatchEvent("error");
+    const playbackError = page
+      .getByRole("alert")
+      .filter({ hasText: "This clip couldn’t play." });
+    await expect(playbackError).toContainText(
+      "This clip couldn’t play. Check your connection and try again.",
+    );
+    await expect(currentVideo).toHaveCount(0);
+    await playbackError.getByRole("button", { name: "Try again" }).click();
+    await expect(currentVideo).toHaveAttribute("src", /\/clips\//);
+    await expect(playbackError).toHaveCount(0);
+
     const goalHtml = await page.content();
     expect(goalHtml).not.toContain(videoId);
     expect(goalHtml).not.toContain("playback/");
