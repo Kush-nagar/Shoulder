@@ -381,6 +381,37 @@ class PublicationApiTests(DatabaseTestCase):
         )
         self.assertTrue(jobs.succeed(job.id, job.locked_by))
 
+    def test_a_player_on_the_way_out_sends_no_digest(self) -> None:
+        """The publication email is fenced on the player's state; this was not.
+
+        A player who is inactive, deleted, or pending deletion still produced a
+        digest naming them to every coach on the team, with a link to their
+        page -- outbound mail about a child whose record is on its way out.
+        """
+        publication = self.publish([0, 1, 2])
+        self.finish(publication.json()["id"])
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("""
+                    UPDATE app.player SET deletion_pending_at = now()
+                    WHERE id = :player
+                """),
+                {"player": self.player},
+            )
+        saved = self.save_reflection(
+            self.judgments[0]["id"], "Written while the record is on its way out."
+        )
+        self.assertIn(saved.status_code, (200, 404), saved.text)
+        with self.admin.connect() as connection:
+            digests = connection.execute(
+                text("""
+                    SELECT count(*) FROM app.email_delivery
+                    WHERE kind = 'reflection_digest' AND player_id = :player
+                """),
+                {"player": self.player},
+            ).scalar_one()
+        self.assertEqual(digests, 0)
+
     def test_reflection_delete_suppresses_stale_digest_without_text(self) -> None:
         publication = self.publish([0, 1, 2])
         self.finish(publication.json()["id"])

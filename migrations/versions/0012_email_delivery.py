@@ -288,8 +288,19 @@ def _create_enqueue_functions() -> None:
             v_digest_on date := (pg_catalog.now() AT TIME ZONE 'UTC')::date;
             v_delivery_key text;
         BEGIN
+            -- Fenced on the player's state exactly as the publication email
+            -- is. Without it a player who is inactive, deleted, or pending
+            -- deletion still generated a digest naming them to every coach on
+            -- the team, linking to their page -- outbound mail about a child
+            -- whose record is on its way out.
             SELECT p.team_id INTO v_team_id
-            FROM app.player p WHERE p.id = NEW.player_id;
+            FROM app.player p
+            WHERE p.id = NEW.player_id
+              AND p.active AND p.deleted_at IS NULL
+              AND p.deletion_pending_at IS NULL;
+            IF v_team_id IS NULL THEN
+                RETURN NEW;
+            END IF;
             FOR v_coach_id IN
                 SELECT m.user_id FROM app.team_membership m
                 WHERE m.team_id = v_team_id AND m.role = 'coach'
