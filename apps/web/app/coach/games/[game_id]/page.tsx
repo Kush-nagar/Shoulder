@@ -51,8 +51,10 @@ export default async function GamePage({
 }: {
   params: Promise<{ game_id: string }>;
 }) {
-  const { token, userId } = await requireCoachSession();
   const { game_id } = await params;
+  const { token, userId } = await requireCoachSession(
+    `/coach/games/${game_id}`,
+  );
   const game = await fetchGame(token, game_id);
   // Absent and hidden share one surface, so a coach outside the team learns
   // nothing about whether the match exists.

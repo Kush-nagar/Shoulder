@@ -57,6 +57,7 @@ class Job:
     id: UUID
     kind: str
     video_id: UUID | None
+    email_delivery_id: UUID | None
     attempts: int
     max_attempts: int
     payload: dict[str, Any]
@@ -137,8 +138,8 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
                     error_code = NULL,
                     error_message = NULL
                 WHERE id = :id AND status = 'queued'
-                RETURNING id, kind, video_id, attempts, max_attempts, payload,
-                          locked_by
+                RETURNING id, kind, video_id, email_delivery_id, attempts,
+                          max_attempts, payload, locked_by
             """),
             {"id": candidate, "worker_id": worker_id},
         ).one()
@@ -146,6 +147,7 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
         id=row.id,
         kind=row.kind,
         video_id=row.video_id,
+        email_delivery_id=row.email_delivery_id,
         attempts=row.attempts,
         max_attempts=row.max_attempts,
         payload=dict(row.payload),

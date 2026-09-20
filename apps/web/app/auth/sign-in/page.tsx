@@ -1,11 +1,13 @@
 import { ShoulderMark, ShoulderWordmark } from "../../../components/brand";
+import { verifiedRedirectPath } from "../../../lib/auth/policy";
 
 export default async function SignIn({
   searchParams,
 }: {
-  searchParams: Promise<{ sent?: string; error?: string }>;
+  searchParams: Promise<{ sent?: string; error?: string; next?: string }>;
 }) {
   const state = await searchParams;
+  const next = verifiedRedirectPath(state.next);
   return (
     <main className="mx-auto max-w-md px-5 py-16">
       <header className="mb-10">
@@ -28,6 +30,7 @@ export default async function SignIn({
         method="post"
         className="mt-6 flex flex-col gap-3"
       >
+        {next ? <input type="hidden" name="next" value={next} /> : null}
         <label htmlFor="email">Email address</label>
         <input
           id="email"

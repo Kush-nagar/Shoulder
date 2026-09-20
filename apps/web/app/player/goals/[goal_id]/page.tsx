@@ -16,7 +16,10 @@ export default async function GoalEvidencePage({
 }) {
   const { goal_id: goalId } = await params;
   const { publication } = await searchParams;
-  const { token, player } = await requirePlayerSession();
+  const destination = `/player/goals/${goalId}${
+    publication ? `?publication=${publication}` : ""
+  }`;
+  const { token, player } = await requirePlayerSession(destination);
   const goals = await fetchGoals(token, player.id);
   if (goals === null) {
     return (

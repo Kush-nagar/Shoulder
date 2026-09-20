@@ -56,6 +56,9 @@ TABLES = (
     # 0011 — Task 19 optional reflections and content-free replay markers.
     "player_reflection",
     "player_reflection_request",
+    # 0012 - Task 20 content-free email outbox and reflection digest events.
+    "email_delivery",
+    "email_reflection_event",
 )
 
 
@@ -759,7 +762,11 @@ class RuntimeIsolationTests(DatabaseTestCase):
         for user_id in (None, "", "not-a-uuid", "' OR true --"):
             for table in TABLES:
                 with self.subTest(user_id=user_id, table=table):
-                    if table == "player_reflection_request":
+                    if table in (
+                        "player_reflection_request",
+                        "email_delivery",
+                        "email_reflection_event",
+                    ):
                         with self.assertRaises(ProgrammingError) as caught:
                             self.visible(user_id, f"SELECT 1 FROM app.{table}")
                         self.assertEqual(sqlstate(caught.exception), "42501")
@@ -901,8 +908,10 @@ class ZMigrationTests(unittest.TestCase):
                 # write function, and `0010`'s six player/publication helpers,
                 # four coach transitions, three worker functions, finalize,
                 # the failure trigger, the reserved-edit trigger, and 0011's
-                # three runtime reflection helpers plus two internal helpers.
-                self.assertEqual(self.function_count(connection), 38)
+                # three runtime reflection helpers plus two internal helpers,
+                # and 0012's three fenced worker helpers plus five outbox and
+                # source-transition trigger functions.
+                self.assertEqual(self.function_count(connection), 46)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")

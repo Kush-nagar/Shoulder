@@ -215,6 +215,19 @@ EXPECTED_POLICIES = {
         "ALL",
         "{shoulder_migration}",
     ),
+    # 0012: operational email metadata is invisible to every interactive role.
+    (
+        "email_delivery",
+        "email_delivery_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "email_reflection_event",
+        "email_reflection_event_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -258,6 +271,9 @@ EXPECTED_WORKER_FUNCTIONS = {
     # job's lease has moved on, so a worker that lost its lease cannot remove
     # the clip its replacement finished.
     "evidence_clip_object_disposable",
+    "email_delivery_input",
+    "complete_email_delivery",
+    "suppress_email_delivery",
 }
 
 
@@ -401,7 +417,12 @@ class PolicySurfaceTests(DatabaseTestCase):
             {
                 ("shoulder_api", table, "SELECT")
                 for table in TABLES
-                if table != "player_reflection_request"
+                if table
+                not in (
+                    "player_reflection_request",
+                    "email_delivery",
+                    "email_reflection_event",
+                )
             }
             | {
                 ("shoulder_api", "development_goal", "INSERT"),
@@ -934,7 +955,11 @@ class ContextIsolationTests(IsolationHarness):
         for identity in (None, "", "not-a-uuid", "' OR true --", "00000000"):
             for table in TABLES:
                 with self.subTest(identity=identity, table=table):
-                    if table == "player_reflection_request":
+                    if table in (
+                        "player_reflection_request",
+                        "email_delivery",
+                        "email_reflection_event",
+                    ):
                         self.assertEqual(
                             self.refused_as(identity, f"SELECT 1 FROM app.{table}"),
                             "42501",
