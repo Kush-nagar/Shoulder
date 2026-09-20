@@ -15,7 +15,7 @@ if (process.env.R2_ENDPOINT_URL !== "http://127.0.0.1:9000") {
 
 export default defineConfig({
   ...smoke,
-  testMatch: "player.spec.mjs",
+  testMatch: ["player.spec.mjs", "player-mobile.spec.mjs"],
   // Each test generates and publishes a real fixture clip with ffmpeg.
   timeout: 120000,
   use: {
@@ -32,6 +32,7 @@ export default defineConfig({
       // scripts/check-player.ps1 provisions these per run; never stored.
       DATABASE_URL: process.env.DATABASE_URL ?? "",
       OPERATOR_DATABASE_URL: process.env.OPERATOR_DATABASE_URL ?? "",
+      WORKER_DATABASE_URL: process.env.WORKER_DATABASE_URL ?? "",
       OPERATOR_BOOTSTRAP_TOKEN: process.env.OPERATOR_BOOTSTRAP_TOKEN ?? "",
       R2_ENDPOINT_URL: process.env.R2_ENDPOINT_URL ?? "",
       R2_BUCKET: process.env.R2_BUCKET ?? "",

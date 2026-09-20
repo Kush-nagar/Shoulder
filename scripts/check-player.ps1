@@ -27,6 +27,7 @@ try {
     }
     $env:DATABASE_URL = "postgresql+psycopg://shoulder_api:$password@127.0.0.1:54322/postgres"
     $env:OPERATOR_DATABASE_URL = "postgresql+psycopg://shoulder_operator:$password@127.0.0.1:54322/postgres"
+    $env:WORKER_DATABASE_URL = "postgresql+psycopg://shoulder_worker:$password@127.0.0.1:54322/postgres"
     $env:OPERATOR_BOOTSTRAP_TOKEN = New-Secret
 
     $local = @{}
@@ -46,7 +47,7 @@ try {
     & node node_modules/@playwright/test/cli.js test --config playwright.player.config.mjs
     if ($LASTEXITCODE) { throw 'Real local player integration failed' }
     & ./scripts/infra.ps1 health
-    Write-Host 'PASS: keyboard transport, signed-URL refresh, playhead preservation, sprite timeline.'
+    Write-Host 'PASS: player mobile isolation, atomic replacement, viewport/a11y matrix, and coach playback regression.'
 } finally {
     foreach ($role in @('shoulder_api', 'shoulder_operator', 'shoulder_worker')) {
         "ALTER ROLE $role PASSWORD NULL;" |
@@ -59,6 +60,7 @@ try {
     $env:R2_ENDPOINT_URL = $null
     $env:OPERATOR_BOOTSTRAP_TOKEN = $null
     $env:OPERATOR_DATABASE_URL = $null
+    $env:WORKER_DATABASE_URL = $null
     $env:DATABASE_URL = $null
     $env:MIGRATION_DATABASE_URL = $null
     & ./scripts/infra.ps1 stop

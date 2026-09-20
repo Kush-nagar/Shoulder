@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `9d3ba52` (PR #41; carries #32 and #35 to #40 before it) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7, PR #8, `ba3b52e`); Block 02 (Tasks 8-10, PR #10, `465b894`, status sync PR #11); Block 03 (Tasks 11-13, PR #13, `dab524f`); Block 04 Tasks 14 (PR #21) and 15 (PR #32) |
-| Current block | Block 04. Task 15 merged and reconciled. Task 16 is implemented on this branch by the local Codex lane and is in review as PR #42. |
-| Current worker / branch | Task 16 draft preservation / `block-04-t16-draft-preservation-and-conflict-recovery` |
-| Open PRs | #42 Task 16 (this branch), reviewed by Claude because Codex wrote it; #27 live bootstrap hotfix from 2026-09-15, still holding unlanded cloud recovery work (`leases.abandon_finished_worker`, watchdog and worker workflow changes) and far behind a much-changed `main`; it needs a rebase and its own verification before it can land |
-| Database revision | `0009_draft_recovery` on this branch; `main` is on `0008_coach_judgments`; `Shoulder Dev` is still on `0005_video_ingest` |
-| Last full verification | Task 16, 2026-09-19 on this branch: `scripts/check-marking.ps1` against real Auth, Postgres and MinIO, 9 of 9 in Chromium, Firefox and WebKit, including "five judgment drafts survive a lost response, reload, and stale edit without loss" -- run twice, the second time with assertions strengthened to check each clip's bounds rather than only that five list items exist. `scripts/check.ps1` end to end, exit 0. Task 15 and the AgentOps work carry their own records; the latter is indexed at `docs/agentops-three-writer-verification.md`. |
+| Last verified `main` | `5f011f3` (PR #48, Task 17 player-only clip export and batch publish) |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17) |
+| Current block | Block 06. Task 18 player mobile experience is implemented and verified locally on its task branch. |
+| Current worker / branch | Task 18 player mobile experience / `block-06-t18-player-mobile-experience` |
+| Open PRs | Not checked in this task. This run did not push or open a Task 18 PR. |
+| Database revision | `0010_player_publications` on this branch and `main`; `Shoulder Dev` was not checked in this task. Task 18 adds no schema change. |
+| Last full verification | Task 18, 2026-09-20: `scripts/check-player.ps1` passed 15/15 in Chromium, Firefox, and WebKit against real local Auth, Postgres, MinIO, FastAPI, Next.js, and clip-export worker. It covered 320, 360, 375, 390, 430, and 768 px player widths, axe scans, keyboard focus, Player A/B isolation, next-only metadata preload, and atomic publication replacement. `scripts/check.ps1` passed end to end: 45 Node tests, 1,428 Python tests (348 environment-gated skips), generated-contract check, production build, secret scan, and 3 browser smoke tests. |
 | Blockers | none that require a human before Task 23. See the standing CI gap below: it predates this task and does not block it. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | None by hand. Task 16 goes through independent review, CI and merge, then the loop selects Task 17. Tasks 23 and later stop until a human sets `gates.real_use_gate`. |
+| Next action | Review and merge Task 18, then Task 19 becomes eligible. Tasks 23 and later remain blocked by `gates.real_use_gate`. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -169,16 +169,12 @@ owner decision.
 
 ## Current state
 
-- Current phase: Phase C — Coach review. Tasks 14 and 15 are merged. Task 16
-  is implemented and verified on
-  `block-04-t16-draft-preservation-and-conflict-recovery`: local drafts save
-  on every change, retry interrupted observation creation by client UUID,
-  reconcile accepted writes whose responses are lost, restore after
-  reload/offline, and preserve both sides of genuine version conflicts.
+- Current phase: Phase C — the manual product. Tasks 14-17 are merged. Task 18
+  is implemented and verified on `block-06-t18-player-mobile-experience`.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: `D:\Shoulder` sits on `main`; Task 15 is written in its own
-  worktree, `D:\Shoulder-agents\block-04-t15-coach-judgments`, on branch
-  `block-04-t15-coach-judgments`. One writer per checkout.
+- Checkout: Task 18 is written in
+  `D:\Shoulder-agents\block-06-t18-player-mobile-experience`. One writer per
+  checkout.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.
 - Last verified: 2026-09-08; Task 5 local migration cycle, 75 database tests, 6 auth browser tests and full check passed. Hosted isolation was independently verified. All review verification blockers are resolved; see `docs/task-5-verification.md`.

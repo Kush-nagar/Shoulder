@@ -21,8 +21,10 @@ export const config = {
   matcher: [
     "/",
     "/coach/:path*",
+    "/player/:path*",
     "/auth/session",
     "/api/auth/identity",
     "/api/me",
+    "/api/player/:path*",
   ],
 };

@@ -43,7 +43,7 @@ function resetLocalWorkspace() {
       "-v",
       "ON_ERROR_STOP=1",
       "-c",
-      "TRUNCATE app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
+      "TRUNCATE app.review_publication_item, app.evidence_clip, app.review_publication, app.judgment_revision, app.judgment, app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
     ],
     { stdio: ["ignore", "ignore", "pipe"] },
   );
