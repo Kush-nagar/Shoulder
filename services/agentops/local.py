@@ -631,6 +631,7 @@ def local_plan(
     exclude_lanes: frozenset[str] = frozenset(),
     purpose: str = "task",
     config: Mapping[str, Any] | None = None,
+    writer: Any | None = None,
 ) -> LocalPlan:
     """The existing router, asked the question with local constraints attached.
 
@@ -659,17 +660,24 @@ def local_plan(
         rejections=list(unusable.values()),
     )
 
-    try:
-        plan.writer = routing.select(
-            gated,
-            classification,
-            effort_escalations=escalations,
-            exclude_lanes=excluded,
-        )
-    except routing.RoutingBlocked as blocked:
-        plan.blocked_reason = blocked.reason
-        plan.rejections.extend(blocked.rejections)
-        return plan
+    if writer is not None:
+        # Asked about a writer that is already doing the work rather than one
+        # to choose. A failover replaces the writer mid-task, and the reviewer
+        # below has to be independent of whoever actually wrote, not of
+        # whoever was picked first.
+        plan.writer = writer
+    else:
+        try:
+            plan.writer = routing.select(
+                gated,
+                classification,
+                effort_escalations=escalations,
+                exclude_lanes=excluded,
+            )
+        except routing.RoutingBlocked as blocked:
+            plan.blocked_reason = blocked.reason
+            plan.rejections.extend(blocked.rejections)
+            return plan
 
     plan.rejections.extend(plan.writer.rejections)
 
@@ -1690,6 +1698,29 @@ def run_once(
             prompt = build_prompt(root, task_id, "implement", repair="verification")
         attempted = implement(prompt)
         run = attempted["run"]
+        if attempted["assignment"].lane != writer.lane:
+            # A failover replaced the writer, and the reviewer was chosen to
+            # be independent of the one it replaced. Task 19 is the case:
+            # Codex ran out of allowance mid-task, Claude took the work over,
+            # and the reviewer picked for Codex was Claude -- so Claude
+            # reviewed its own diff while the record went on reporting the
+            # review as independent. A false claim of independence is worse
+            # than a declared same-family review, because only one of the two
+            # can be noticed.
+            replanned = local_plan(
+                ctx, candidate, store, writer=attempted["assignment"], config=config
+            )
+            if replanned.reviewer is not None:
+                plan.reviewer = replanned.reviewer
+                plan.reviewer_independent = replanned.reviewer_independent
+                localstate.append_event(
+                    paths,
+                    "reviewer_replanned",
+                    task_id=task_id,
+                    writer_lane=attempted["assignment"].lane,
+                    reviewer_lane=plan.reviewer.lane,
+                    independent=plan.reviewer_independent,
+                )
         writer = attempted["assignment"]
         failovers.extend(attempted["failovers"])
         phases.append({"phase": "implementing", "outcome": run["outcome"]})

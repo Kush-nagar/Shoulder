@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -122,6 +123,34 @@ class TestReviewerSelection(RoutingCase):
             self.assertFalse(plan.reviewer_independent)
         else:
             self.assertTrue(plan.reviewer_independent)
+
+    def test_a_replaced_writer_gets_a_reviewer_independent_of_it(self) -> None:
+        """A failover swaps the writer, and independence follows the swap.
+
+        Task 19: Codex ran out of allowance mid-task, Claude took the work
+        over, and the reviewer chosen for Codex was Claude -- so Claude
+        reviewed its own diff while the record still reported the review as
+        independent. Asking with the writer that actually wrote is what keeps
+        the claim true.
+        """
+        first = self.planned()
+        assert first.reviewer is not None
+        took_over = replace(first.reviewer)
+        replanned = local.local_plan(
+            self.ctx, self.candidate, self.store, writer=took_over
+        )
+        assert replanned.writer is not None
+        assert replanned.reviewer is not None
+        self.assertEqual(replanned.writer.lane, took_over.lane)
+        if replanned.reviewer_independent:
+            self.assertNotEqual(replanned.reviewer.lane, took_over.lane)
+
+    def test_an_overridden_writer_is_used_rather_than_chosen(self) -> None:
+        first = self.planned()
+        replanned = local.local_plan(
+            self.ctx, self.candidate, self.store, writer=first.writer
+        )
+        self.assertIs(replanned.writer, first.writer)
 
     def test_the_reviewer_uses_the_same_capability_class_as_the_writer(self) -> None:
         """Risk already chose the class; a separate review tier would either
