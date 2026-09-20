@@ -13,6 +13,7 @@ from services.api.problems import Problem
 from services.api.publication_service import (
     cancel_publication,
     clip_for_signing,
+    coach_evidence_sets,
     evidence_sets,
     load_publication,
     publication_error,
@@ -24,6 +25,8 @@ from services.api.routes import PRIVATE, unavailable
 from services.api.schemas import (
     ClipUrl,
     ClipUrlRequest,
+    CoachEvidenceSet,
+    EvidenceDot,
     EvidenceItem,
     EvidenceSet,
     ReviewPublication,
@@ -187,6 +190,41 @@ def player_evidence(
                 clip_duration_ms=row.duration_ms,
                 coach_display_name=row.coach_display_name,
             )
+        )
+    return grouped
+
+
+@router.get(
+    "/players/{player_id}/goals/{goal_id}/evidence",
+    response_model=list[CoachEvidenceSet],
+    dependencies=PRIVATE,
+)
+def coach_player_evidence(
+    player_id: UUID,
+    goal_id: UUID,
+    user_id: Annotated[str, Depends(authenticated_identity)],
+) -> list[CoachEvidenceSet]:
+    try:
+        with user_transaction(user_id) as connection:
+            rows = coach_evidence_sets(connection, player_id, goal_id)
+    except DBAPIError:
+        raise unavailable() from None
+    if rows is None:
+        raise Problem(404, "That player is not available.")
+    grouped: list[CoachEvidenceSet] = []
+    for row in rows:
+        if not grouped or grouped[-1].publication_id != row.publication_id:
+            grouped.append(
+                CoachEvidenceSet(
+                    publication_id=row.publication_id,
+                    game_id=row.game_id,
+                    game_label=row.game_label,
+                    published_at=row.published_at,
+                    items=[],
+                )
+            )
+        grouped[-1].items.append(
+            EvidenceDot(judgment_id=row.judgment_id, verdict=row.verdict)
         )
     return grouped
 

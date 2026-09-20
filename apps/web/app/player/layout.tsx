@@ -39,7 +39,7 @@ export default async function PlayerLayout({
                 href="/player/progress"
                 className={`flex min-h-11 items-center rounded-lg px-3 text-[16px] hover:bg-surface-subtle ${focus}`}
               >
-                Reflections
+                Progress
               </Link>
               <PlayerSignOutForm />
             </div>
@@ -49,6 +49,23 @@ export default async function PlayerLayout({
       <main className="mx-auto max-w-140 px-5 py-8 md:px-6 md:py-10">
         {children}
       </main>
+      <nav
+        aria-label="Player navigation"
+        className="mx-auto flex max-w-140 border-t border-line px-5 pb-[env(safe-area-inset-bottom)] md:px-6"
+      >
+        <Link
+          href="/player"
+          className={`flex min-h-11 flex-1 items-center justify-center text-[16px] font-medium ${focus}`}
+        >
+          Today
+        </Link>
+        <Link
+          href="/player/progress"
+          className={`flex min-h-11 flex-1 items-center justify-center text-[16px] font-medium ${focus}`}
+        >
+          Progress
+        </Link>
+      </nav>
     </div>
   );
 }

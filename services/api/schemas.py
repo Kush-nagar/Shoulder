@@ -559,6 +559,19 @@ class EvidenceSet(BaseModel):
     items: list[EvidenceItem]
 
 
+class EvidenceDot(BaseModel):
+    judgment_id: UUID
+    verdict: Literal["applied", "opportunity"]
+
+
+class CoachEvidenceSet(BaseModel):
+    publication_id: UUID
+    game_id: UUID
+    game_label: str
+    published_at: datetime
+    items: list[EvidenceDot]
+
+
 class ClipUrlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_published_revision_id: UUID

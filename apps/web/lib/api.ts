@@ -24,6 +24,7 @@ export type Judgment = Schema["Judgment"];
 export type InviteResult = Schema["InviteResult"];
 export type EvidenceSet = Schema["EvidenceSet"];
 export type EvidenceItem = Schema["EvidenceItem"];
+export type CoachEvidenceSet = Schema["CoachEvidenceSet"];
 export type ClipUrl = Schema["ClipUrl"];
 export type PlayerReflection = Schema["PlayerReflection"];
 
@@ -149,6 +150,20 @@ export async function fetchEvidence(
     await request<EvidenceSet[]>(
       token,
       `/v1/me/goals/${encodeURIComponent(goalId)}/evidence`,
+    )
+  ).data;
+}
+
+/** Current published pointers for one player and goal, readable by their coach. */
+export async function fetchCoachEvidence(
+  token: string,
+  playerId: string,
+  goalId: string,
+): Promise<CoachEvidenceSet[] | null> {
+  return (
+    await request<CoachEvidenceSet[]>(
+      token,
+      `/v1/players/${encodeURIComponent(playerId)}/goals/${encodeURIComponent(goalId)}/evidence`,
     )
   ).data;
 }

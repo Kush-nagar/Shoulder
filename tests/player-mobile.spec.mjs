@@ -544,6 +544,65 @@ test("linked player sees only current clips across phone viewports", async ({
     ).toBe(false);
     await page.unroute("**/api/player/judgments/*/reflection", reflectionRoute);
 
+    for (const [width, height] of viewports) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/player/progress");
+      await expect(
+        page.getByRole("heading", { name: "Progress" }),
+      ).toBeVisible();
+      await expect(page.getByLabel("Evidence legend")).toContainText(
+        "You did this.",
+      );
+      await expect(
+        page.getByRole("link", { name: /Chance to do this\..*clip 2 of 3/ }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("blockquote").getByText(reflectionText),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(width + 1);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      const timelineScreenshot = testInfo.outputPath(
+        `player-progress-${width}x${height}.png`,
+      );
+      await page.screenshot({ path: timelineScreenshot, fullPage: true });
+      await testInfo.attach(`player-progress-${width}x${height}`, {
+        path: timelineScreenshot,
+        contentType: "image/png",
+      });
+    }
+    await page
+      .getByRole("link", { name: /Chance to do this\..*clip 2 of 3/ })
+      .click();
+    await expect(page.getByText("Coach sentence 2.")).toBeVisible();
+    await page.setViewportSize({ width: 375, height: 812 });
+
+    const coachPage = await coachContext.newPage();
+    await coachPage.setViewportSize({ width: 1024, height: 768 });
+    await coachPage.goto(`/coach/players/${playerId}`);
+    await expect(
+      coachPage.getByRole("heading", { name: "Evidence and reflections" }),
+    ).toBeVisible();
+    await expect(
+      coachPage.getByRole("link", { name: /Chance to do this\..*clip 2 of 3/ }),
+    ).toBeVisible();
+    expect(
+      (await new AxeBuilder({ page: coachPage }).analyze()).violations,
+    ).toEqual([]);
+    const coachTimelineScreenshot = testInfo.outputPath(
+      "coach-development-timeline-1024x768.png",
+    );
+    await coachPage.screenshot({
+      path: coachTimelineScreenshot,
+      fullPage: true,
+    });
+    await testInfo.attach("coach-development-timeline-1024x768", {
+      path: coachTimelineScreenshot,
+      contentType: "image/png",
+    });
+    await coachPage.close();
+
     const deniedReflection = await otherContext.request.put(
       `/api/player/judgments/${secondItem.judgment_id}/reflection`,
       {

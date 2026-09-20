@@ -20,11 +20,14 @@ const dateLabel = new Intl.DateTimeFormat("en-GB", {
 
 export default async function ReviewPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ game_id: string; player_id: string }>;
+  searchParams: Promise<{ judgment?: string }>;
 }) {
   const { token, userId } = await requireCoachSession();
   const { game_id: gameId, player_id: playerId } = await params;
+  const { judgment } = await searchParams;
   const game = await fetchGame(token, gameId);
   if (!game) notFound();
 
@@ -76,6 +79,7 @@ export default async function ReviewPage({
           goalId={player.active_goal?.id ?? null}
           label={`${player.display_name} · ${context}`}
           initialObservations={observations}
+          initialJudgmentId={judgment}
         />
       </main>
     </div>

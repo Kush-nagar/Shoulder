@@ -55,6 +55,7 @@ export function EvidenceSequence({
   initialReflections,
   reflectionsLoaded,
   initialPublicationId,
+  initialJudgmentId,
 }: {
   goalId: string;
   goalTitle: string;
@@ -63,17 +64,25 @@ export function EvidenceSequence({
   initialReflections: PlayerReflection[];
   reflectionsLoaded: boolean;
   initialPublicationId?: string;
+  initialJudgmentId?: string;
 }) {
+  const initialSet =
+    initialEvidence.find(
+      (set) => set.publication_id === initialPublicationId,
+    ) ?? initialEvidence[0];
   const [evidence, setEvidence] = useState(initialEvidence);
   const [reflections, setReflections] = useState(initialReflections);
   const [reflectionDataAvailable, setReflectionDataAvailable] =
     useState(reflectionsLoaded);
   const [publicationId, setPublicationId] = useState(
-    initialEvidence.some((set) => set.publication_id === initialPublicationId)
-      ? initialPublicationId
-      : initialEvidence[0]?.publication_id,
+    initialSet?.publication_id,
   );
-  const [clipIndex, setClipIndex] = useState(0);
+  const [clipIndex, setClipIndex] = useState(() => {
+    const requested = initialSet?.items.findIndex(
+      (item) => item.judgment_id === initialJudgmentId,
+    );
+    return requested !== undefined && requested >= 0 ? requested : 0;
+  });
   const [signed, setSigned] = useState<SignedClip | null>(null);
   const [nextSigned, setNextSigned] = useState<SignedClip | null>(null);
   const [loading, setLoading] = useState(false);

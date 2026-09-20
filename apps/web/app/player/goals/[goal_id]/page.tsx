@@ -12,13 +12,18 @@ export default async function GoalEvidencePage({
   searchParams,
 }: {
   params: Promise<{ goal_id: string }>;
-  searchParams: Promise<{ publication?: string }>;
+  searchParams: Promise<{ publication?: string; judgment?: string }>;
 }) {
   const { goal_id: goalId } = await params;
-  const { publication } = await searchParams;
-  const destination = `/player/goals/${goalId}${
-    publication ? `?publication=${publication}` : ""
-  }`;
+  const { publication, judgment } = await searchParams;
+  // Both halves of the merge matter: the email link carries a publication and
+  // the timeline carries a judgment, and either can arrive before sign-in, so
+  // the destination has to survive it with whichever it was given.
+  const query = new URLSearchParams();
+  if (publication) query.set("publication", publication);
+  if (judgment) query.set("judgment", judgment);
+  const search = query.toString();
+  const destination = `/player/goals/${goalId}${search ? `?${search}` : ""}`;
   const { token, player } = await requirePlayerSession(destination);
   const goals = await fetchGoals(token, player.id);
   if (goals === null) {
@@ -46,6 +51,7 @@ export default async function GoalEvidencePage({
       initialReflections={reflections ?? []}
       reflectionsLoaded={reflections !== null}
       initialPublicationId={publication}
+      initialJudgmentId={judgment}
     />
   );
 }
