@@ -171,6 +171,50 @@ EXPECTED_POLICIES = {
     ),
     ("evidence_clip", "evidence_clip_coach_select", "SELECT", "{shoulder_api}"),
     ("evidence_clip", "evidence_clip_player_select", "SELECT", "{shoulder_api}"),
+    # 0011: reflections are player-authored and coach-readable. Mutations use
+    # serialized functions; policies still pin every direct verb to the author.
+    (
+        "player_reflection",
+        "player_reflection_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "player_reflection",
+        "player_reflection_player_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "player_reflection",
+        "player_reflection_coach_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "player_reflection",
+        "player_reflection_player_insert",
+        "INSERT",
+        "{shoulder_api}",
+    ),
+    (
+        "player_reflection",
+        "player_reflection_player_update",
+        "UPDATE",
+        "{shoulder_api}",
+    ),
+    (
+        "player_reflection",
+        "player_reflection_player_delete",
+        "DELETE",
+        "{shoulder_api}",
+    ),
+    (
+        "player_reflection_request",
+        "player_reflection_request_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -201,6 +245,9 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "retry_review_publication",
     "cancel_review_publication",
     "withdraw_judgment",
+    "is_player_reflection_author",
+    "save_player_reflection",
+    "delete_player_reflection",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
@@ -351,7 +398,11 @@ class PolicySurfaceTests(DatabaseTestCase):
             # inserted whole, so that one is table-level; the roster's INSERT
             # and both UPDATE surfaces are column-level by design and are
             # snapshotted per column in `tests/test_database_roster.py`.
-            {("shoulder_api", table, "SELECT") for table in TABLES}
+            {
+                ("shoulder_api", table, "SELECT")
+                for table in TABLES
+                if table != "player_reflection_request"
+            }
             | {
                 ("shoulder_api", "development_goal", "INSERT"),
                 ("shoulder_api", "game", "INSERT"),
@@ -883,9 +934,16 @@ class ContextIsolationTests(IsolationHarness):
         for identity in (None, "", "not-a-uuid", "' OR true --", "00000000"):
             for table in TABLES:
                 with self.subTest(identity=identity, table=table):
-                    self.assertEqual(
-                        self.read_as(identity, f"SELECT 1 FROM app.{table}"), []
-                    )
+                    if table == "player_reflection_request":
+                        self.assertEqual(
+                            self.refused_as(identity, f"SELECT 1 FROM app.{table}"),
+                            "42501",
+                        )
+                    else:
+                        self.assertEqual(
+                            self.read_as(identity, f"SELECT 1 FROM app.{table}"),
+                            [],
+                        )
 
     def test_concurrent_identities_do_not_interfere(self) -> None:
         world = self.world

@@ -1,7 +1,9 @@
-"""Task 17 publication, snapshot, and player-media API acceptance."""
+"""Tasks 17 and 19 publication, player-media, and reflection acceptance."""
 
 import sys
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest import mock
@@ -10,6 +12,7 @@ from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 from httpx import Response
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from services.api import storage
 from services.api.auth import authenticated_identity
@@ -17,7 +20,7 @@ from services.api.main import app
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from test_database import CONFIGURED, DatabaseTestCase  # noqa: E402
+from test_database import CONFIGURED, DatabaseTestCase, sqlstate  # noqa: E402
 
 
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
@@ -60,6 +63,8 @@ class PublicationApiTests(DatabaseTestCase):
 
     def delete_publication_rows(self) -> None:
         with self.admin.connect() as connection, connection.begin():
+            connection.execute(text("DELETE FROM app.player_reflection_request"))
+            connection.execute(text("DELETE FROM app.player_reflection"))
             connection.execute(
                 text("""
                     UPDATE app.judgment SET
@@ -250,6 +255,52 @@ class PublicationApiTests(DatabaseTestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         return cast("list[dict[str, Any]]", response.json())
+
+    def save_reflection(
+        self,
+        judgment_id: str,
+        reflection_text: str,
+        *,
+        actor: UUID | None = None,
+        key: str | None = None,
+        current: dict[str, Any] | None = None,
+    ) -> Response:
+        return cast(
+            Response,
+            self.client_for(actor or self.player_account).put(
+                f"/v1/me/judgments/{judgment_id}/reflection",
+                headers={"Idempotency-Key": key or f"reflection-{uuid4()}"},
+                json={
+                    "intent": "edit" if current else "create",
+                    "text": reflection_text,
+                    "expected_reflection_id": current["id"] if current else None,
+                    "expected_etag": current["etag"] if current else None,
+                    "request_created_at": datetime.now(UTC).isoformat(),
+                },
+            ),
+        )
+
+    def delete_reflection(
+        self,
+        judgment_id: str,
+        current: dict[str, Any],
+        *,
+        actor: UUID | None = None,
+        key: str | None = None,
+    ) -> Response:
+        return cast(
+            Response,
+            self.client_for(actor or self.player_account).request(
+                "DELETE",
+                f"/v1/me/judgments/{judgment_id}/reflection",
+                headers={"Idempotency-Key": key or f"delete-{uuid4()}"},
+                json={
+                    "expected_reflection_id": current["id"],
+                    "expected_etag": current["etag"],
+                    "request_created_at": datetime.now(UTC).isoformat(),
+                },
+            ),
+        )
 
     def test_three_to_six_items_and_one_current_set_are_enforced(self) -> None:
         for indices in ([0, 1], [0, 1, 2, 3, 4, 5, 0]):
@@ -487,6 +538,335 @@ class PublicationApiTests(DatabaseTestCase):
             json={"expected_published_revision_id": item["published_revision_id"]},
         )
         self.assertEqual(expired.status_code, 409, expired.text)
+
+    def test_reflection_author_crud_coach_read_only_and_other_player_denied(
+        self,
+    ) -> None:
+        publication = self.publish([0, 1, 2]).json()
+        self.finish(publication["id"])
+        judgment_id = self.judgments[0]["id"]
+
+        created_response = self.save_reflection(
+            judgment_id, "I saw the pass before receiving."
+        )
+        self.assertEqual(created_response.status_code, 200, created_response.text)
+        created = created_response.json()
+        own = self.client_for(self.player_account).get("/v1/me/reflections")
+        self.assertEqual(own.status_code, 200, own.text)
+        self.assertEqual(own.json(), [created])
+        coach = self.client_for(self.coach).get(
+            f"/v1/players/{self.player}/reflections"
+        )
+        self.assertEqual(coach.status_code, 200, coach.text)
+        self.assertEqual(coach.json(), [created])
+        other = self.client_for(self.other_player_account).get("/v1/me/reflections")
+        self.assertEqual(other.status_code, 200, other.text)
+        self.assertEqual(other.json(), [])
+
+        coach_edit = self.save_reflection(
+            judgment_id,
+            "Coach must not write this.",
+            actor=self.coach,
+            current=created,
+        )
+        self.assertEqual(coach_edit.status_code, 404, coach_edit.text)
+        other_edit = self.save_reflection(
+            judgment_id,
+            "Another player must not write this.",
+            actor=self.other_player_account,
+            current=created,
+        )
+        self.assertEqual(other_edit.status_code, 404, other_edit.text)
+
+        with self.runtime.connect() as connection, connection.begin():
+            self.as_user(connection, self.player_account)
+            self.assertEqual(
+                connection.execute(
+                    text("SELECT id FROM app.player_reflection")
+                ).scalar_one(),
+                UUID(created["id"]),
+            )
+        with self.runtime.connect() as connection, connection.begin():
+            self.as_user(connection, self.coach)
+            self.assertEqual(
+                connection.execute(
+                    text("SELECT id FROM app.player_reflection")
+                ).scalar_one(),
+                UUID(created["id"]),
+            )
+        with self.runtime.connect() as connection, connection.begin():
+            self.as_user(connection, self.other_player_account)
+            self.assertEqual(
+                connection.execute(text("SELECT id FROM app.player_reflection")).all(),
+                [],
+            )
+        for actor in (self.player_account, self.coach):
+            with self.subTest(actor=str(actor)), self.assertRaises(DBAPIError):
+                with self.runtime.connect() as connection, connection.begin():
+                    self.as_user(connection, actor)
+                    connection.execute(
+                        text("UPDATE app.player_reflection SET text = 'bypass'")
+                    )
+            with self.subTest(marker_actor=str(actor)), self.assertRaises(DBAPIError):
+                with self.runtime.connect() as connection, connection.begin():
+                    self.as_user(connection, actor)
+                    connection.execute(
+                        text("SELECT * FROM app.player_reflection_request")
+                    ).all()
+
+        edited_response = self.save_reflection(
+            judgment_id,
+            "I checked both sides first.",
+            current=created,
+            key="accepted-edit",
+        )
+        self.assertEqual(edited_response.status_code, 200, edited_response.text)
+        edited = edited_response.json()
+        self.assertNotEqual(edited["etag"], created["etag"])
+        newer_response = self.save_reflection(
+            judgment_id, "I checked earlier on the next clip.", current=edited
+        )
+        self.assertEqual(newer_response.status_code, 200, newer_response.text)
+        stale_retry = self.save_reflection(
+            judgment_id,
+            "I checked both sides first.",
+            current=created,
+            key="accepted-edit",
+        )
+        self.assertEqual(stale_retry.status_code, 409, stale_retry.text)
+        deleted = self.delete_reflection(judgment_id, newer_response.json())
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+        self.assertEqual(
+            self.client_for(self.player_account).get("/v1/me/reflections").json(), []
+        )
+
+    def test_reflection_length_duplicate_expiry_and_optional_skip(self) -> None:
+        publication = self.publish([0, 1, 2]).json()
+        self.finish(publication["id"])
+        judgment_id = self.judgments[0]["id"]
+        before = self.evidence()
+        for value in ("   ", "x" * 1001):
+            with self.subTest(length=len(value)):
+                invalid = self.save_reflection(judgment_id, value)
+                self.assertEqual(invalid.status_code, 422, invalid.text)
+        # The runtime function is a public security boundary too. It must not
+        # accept an overlong value whose trimmed length happens to fit.
+        with self.assertRaises(DBAPIError) as caught:
+            with self.runtime.connect() as connection, connection.begin():
+                self.as_user(connection, self.player_account)
+                connection.execute(
+                    text("""
+                        SELECT private.save_player_reflection(
+                            :judgment, 'create', :reflection_text,
+                            NULL, NULL, :created_at, :request_key
+                        )
+                    """),
+                    {
+                        "judgment": judgment_id,
+                        "reflection_text": "x" + " " * 1000,
+                        "created_at": datetime.now(UTC),
+                        "request_key": "direct-overlong-reflection",
+                    },
+                )
+        self.assertEqual(sqlstate(caught.exception), "P1902")
+        expired = self.client_for(self.player_account).put(
+            f"/v1/me/judgments/{judgment_id}/reflection",
+            headers={"Idempotency-Key": "expired-reflection"},
+            json={
+                "intent": "create",
+                "text": "This request is too old.",
+                "expected_reflection_id": None,
+                "expected_etag": None,
+                "request_created_at": (
+                    datetime.now(UTC) - timedelta(days=8)
+                ).isoformat(),
+            },
+        )
+        self.assertEqual(expired.status_code, 422, expired.text)
+
+        first = self.save_reflection(judgment_id, "x" * 1000, key="same-save")
+        duplicate = self.save_reflection(judgment_id, "x" * 1000, key="same-save")
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(duplicate.status_code, 200, duplicate.text)
+        self.assertEqual(first.json()["id"], duplicate.json()["id"])
+        self.assertEqual(first.json()["etag"], duplicate.json()["etag"])
+        with self.admin.connect() as connection:
+            count = connection.execute(
+                text(
+                    "SELECT count(*) FROM app.player_reflection "
+                    "WHERE judgment_id = :judgment"
+                ),
+                {"judgment": judgment_id},
+            ).scalar_one()
+        self.assertEqual(count, 1)
+        # Playback and navigation evidence remain available without any save;
+        # "Skip" is a client-only action and never calls a gating API.
+        self.assertEqual(self.evidence(), before)
+
+    def test_reflection_save_delete_race_and_old_retries_do_not_resurrect(
+        self,
+    ) -> None:
+        publication = self.publish([0, 1, 2]).json()
+        self.finish(publication["id"])
+        judgment_id = self.judgments[0]["id"]
+        create_key = "race-create"
+        created = self.save_reflection(
+            judgment_id, "Original reflection.", key=create_key
+        ).json()
+
+        def edit() -> int:
+            return self.save_reflection(
+                judgment_id,
+                "Concurrent edit.",
+                key="race-edit",
+                current=created,
+            ).status_code
+
+        def delete() -> int:
+            return self.delete_reflection(
+                judgment_id, created, key="race-delete"
+            ).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            edit_future = pool.submit(edit)
+            delete_future = pool.submit(delete)
+            edit_status = edit_future.result()
+            delete_status = delete_future.result()
+        self.assertIn((edit_status, delete_status), ((200, 409), (409, 204)))
+
+        current_rows = (
+            self.client_for(self.player_account).get("/v1/me/reflections").json()
+        )
+        if current_rows:
+            removed = self.delete_reflection(
+                judgment_id, current_rows[0], key="race-cleanup-delete"
+            )
+            self.assertEqual(removed.status_code, 204, removed.text)
+
+        old_create_retry = self.save_reflection(
+            judgment_id, "Original reflection.", key=create_key
+        )
+        self.assertEqual(old_create_retry.status_code, 409, old_create_retry.text)
+        recreated_response = self.save_reflection(
+            judgment_id, "Deliberate new reflection.", key="deliberate-new-create"
+        )
+        self.assertEqual(recreated_response.status_code, 200, recreated_response.text)
+        recreated = recreated_response.json()
+
+        old_delete_retry = self.delete_reflection(
+            judgment_id, created, key="race-delete"
+        )
+        # A completed delete replays as 204 without touching the new row. A
+        # delete that lost the race was never accepted and must conflict with
+        # the deliberate replacement instead.
+        expected_retry = 204 if delete_status == 204 else 409
+        self.assertEqual(
+            old_delete_retry.status_code, expected_retry, old_delete_retry.text
+        )
+        remaining = (
+            self.client_for(self.player_account).get("/v1/me/reflections").json()
+        )
+        self.assertEqual([row["id"] for row in remaining], [recreated["id"]])
+
+    def test_withdrawn_reflection_remains_manageable_but_cannot_be_recreated(
+        self,
+    ) -> None:
+        publication = self.publish([0, 1, 2]).json()
+        self.finish(publication["id"])
+        judgment_id = self.judgments[0]["id"]
+        created = self.save_reflection(
+            judgment_id, "Available before withdrawal."
+        ).json()
+        withdrawn = self.client_for(self.coach).post(
+            f"/v1/judgments/{judgment_id}/withdraw"
+        )
+        self.assertEqual(withdrawn.status_code, 204, withdrawn.text)
+
+        own = self.client_for(self.player_account).get("/v1/me/reflections").json()
+        self.assertEqual(len(own), 1)
+        self.assertFalse(own[0]["evidence_available"])
+        edited = self.save_reflection(
+            judgment_id, "Still mine after withdrawal.", current=created
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(
+            edited.json()["judgment_version_at_save"],
+            created["judgment_version_at_save"],
+        )
+        removed = self.delete_reflection(judgment_id, edited.json())
+        self.assertEqual(removed.status_code, 204, removed.text)
+        forbidden_create = self.save_reflection(
+            judgment_id, "Cannot start after withdrawal."
+        )
+        self.assertEqual(forbidden_create.status_code, 409, forbidden_create.text)
+
+    def test_republish_context_updates_without_reflection_text_history(self) -> None:
+        first_publication = self.publish([0, 1, 2]).json()
+        self.finish(first_publication["id"])
+        judgment_id = self.judgments[0]["id"]
+        old_text = "Version one private reflection."
+        created = self.save_reflection(judgment_id, old_text).json()
+        self.assertEqual(created["judgment_version_at_save"], 1)
+
+        edited_judgment = self.client_for(self.coach).patch(
+            f"/v1/judgments/{judgment_id}",
+            headers={"If-Match": '"1"'},
+            json={
+                "verdict": "applied",
+                "comment_text": "Republished coach sentence.",
+                "clip_start_ms": 1000,
+                "clip_end_ms": 2000,
+            },
+        )
+        self.assertEqual(edited_judgment.status_code, 200, edited_judgment.text)
+        self.judgments[0] = edited_judgment.json()
+        replacement = self.publish([0, 1, 2], replaces=first_publication["id"]).json()
+        self.finish(replacement["id"])
+
+        earlier = (
+            self.client_for(self.player_account).get("/v1/me/reflections").json()[0]
+        )
+        self.assertEqual(earlier["current_published_version"], 2)
+        self.assertTrue(earlier["is_for_earlier_version"])
+        new_text = "Version two private reflection."
+        updated = self.save_reflection(judgment_id, new_text, current=earlier).json()
+        self.assertEqual(updated["judgment_version_at_save"], 2)
+        self.assertFalse(updated["is_for_earlier_version"])
+
+        with self.admin.connect() as connection:
+            rows = (
+                connection.execute(
+                    text(
+                        "SELECT text FROM app.player_reflection "
+                        "WHERE judgment_id = :judgment"
+                    ),
+                    {"judgment": judgment_id},
+                )
+                .scalars()
+                .all()
+            )
+            marker_columns = (
+                connection.execute(
+                    text("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'app'
+                      AND table_name = 'player_reflection_request'
+                """)
+                )
+                .scalars()
+                .all()
+            )
+            longest_marker = connection.execute(
+                text("""
+                    SELECT max(expires_at - processed_at)
+                    FROM app.player_reflection_request
+                """)
+            ).scalar_one()
+        self.assertEqual(rows, [new_text])
+        self.assertNotIn(old_text, rows)
+        self.assertNotIn("text", marker_columns)
+        self.assertNotIn("payload", marker_columns)
+        self.assertLessEqual(longest_marker, timedelta(days=7))
 
 
 if __name__ == "__main__":  # pragma: no cover

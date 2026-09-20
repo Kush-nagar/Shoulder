@@ -53,6 +53,9 @@ TABLES = (
     "review_publication",
     "evidence_clip",
     "review_publication_item",
+    # 0011 — Task 19 optional reflections and content-free replay markers.
+    "player_reflection",
+    "player_reflection_request",
 )
 
 
@@ -754,8 +757,13 @@ class RuntimeIsolationTests(DatabaseTestCase):
 
     def test_missing_and_malformed_identity_read_nothing(self) -> None:
         for user_id in (None, "", "not-a-uuid", "' OR true --"):
-            with self.subTest(user_id=user_id):
-                for table in TABLES:
+            for table in TABLES:
+                with self.subTest(user_id=user_id, table=table):
+                    if table == "player_reflection_request":
+                        with self.assertRaises(ProgrammingError) as caught:
+                            self.visible(user_id, f"SELECT 1 FROM app.{table}")
+                        self.assertEqual(sqlstate(caught.exception), "42501")
+                        continue
                     self.assertEqual(
                         self.visible(user_id, f"SELECT 1 FROM app.{table}"), []
                     )
@@ -892,8 +900,9 @@ class ZMigrationTests(unittest.TestCase):
                 # `0008`'s four judgment visibility helpers plus its single
                 # write function, and `0010`'s six player/publication helpers,
                 # four coach transitions, three worker functions, finalize,
-                # the failure trigger, and the reserved-edit trigger.
-                self.assertEqual(self.function_count(connection), 33)
+                # the failure trigger, the reserved-edit trigger, and 0011's
+                # three runtime reflection helpers plus two internal helpers.
+                self.assertEqual(self.function_count(connection), 38)
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")

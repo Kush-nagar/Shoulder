@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ClipUrl, EvidenceItem, EvidenceSet } from "../../../../lib/api";
+import type {
+  ClipUrl,
+  EvidenceItem,
+  EvidenceSet,
+  PlayerReflection,
+} from "../../../../lib/api";
+import { ReflectionEditor } from "../../reflection-editor";
 
 type SignedClip = ClipUrl & { judgmentId: string };
 
@@ -44,15 +50,24 @@ async function signClip(item: EvidenceItem, signal: AbortSignal) {
 export function EvidenceSequence({
   goalId,
   goalTitle,
+  playerId,
   initialEvidence,
+  initialReflections,
+  reflectionsLoaded,
   initialPublicationId,
 }: {
   goalId: string;
   goalTitle: string;
+  playerId: string;
   initialEvidence: EvidenceSet[];
+  initialReflections: PlayerReflection[];
+  reflectionsLoaded: boolean;
   initialPublicationId?: string;
 }) {
   const [evidence, setEvidence] = useState(initialEvidence);
+  const [reflections, setReflections] = useState(initialReflections);
+  const [reflectionDataAvailable, setReflectionDataAvailable] =
+    useState(reflectionsLoaded);
   const [publicationId, setPublicationId] = useState(
     initialEvidence.some((set) => set.publication_id === initialPublicationId)
       ? initialPublicationId
@@ -75,6 +90,10 @@ export function EvidenceSequence({
   );
   const item = selectedSet?.items[clipIndex];
   const nextItem = selectedSet?.items[clipIndex + 1];
+  const reflection = item
+    ? (reflections.find((value) => value.judgment_id === item.judgment_id) ??
+      null)
+    : null;
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -98,9 +117,12 @@ export function EvidenceSequence({
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/player/goals/${goalId}/evidence`, {
-        cache: "no-store",
-      });
+      const [response, reflectionResponse] = await Promise.all([
+        fetch(`/api/player/goals/${goalId}/evidence`, { cache: "no-store" }),
+        fetch("/api/player/reflections", { cache: "no-store" }).catch(
+          () => null,
+        ),
+      ]);
       if (!response.ok) throw new Error("evidence-unavailable");
       const replacement = (await response.json()) as EvidenceSet[];
       const nextSet =
@@ -111,6 +133,12 @@ export function EvidenceSequence({
       setClipIndex((current) =>
         nextSet ? Math.min(current, nextSet.items.length - 1) : 0,
       );
+      if (reflectionResponse?.ok) {
+        setReflections((await reflectionResponse.json()) as PlayerReflection[]);
+        setReflectionDataAvailable(true);
+      } else {
+        setReflectionDataAvailable(false);
+      }
     } catch {
       setError(
         "Your clips changed, but the new set could not be loaded. Try again.",
@@ -327,6 +355,41 @@ export function EvidenceSequence({
             Clip {clipIndex + 1} of {selectedSet.items.length}
           </span>
         </div>
+
+        {reflectionDataAvailable ? (
+          <ReflectionEditor
+            key={item.judgment_id}
+            playerId={playerId}
+            judgmentId={item.judgment_id}
+            initialReflection={reflection}
+            evidenceAvailable
+            onSkip={() => {
+              if (clipIndex < selectedSet.items.length - 1) {
+                setClipIndex((current) => current + 1);
+              } else {
+                window.location.assign("/player");
+              }
+            }}
+            onChange={(changed) =>
+              setReflections((current) => [
+                ...current.filter(
+                  (value) => value.judgment_id !== item.judgment_id,
+                ),
+                ...(changed ? [changed] : []),
+              ])
+            }
+          />
+        ) : (
+          <section
+            aria-label="Your reflection"
+            className="mt-6 rounded-[14px] border border-line bg-surface p-4"
+          >
+            <p role="alert" className="text-[14px] leading-5 text-muted">
+              Your reflection could not be loaded. You can still watch this
+              clip.
+            </p>
+          </section>
+        )}
 
         <nav aria-label="Clip navigation" className="mt-5 flex gap-3">
           <button

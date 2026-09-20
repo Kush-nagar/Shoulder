@@ -25,6 +25,7 @@ export type InviteResult = Schema["InviteResult"];
 export type EvidenceSet = Schema["EvidenceSet"];
 export type EvidenceItem = Schema["EvidenceItem"];
 export type ClipUrl = Schema["ClipUrl"];
+export type PlayerReflection = Schema["PlayerReflection"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */
 /**
@@ -150,6 +151,13 @@ export async function fetchEvidence(
       `/v1/me/goals/${encodeURIComponent(goalId)}/evidence`,
     )
   ).data;
+}
+
+/** Own reflections include withdrawn evidence but never withdrawn coach text. */
+export async function fetchReflections(
+  token: string,
+): Promise<PlayerReflection[] | null> {
+  return (await request<PlayerReflection[]>(token, "/v1/me/reflections")).data;
 }
 
 export async function fetchObservations(

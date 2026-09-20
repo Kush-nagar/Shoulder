@@ -568,3 +568,56 @@ class ClipUrl(BaseModel):
     url: str
     expires_in: int
     published_revision_id: UUID
+
+
+# --- Optional player reflections --------------------------------------------
+
+
+class ReflectionSaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: Literal["create", "edit"]
+    text: str = Field(min_length=1, max_length=1000)
+    expected_reflection_id: UUID | None = None
+    expected_etag: UUID | None = None
+    request_created_at: datetime
+
+    @model_validator(mode="after")
+    def valid_intent(self) -> Self:
+        if not self.text.strip():
+            raise ValueError("reflection text cannot be blank")
+        if self.request_created_at.tzinfo is None:
+            raise ValueError("request_created_at must include a timezone")
+        expected = (self.expected_reflection_id, self.expected_etag)
+        if self.intent == "create" and expected != (None, None):
+            raise ValueError("create cannot name an existing reflection")
+        if self.intent == "edit" and any(value is None for value in expected):
+            raise ValueError("edit requires the existing reflection and ETag")
+        return self
+
+
+class ReflectionDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_reflection_id: UUID
+    expected_etag: UUID
+    request_created_at: datetime
+
+    @model_validator(mode="after")
+    def timezone_required(self) -> Self:
+        if self.request_created_at.tzinfo is None:
+            raise ValueError("request_created_at must include a timezone")
+        return self
+
+
+class PlayerReflection(BaseModel):
+    id: UUID
+    judgment_id: UUID
+    text: str
+    judgment_version_at_save: int
+    etag: UUID
+    created_at: datetime
+    updated_at: datetime
+    evidence_available: bool
+    current_published_version: int | None
+    is_for_earlier_version: bool

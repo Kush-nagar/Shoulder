@@ -64,7 +64,7 @@ function quoted(value) {
 
 function resetLocalWorkspace() {
   psql(
-    "TRUNCATE app.review_publication_item, app.evidence_clip, app.review_publication, app.judgment_revision, app.judgment, app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
+    "TRUNCATE app.player_reflection_request, app.player_reflection, app.review_publication_item, app.evidence_clip, app.review_publication, app.judgment_revision, app.judgment, app.observation, app.processing_job, app.video_upload_part, app.video, app.game, app.development_goal, app.player, app.team_membership, app.team",
   );
 }
 
@@ -459,7 +459,9 @@ test("linked player sees only current clips across phone viewports", async ({
     expect(ownBody).not.toContain(videoId);
     expect(ownBody).not.toContain("storage_key");
     expect(ownBody).not.toContain("playback/");
-    const firstItem = JSON.parse(ownBody)[0].items[0];
+    const ownItems = JSON.parse(ownBody)[0].items;
+    const firstItem = ownItems[0];
+    const secondItem = ownItems[1];
 
     const ownSign = await playerContext.request.post(
       `/api/player/judgments/${firstItem.judgment_id}/clip-url`,
@@ -490,6 +492,63 @@ test("linked player sees only current clips across phone viewports", async ({
       },
     );
     expect(deniedSign.status()).toBe(409);
+
+    await page.getByRole("button", { name: "Next" }).click();
+    await expect(page.getByText("Coach sentence 2.")).toBeVisible();
+    const reflectionText = "I noticed the space before my first touch.";
+    await page.getByLabel("What did you notice?").fill(reflectionText);
+    let failSave = true;
+    const reflectionRoute = async (route) => {
+      if (route.request().method() === "PUT" && failSave) {
+        failSave = false;
+        await route.fulfill({ status: 503, body: "unavailable" });
+        return;
+      }
+      await route.continue();
+    };
+    await page.route("**/api/player/judgments/*/reflection", reflectionRoute);
+    await page.getByRole("button", { name: "Save reflection" }).click();
+    await expect(
+      page.getByText(/Your text remains on this device/),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        Object.entries(localStorage).some(
+          ([key, value]) =>
+            key.startsWith("shoulder:player-reflection:") &&
+            value.includes("I noticed the space"),
+        ),
+      ),
+    ).toBe(true);
+    await page.getByRole("button", { name: "Save reflection" }).click();
+    await expect(page.getByText("Reflection saved.")).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).some((key) =>
+          key.startsWith("shoulder:player-reflection:"),
+        ),
+      ),
+    ).toBe(false);
+    await page.unroute("**/api/player/judgments/*/reflection", reflectionRoute);
+
+    const deniedReflection = await otherContext.request.put(
+      `/api/player/judgments/${secondItem.judgment_id}/reflection`,
+      {
+        headers: {
+          Origin: origin,
+          "Idempotency-Key": randomUUID(),
+        },
+        data: {
+          intent: "create",
+          text: "Another player's text.",
+          expected_reflection_id: null,
+          expected_etag: null,
+          request_created_at: new Date().toISOString(),
+        },
+      },
+    );
+    expect(deniedReflection.status()).toBe(404);
+    await page.getByRole("button", { name: "Previous" }).click();
 
     const edited = await coachContext.request.patch(
       `/api/judgments/${judgments[1].id}`,
@@ -547,6 +606,9 @@ test("linked player sees only current clips across phone viewports", async ({
     await expect(
       page.getByText("Notice the space before your first touch."),
     ).toBeVisible();
+    await expect(
+      page.getByText("Written for an earlier version of this clip"),
+    ).toBeVisible();
     await expect(currentVideo).toHaveAttribute(
       "src",
       new RegExp(`/clips/${judgments[1].id}/2\\.mp4`),
@@ -584,6 +646,92 @@ test("linked player sees only current clips across phone viewports", async ({
       path: evidenceScreenshot,
       contentType: "image/png",
     });
+
+    const reflectionListRoute = (route) =>
+      route.fulfill({ status: 503, body: "unavailable" });
+    await page.route("**/api/player/reflections", reflectionListRoute);
+    const editedAgain = await coachContext.request.patch(
+      `/api/judgments/${judgments[1].id}`,
+      {
+        headers: { Origin: origin, "If-Match": '"2"' },
+        data: {
+          verdict: "opportunity",
+          comment_text: "Check the space again before receiving.",
+          clip_start_ms: 3000,
+          clip_end_ms: 4200,
+        },
+      },
+    );
+    expect(editedAgain.status()).toBe(200);
+    judgments = [judgments[0], await editedAgain.json(), judgments[2]];
+    const replacementWithoutReflection = publish({
+      coachId: coach.userId,
+      gameId,
+      playerId,
+      goalId,
+      judgments,
+      replaces: replacement,
+    });
+    runClipExports();
+    expect(
+      psql(
+        `SELECT status FROM app.review_publication WHERE id = ${quoted(replacementWithoutReflection)}`,
+      ),
+    ).toBe("published");
+
+    await page.getByRole("button", { name: "Previous" }).click();
+    await page.getByRole("button", { name: "Next" }).click();
+    await expect(
+      page.getByText("Check the space again before receiving."),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Your reflection could not be loaded. You can still watch this clip.",
+      ),
+    ).toBeVisible();
+    await expect(currentVideo).toHaveAttribute(
+      "src",
+      new RegExp(`/clips/${judgments[1].id}/3\\.mp4`),
+    );
+    await page.unroute("**/api/player/reflections", reflectionListRoute);
+    await page.reload();
+    await page.getByRole("button", { name: "Next" }).click();
+    await expect(
+      page.getByText("Written for an earlier version of this clip"),
+    ).toBeVisible();
+
+    await page
+      .getByLabel("What did you notice?")
+      .fill("Delete this cached edit.");
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Permanently delete this reflection?",
+      }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Delete permanently" }).click();
+    await expect(page.getByText("Reflection deleted.")).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).some((key) =>
+          key.startsWith("shoulder:player-reflection:"),
+        ),
+      ),
+    ).toBe(false);
+
+    await page
+      .getByLabel("What did you notice?")
+      .fill("Unsent before sign-out.");
+    await page.locator('summary[aria-label="Account menu"]').click();
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page).toHaveURL(/\/auth\/sign-in$/);
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).some((key) =>
+          key.startsWith("shoulder:player-reflection:"),
+        ),
+      ),
+    ).toBe(false);
   } finally {
     await Promise.all([
       coachContext.close(),
