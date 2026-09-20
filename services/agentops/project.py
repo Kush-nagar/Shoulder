@@ -433,12 +433,23 @@ def ci_state(pull_request: int, *, repo: str) -> dict[str, Any]:
             "view",
             str(pull_request),
             "--json",
-            "statusCheckRollup,mergeStateStatus,headRefOid",
+            "statusCheckRollup,mergeStateStatus,headRefOid,state",
         ],
         repo=repo,
     )
     if payload is None:
-        return {"state": "unknown", "failing": [], "pending": [], "head": ""}
+        return {
+            "state": "unknown",
+            "failing": [],
+            "pending": [],
+            "head": "",
+            "merged": False,
+        }
+    # Whether the pull request is still open at all, which is a different
+    # question from whether its checks pass and has to be asked first. A
+    # merged pull request keeps whatever check results it had, so one that
+    # merged while a check was red still reads as failing forever after.
+    merged = str(payload.get("state") or "").upper() == "MERGED"
 
     reported = payload.get("statusCheckRollup")
     if not reported:
@@ -453,6 +464,7 @@ def ci_state(pull_request: int, *, repo: str) -> dict[str, Any]:
             "pending": ["(no checks reported yet)"],
             "head": str(payload.get("headRefOid") or ""),
             "merge_state": str(payload.get("mergeStateStatus") or ""),
+            "merged": merged,
         }
 
     failing: list[dict[str, Any]] = []
@@ -491,6 +503,7 @@ def ci_state(pull_request: int, *, repo: str) -> dict[str, Any]:
         "pending": pending,
         "head": str(payload.get("headRefOid") or ""),
         "merge_state": str(payload.get("mergeStateStatus") or ""),
+        "merged": merged,
     }
 
 
@@ -746,6 +759,15 @@ def ship(
             poll_seconds=poll_seconds,
         )
         save(paths, phase="waiting_for_ci", ci=checks["state"])
+        if checks.get("merged"):
+            # Already landed, so there is nothing left to wait for, repair or
+            # merge. A merged pull request keeps the check results it had, and
+            # a red one stays red forever, so the loop below read task 18's
+            # merged pull request as failing and sent a writer to repair it --
+            # once every couple of minutes, against a Codex allowance the next
+            # task needed, on a branch whose work was already on main.
+            save(paths, phase="merged", ci=checks["state"])
+            return {"task_id": task_id, "pull_request": number, "merged": True}
         if checks.get("timed_out"):
             raise Stop(
                 BLOCKED_HUMAN,
