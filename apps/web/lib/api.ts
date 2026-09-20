@@ -175,6 +175,7 @@ export async function fetchReflections(
   return (await request<PlayerReflection[]>(token, "/v1/me/reflections")).data;
 }
 
+/** Coach read-only reflection list for one authorized roster player. */
 export async function fetchPlayerReflections(
   token: string,
   playerId: string,

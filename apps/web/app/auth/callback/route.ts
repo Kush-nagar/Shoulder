@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { authConfig } from "../../../lib/auth/policy";
+import { authConfig, verifiedRedirectPath } from "../../../lib/auth/policy";
 import { routeAuth } from "../../../lib/auth/route";
 import { verifiedToken } from "../../../lib/auth/server";
 
@@ -8,6 +8,9 @@ export async function GET(request: NextRequest) {
   const auth = routeAuth(request);
   const codes = request.nextUrl.searchParams.getAll("code");
   const flows = request.nextUrl.searchParams.getAll("sb_flow_id");
+  const destinations = request.nextUrl.searchParams.getAll("next");
+  const next =
+    destinations.length === 1 ? verifiedRedirectPath(destinations[0]) : null;
   try {
     if (
       request.headers.get("host") !== new URL(config.origin).host ||
@@ -25,10 +28,11 @@ export async function GET(request: NextRequest) {
     );
     if (error || !(await verifiedToken(auth.client)))
       throw new Error("Invalid callback");
-    // A fixed destination prevents open redirects and premature role routing.
-    return auth.finish(
-      NextResponse.redirect(`${config.origin}/auth/session`, 303),
-    );
+    // Session routing verifies the database role before honoring this closed
+    // allowlist. No callback value can become an absolute URL.
+    const session = new URL("/auth/session", config.origin);
+    if (next) session.searchParams.set("next", next);
+    return auth.finish(NextResponse.redirect(session, 303));
   } catch {
     // A failed top-level callback must not let an external link sign out an
     // existing session, and an unverified exchange must not reach the browser.

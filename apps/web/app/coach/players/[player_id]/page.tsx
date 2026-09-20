@@ -45,7 +45,7 @@ export default async function Player({
   params: Promise<{ player_id: string }>;
 }) {
   const { player_id } = await params;
-  const token = await requireCoach();
+  const token = await requireCoach(`/coach/players/${player_id}`);
   const team = (await fetchTeams(token))?.[0];
   // Archived rows are requested too: archiving is soft, the roster links to
   // them, and their goals stay readable.

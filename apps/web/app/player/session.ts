@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import { fetchMe } from "../../lib/api";
+import { verifiedRedirectPath } from "../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../lib/auth/server";
 
 /** Player access comes only from the database-derived role and linked row. */
@@ -23,9 +24,14 @@ export const playerSession = cache(async () => {
   return { token, player: me.player };
 });
 
-export async function requirePlayerSession() {
+export async function requirePlayerSession(destination?: string) {
   const session = await playerSession();
-  if (!session) redirect("/auth/sign-in");
+  if (!session) {
+    const next = verifiedRedirectPath(destination);
+    redirect(
+      next ? `/auth/sign-in?next=${encodeURIComponent(next)}` : "/auth/sign-in",
+    );
+  }
   if (!session.player) notFound();
   return {
     token: session.token,

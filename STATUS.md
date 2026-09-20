@@ -10,15 +10,15 @@ against Git and GitHub before editing anything.
 | Field | Value |
 |---|---|
 | Last verified `main` | `ac41577` (PR #56, Task 19 optional reflections) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17) |
-| Current block | Block 06. Task 21 development timeline is implemented; final local verification is incomplete because WebKit cannot launch on this workstation. |
-| Current worker / branch | Task 21 development timeline / `block-06-t21-development-timeline` |
-| Open PRs | Not checked in this task. This run did not push or open a Task 21 PR. |
-| Database revision | `0011_optional_reflections` on this branch; Task 21 adds no schema change. `Shoulder Dev` was not checked in this task. |
-| Last full verification | Task 21, 2026-09-20: format, lint, TypeScript, 52 Node tests, 1,446 Python tests (354 environment-gated skips), generated contracts, production build, Chromium smoke, and Firefox smoke passed. `scripts/check.ps1` failed only because WebKit exited before page launch with `3236495362`; a direct retry failed identically. Timeline browser work reached and passed axe scans at 320, 360, 375, 390, 430, and 768 px plus coach 1024 px before a test-viewport setup defect, now fixed; rerun was blocked by a disposable Docker/MinIO startup race. |
-| Blockers | Restore local WebKit launch and a stable isolated Docker test stack, then rerun `scripts/check.ps1` and `scripts/check-player.ps1`. |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17); Block 06 Tasks 18-19 |
+| Current block | Block 06. Task 20 email delivery is implemented and behaviorally verified on its task branch. |
+| Current worker / branch | Task 20 email delivery / `block-06-t20-email-delivery` |
+| Open PRs | Not checked in this task. This run did not push or open a Task 20 PR. |
+| Database revision | `0012_email_delivery` on this branch; `0011_optional_reflections` on `main`. The local up/down/up migration cycle passed. |
+| Last full verification | Task 20, 2026-09-20: the named mocked-send, duplicate suppression, safe-link, private-subject, reflection-deletion, and database-isolation checks passed. `scripts/check.ps1` passed formatting, lint, type checks, 50 Node tests, 1,454 Python tests (357 environment-gated skips), generated contracts, production build, bundle scan, and Chromium/Firefox smoke. WebKit could not launch because Windows Application Control blocks Playwright's cached `icuuc77.dll`; the test did not start. |
+| Blockers | Local full-check completion is blocked only by the workstation's WebKit DLL policy. No test or security policy was weakened; run WebKit on an allowed host or CI before merge. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Rerun the two blocked browser gates, then review Task 21. Tasks 23 and later remain blocked by `gates.real_use_gate`. |
+| Next action | Run the unchanged WebKit smoke gate on an allowed host, review and merge Task 20, then Task 21 becomes eligible. Tasks 23 and later remain blocked by `gates.real_use_gate`. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -71,6 +71,10 @@ owner decision.
 
 ### Environment limitations on this workstation
 
+- **WebKit is currently blocked locally.** On 2026-09-20 Windows Application
+  Control refused Playwright 1.63.0's `icuuc77.dll` with error 4551. A forced
+  official browser reinstall reproduced the block; Chromium and Firefox smoke
+  tests pass. No security policy was disabled, changed, or bypassed.
 - **Firefox browser tests were blocked locally, and are not currently.** Windows
   Smart App Control was enforcing (`VerifiedAndReputablePolicyState = 1`) and
   blocked Mozilla's `lgpllibs.dll`: `LoadLibrary` returned 4551, "An Application
@@ -169,12 +173,12 @@ owner decision.
 
 ## Current state
 
-- Current phase: Phase C — the manual product. Tasks 14-19 are merged. Task 21
-  is implemented on `block-06-t21-development-timeline`; final browser gates
-  remain blocked as recorded above.
+- Current phase: Phase C — the manual product. Tasks 14-19 are merged. Task 20
+  is implemented and behaviorally verified on `block-06-t20-email-delivery`;
+  local WebKit launch remains blocked by the host policy noted above.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: Task 21 is written in
-  `D:\Shoulder-agents\block-06-t21-development-timeline`. One writer per
+- Checkout: Task 20 is written in
+  `D:\Shoulder-agents\block-06-t20-email-delivery`. One writer per
   checkout.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.

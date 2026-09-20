@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable
 from uuid import uuid4
 
-from services.worker import jobs, media
+from services.worker import delivery, jobs, media
 
 logger = logging.getLogger("shoulder.worker")
 
@@ -31,7 +31,7 @@ logger = logging.getLogger("shoulder.worker")
 Handler = Callable[[jobs.Job, Callable[[float | None], bool]], None]
 # Tasks 11 and 12 register `transcode` and `thumbnail`. A kind with no handler
 # here is never claimed, so it waits in the queue instead of burning attempts.
-HANDLERS: dict[str, Handler] = dict(media.HANDLERS)
+HANDLERS: dict[str, Handler] = {**media.HANDLERS, **delivery.HANDLERS}
 
 IDLE_SLEEP_SECONDS = 2.0
 SWEEP_INTERVAL_SECONDS = 30.0

@@ -16,7 +16,15 @@ export default async function GoalEvidencePage({
 }) {
   const { goal_id: goalId } = await params;
   const { publication, judgment } = await searchParams;
-  const { token, player } = await requirePlayerSession();
+  // Both halves of the merge matter: the email link carries a publication and
+  // the timeline carries a judgment, and either can arrive before sign-in, so
+  // the destination has to survive it with whichever it was given.
+  const query = new URLSearchParams();
+  if (publication) query.set("publication", publication);
+  if (judgment) query.set("judgment", judgment);
+  const search = query.toString();
+  const destination = `/player/goals/${goalId}${search ? `?${search}` : ""}`;
+  const { token, player } = await requirePlayerSession(destination);
   const goals = await fetchGoals(token, player.id);
   if (goals === null) {
     return (
