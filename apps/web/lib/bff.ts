@@ -58,6 +58,7 @@ export async function forward(
         headers: {
           "Content-Type":
             upstream.headers.get("content-type") ?? "application/json",
+          "Cache-Control": "private, no-store",
           ...(upstream.headers.get("etag")
             ? { ETag: upstream.headers.get("etag") as string }
             : {}),

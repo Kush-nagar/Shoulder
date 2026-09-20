@@ -453,11 +453,27 @@ test("linked player sees only current clips across phone viewports", async ({
       `/api/player/goals/${goalId}/evidence`,
     );
     expect(ownEvidence.status()).toBe(200);
+    expect(ownEvidence.headers()["cache-control"]).toContain("private");
+    expect(ownEvidence.headers()["cache-control"]).toContain("no-store");
     const ownBody = await ownEvidence.text();
     expect(ownBody).not.toContain(videoId);
     expect(ownBody).not.toContain("storage_key");
     expect(ownBody).not.toContain("playback/");
     const firstItem = JSON.parse(ownBody)[0].items[0];
+
+    const ownSign = await playerContext.request.post(
+      `/api/player/judgments/${firstItem.judgment_id}/clip-url`,
+      {
+        headers: { Origin: origin },
+        data: {
+          expected_published_revision_id: firstItem.published_revision_id,
+        },
+      },
+    );
+    expect(ownSign.status()).toBe(200);
+    expect(ownSign.headers()["cache-control"]).toContain("private");
+    expect(ownSign.headers()["cache-control"]).toContain("no-store");
+    expect(await ownSign.text()).not.toContain(videoId);
 
     const deniedRead = await otherContext.request.get(
       `/api/player/goals/${goalId}/evidence`,
