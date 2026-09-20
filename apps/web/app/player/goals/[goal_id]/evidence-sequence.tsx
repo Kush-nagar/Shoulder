@@ -209,6 +209,15 @@ export function EvidenceSequence({
     resumeRef.current = null;
   }
 
+  function handlePlaybackError() {
+    const video = videoRef.current;
+    resumeRef.current = video
+      ? { time: video.currentTime, playing: !video.paused }
+      : null;
+    setSigned(null);
+    setError("This clip couldn’t play. Check your connection and try again.");
+  }
+
   if (!selectedSet || !item) {
     return (
       <section aria-labelledby="goal-title">
@@ -286,6 +295,7 @@ export function EvidenceSequence({
               playsInline
               preload="metadata"
               onLoadedMetadata={restorePlayback}
+              onError={handlePlaybackError}
             />
           ) : (
             <div
