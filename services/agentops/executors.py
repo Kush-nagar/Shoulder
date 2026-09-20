@@ -46,6 +46,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -169,14 +170,35 @@ EXHAUSTION_MARKERS = (
     "insufficient_quota",
 )
 
-# An explicit reset instant, when the harness prints one. Only a machine
-# readable timestamp is trusted: "resets at 3pm" has no date and no zone, and
-# guessing one would put a lane back in the pool at the wrong hour. Without it
-# the caller falls back to the lane's declared usage window, which is what the
+# An explicit reset instant, when the harness prints one. Without one the
+# caller falls back to the lane's declared usage window, which is what the
 # cloud path already does for Codex.
 RESET_PATTERN = re.compile(
     r"reset(?:s|s at|ting at|_at)?[\s:\"']+"
     r"(\d{4}-\d{2}-\d{2}[T ][\d:]{5,8}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)",
+    re.IGNORECASE,
+)
+
+# The same fact in the form Codex actually prints it: "You've hit your usage
+# limit ... or try again at 11:54 PM." No date and no zone, which is why this
+# was once refused outright rather than guessed at.
+#
+# Refusing it cost more than reading it. The fallback is the lane's declared
+# window, a flat five hours, and on 2026-09-19 that window was wrong twice:
+# the lane came back at 22:57Z and again at 03:58Z, was refused in under ten
+# seconds each time, and re-cooled for another five hours. Both refusals named
+# the same reset, 11:54 PM, and targeting it worked first time. A blind five
+# hours is not the safe option; it is only the one that fails less visibly.
+#
+# So a bare clock time is read, and read narrowly: only after "try again at",
+# which is the harness instructing rather than describing, and only resolved
+# against this machine's own date and zone, which is the zone the harness
+# printed it in. A time already past means tomorrow. The worst case is a
+# mismatched zone putting the lane back an hour early, which costs one refused
+# probe and re-cools -- strictly better than sleeping five hours through a
+# reset that already happened.
+CLOCK_RESET_PATTERN = re.compile(
+    r"try again at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
     re.IGNORECASE,
 )
 
@@ -258,13 +280,39 @@ def exhaustion(run: Mapping[str, Any]) -> dict[str, Any] | None:
     if marker is None:
         return None
     found = RESET_PATTERN.search(text)
+    reset_at = found.group(1).upper() if found else _clock_reset(text)
     return {
         "exhausted": True,
         "marker": marker,
-        "reset_at": found.group(1).upper() if found else "",
+        "reset_at": reset_at,
         "harness": run.get("harness", ""),
         "provider": run.get("provider", ""),
     }
+
+
+def _clock_reset(text: str) -> str:
+    """A "try again at 11:54 PM" resolved against this machine's clock.
+
+    Returns "" when the harness named no clock time, which leaves the caller
+    on the lane's declared window exactly as before.
+    """
+    found = CLOCK_RESET_PATTERN.search(text)
+    if found is None:
+        return ""
+    hour = int(found.group(1))
+    minute = int(found.group(2) or 0)
+    meridiem = (found.group(3) or "").lower()
+    if meridiem == "pm" and hour != 12:
+        hour += 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return ""
+    now = datetime.now().astimezone()
+    reset = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if reset <= now:
+        reset += timedelta(days=1)
+    return reset.isoformat()
 
 
 class Executor(Protocol):

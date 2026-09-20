@@ -89,6 +89,58 @@ def assignment(lane: str) -> routing.Assignment:
     )
 
 
+CODEX_LIMIT = (
+    "You've hit your usage limit. Upgrade to Pro "
+    "(https://chatgpt.com/explore/pro), visit "
+    "https://chatgpt.com/codex/settings/usage to purchase more credits "
+    "or try again at 11:54 PM."
+)
+
+
+class TestTheResetTheHarnessNames(unittest.TestCase):
+    """Codex says when it comes back. It is worth reading.
+
+    This is the message the lane returned twice on 2026-09-19. The clock time
+    was discarded for want of a date and a zone, the lane fell back to its
+    declared five-hour window, and both wake-ups were refused in under ten
+    seconds and re-cooled for another five hours.
+    """
+
+    def test_a_named_clock_time_becomes_the_reset(self) -> None:
+        found = executors.exhaustion(failed_run(CODEX_LIMIT))
+        assert found is not None
+        reset = datetime.fromisoformat(found["reset_at"])
+        self.assertEqual((reset.hour, reset.minute), (23, 54))
+        self.assertIsNotNone(reset.tzinfo)
+
+    def test_a_time_already_past_today_means_tomorrow(self) -> None:
+        """Never a reset in the past: that returns the lane to the pool at
+        once, which is the failure this replaces rather than repeats."""
+        found = executors.exhaustion(failed_run(CODEX_LIMIT))
+        assert found is not None
+        self.assertGreater(
+            datetime.fromisoformat(found["reset_at"]), datetime.now().astimezone()
+        )
+
+    def test_a_machine_readable_timestamp_still_wins(self) -> None:
+        run = failed_run(
+            "usage limit reached; resets at 2026-09-20T08:00:00+00:00"
+            " or try again at 11:54 PM"
+        )
+        found = executors.exhaustion(run)
+        assert found is not None
+        self.assertEqual(found["reset_at"], "2026-09-20T08:00:00+00:00")
+
+    def test_an_allowance_message_with_no_time_still_has_no_reset(self) -> None:
+        """Silence leaves the caller on the lane's declared window."""
+        found = executors.exhaustion(failed_run("You've hit your usage limit."))
+        assert found is not None
+        self.assertEqual(found["reset_at"], "")
+
+    def test_a_clock_time_without_an_allowance_message_is_not_exhaustion(self) -> None:
+        self.assertIsNone(executors.exhaustion(failed_run("try again at 11:54 PM")))
+
+
 class TestExhaustionIsRecognised(unittest.TestCase):
     """What counts as "the account ran out", and what deliberately does not."""
 
