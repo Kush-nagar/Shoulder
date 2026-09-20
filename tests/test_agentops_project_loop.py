@@ -452,6 +452,44 @@ class TestTheGatesFailClosed(ProjectCase):
         result = self.drive(max_tasks=1)
         self.assertTrue(result["merged"], result)
 
+    def test_a_merged_pull_request_is_never_repaired(self) -> None:
+        """A merged pull request keeps the check results it had.
+
+        Task 18's merged and red, so the ship loop read it as failing and sent
+        a writer to repair it once every couple of minutes -- against the
+        Codex allowance the next task needed, on a branch whose work was
+        already on main. Whether it is still open is asked before whether its
+        checks pass.
+        """
+        # Merged by somebody other than this loop, which is how task 18's was:
+        # the loop never called merge, so it never recorded one.
+        self.gh.merged.append(101)
+        self.gh.ci = [
+            json.dumps(
+                {
+                    "statusCheckRollup": [
+                        {"name": "quality", "bucket": "fail", "conclusion": "fail"}
+                    ],
+                    "headRefOid": "d",
+                    "state": "MERGED",
+                }
+            )
+        ]
+        result = self.drive(max_tasks=1)
+        self.assertTrue(result["merged"], result)
+        self.assertEqual(
+            [call for call in self.gh.calls if "repair" in " ".join(call)],
+            [],
+        )
+
+    def test_an_open_pull_request_that_is_failing_is_still_repaired(self) -> None:
+        """The guard is about merged, not about failing."""
+        with mock.patch.object(project, "_gh", self.gh):
+            self.gh.ci = [rollup(("quality", "fail"))]
+            answer = project.ci_state(1, repo="owner/repo")
+        self.assertEqual(answer["state"], "fail")
+        self.assertFalse(answer["merged"])
+
     def test_an_empty_rollup_reads_as_pending_not_pass(self) -> None:
         with mock.patch.object(project, "_gh", self.gh):
             self.gh.ci = [json.dumps({"statusCheckRollup": [], "headRefOid": "d"})]
