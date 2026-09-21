@@ -96,6 +96,15 @@ CODEX_LIMIT = (
     "or try again at 11:54 PM."
 )
 
+# The same refusal, dated. Codex prints it both ways and only the bare form
+# was read, so this one fell back to the five-hour window.
+CODEX_LIMIT_DATED = (
+    "You've hit your usage limit. Upgrade to Pro "
+    "(https://chatgpt.com/explore/pro), visit "
+    "https://chatgpt.com/codex/settings/usage to purchase more credits "
+    "or try again at Sep 21st, 2026 1:03 AM."
+)
+
 
 class TestTheResetTheHarnessNames(unittest.TestCase):
     """Codex says when it comes back. It is worth reading.
@@ -112,6 +121,20 @@ class TestTheResetTheHarnessNames(unittest.TestCase):
         reset = datetime.fromisoformat(found["reset_at"])
         self.assertEqual((reset.hour, reset.minute), (23, 54))
         self.assertIsNotNone(reset.tzinfo)
+
+    def test_a_dated_reset_is_read_the_same_way(self) -> None:
+        """Task 22's refusal, which the bare-clock pattern did not match.
+
+        It fell back to the five-hour window and put the wake-up at 06:53Z
+        when the lane was back at 06:03Z -- fifty minutes of a Codex-only task
+        spent waiting for an allowance that had already returned.
+        """
+        found = executors.exhaustion(failed_run(CODEX_LIMIT_DATED))
+        assert found is not None
+        reset = datetime.fromisoformat(found["reset_at"])
+        self.assertEqual((reset.hour, reset.minute), (1, 3))
+        self.assertIsNotNone(reset.tzinfo)
+        self.assertGreater(reset, datetime.now().astimezone())
 
     def test_a_time_already_past_today_means_tomorrow(self) -> None:
         """Never a reset in the past: that returns the lane to the pool at
