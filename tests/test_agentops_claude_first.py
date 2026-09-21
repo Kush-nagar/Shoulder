@@ -132,9 +132,44 @@ class TestTheResetTheHarnessNames(unittest.TestCase):
         found = executors.exhaustion(failed_run(CODEX_LIMIT_DATED))
         assert found is not None
         reset = datetime.fromisoformat(found["reset_at"])
-        self.assertEqual((reset.hour, reset.minute), (1, 3))
+        # The instant the harness named, not the next one that matches its
+        # clock: a dated reset already behind us means the lane is back, and
+        # `provider_health` reads an elapsed cooldown as available.
+        self.assertEqual(
+            (reset.year, reset.month, reset.day, reset.hour, reset.minute),
+            (2026, 9, 21, 1, 3),
+        )
         self.assertIsNotNone(reset.tzinfo)
-        self.assertGreater(reset, datetime.now().astimezone())
+
+    def test_a_named_date_is_used_rather_than_assumed_to_be_today(self) -> None:
+        """A spent weekly allowance names a day, not an hour.
+
+        Task 22's third refusal said "Sep 26th, 2026 11:56 PM", five days out.
+        Reading only the clock resolved that to 11:56 PM the same night: the
+        lane would have returned, been refused in seconds, re-cooled, and
+        repeated that every night for five days.
+        """
+        found = executors.exhaustion(
+            failed_run(
+                "You've hit your usage limit. Upgrade to Pro or try again at "
+                "Sep 26th, 2026 11:56 PM."
+            )
+        )
+        assert found is not None
+        reset = datetime.fromisoformat(found["reset_at"])
+        self.assertEqual(
+            (reset.year, reset.month, reset.day, reset.hour, reset.minute),
+            (2026, 9, 26, 23, 56),
+        )
+
+    def test_a_date_that_does_not_exist_names_no_reset(self) -> None:
+        """Saying nothing leaves the declared window, which is a known
+        fallback; inventing a date is a wrong answer that looks right."""
+        found = executors.exhaustion(
+            failed_run("usage limit reached; try again at Feb 30th, 2026 1:00 AM")
+        )
+        assert found is not None
+        self.assertEqual(found["reset_at"], "")
 
     def test_a_time_already_past_today_means_tomorrow(self) -> None:
         """Never a reset in the past: that returns the lane to the pool at
