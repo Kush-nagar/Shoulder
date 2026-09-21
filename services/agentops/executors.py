@@ -230,8 +230,17 @@ RESET_PATTERN = re.compile(
 # mismatched zone putting the lane back an hour early, which costs one refused
 # probe and re-cools -- strictly better than sleeping five hours through a
 # reset that already happened.
+#
+# Codex prints this two ways, and the second was missed: "try again at 11:54
+# PM" and "try again at Sep 21st, 2026 1:03 AM". Only the bare form matched,
+# so the dated one fell back to the five-hour window and put the wake-up at
+# 06:53Z when the reset was 06:03Z -- fifty minutes of a Codex-only task spent
+# waiting for a lane that was already back. The month and day are skipped
+# rather than parsed: they are the date this machine is about to compute
+# anyway, and a reset that reads as already past rolls forward to tomorrow.
 CLOCK_RESET_PATTERN = re.compile(
-    r"try again at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
+    r"try again at\s+(?:[A-Za-z]{3,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s*"
+    r"(?:\d{4},?)?\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
     re.IGNORECASE,
 )
 
