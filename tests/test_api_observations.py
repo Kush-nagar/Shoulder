@@ -74,11 +74,14 @@ class ObservationApiTests(DatabaseTestCase):
                     INSERT INTO app.video (
                         id, game_id, original_key, original_filename,
                         content_type, size_bytes, uploaded_by, status,
-                        playback_key, duration_ms, width, height, fps, ready_at
+                        playback_key, duration_ms, width, height, fps, ready_at,
+                        derivatives_expires_at
                     ) VALUES (
                         :id, :game, :original_key, 'match.mp4', 'video/mp4', 1,
                         :coach, :status, :playback_key, :duration,
-                        :width, :height, :fps, :ready_at
+                        :width, :height, :fps, :ready_at,
+                        CASE WHEN :status = 'ready'
+                             THEN now() + interval '30 days' END
                     )
                 """),
                 {

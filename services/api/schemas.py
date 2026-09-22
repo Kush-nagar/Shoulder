@@ -634,3 +634,98 @@ class PlayerReflection(BaseModel):
     evidence_available: bool
     current_published_version: int | None
     is_for_earlier_version: bool
+
+
+# --- Retention and verified deletion -----------------------------------------
+
+
+class RetentionConfirmationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_backup_max_days: int = Field(ge=1, le=30)
+    season_cutoff_confirmed: bool
+    provider_backup_expiry_confirmed: bool
+    notice_confirmed: bool
+    collateral_deletion_confirmed: bool
+    operator_confirmed: bool
+
+    @model_validator(mode="after")
+    def every_confirmation_required(self) -> Self:
+        if not (
+            self.season_cutoff_confirmed
+            and self.provider_backup_expiry_confirmed
+            and self.notice_confirmed
+            and self.collateral_deletion_confirmed
+            and self.operator_confirmed
+        ):
+            raise ValueError("all retention confirmations are required")
+        return self
+
+
+class RetentionStatus(BaseModel):
+    team_id: UUID
+    confirmed: bool
+    season_end_at: datetime
+    confirmed_by: UUID | None = None
+    operator_user_id: UUID | None = None
+    provider_backup_max_days: int | None = None
+    confirmed_at: datetime | None = None
+
+
+class PlayerErasureImpact(BaseModel):
+    player_id: UUID
+    team_id: UUID
+    video_count: int
+    other_player_clip_count: int
+    remaining_player_count: int
+    remaining_goal_count: int
+    remaining_linked_account_count: int
+    can_request: bool
+    challenge: str
+
+
+class PlayerErasureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_video_count: int = Field(ge=0)
+    expected_other_player_clip_count: int = Field(ge=0)
+    challenge: str = Field(min_length=1, max_length=120)
+    collateral_deletion_confirmed: bool
+    notice_confirmed: bool
+    unrelated_data_reviewed: bool
+
+    @model_validator(mode="after")
+    def every_erasure_confirmation_required(self) -> Self:
+        if not (
+            self.collateral_deletion_confirmed
+            and self.notice_confirmed
+            and self.unrelated_data_reviewed
+        ):
+            raise ValueError("all deletion confirmations are required")
+        return self
+
+
+DeletionManifestStatus = Literal[
+    "pending", "running", "awaiting_backup", "completed", "unresolved"
+]
+
+
+class DeletionStatus(BaseModel):
+    id: UUID
+    kind: Literal[
+        "video_source",
+        "video_all",
+        "export_cleanup",
+        "season_expiry",
+        "player_erasure",
+        "reflection_erasure",
+    ]
+    status: DeletionManifestStatus
+    requested_at: datetime
+    active_cleanup_verified_at: datetime | None
+    backup_expires_at: datetime
+    backup_verified_at: datetime | None
+    completed_at: datetime | None
+    failure_code: str | None
+    video_count: int
+    other_player_clip_count: int

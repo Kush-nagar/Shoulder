@@ -10,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from services.api.auth import authenticated_identity
 from services.api.db import NO_STORE, operator_transaction, user_transaction
 from services.api.problems import Problem
+from services.api.retention_service import require_real_data_onboarding_ready
 from services.api.schemas import (
     AuthIdentity,
     BulkRequest,
@@ -353,6 +354,7 @@ def create_player(
     try:
         with user_transaction(user_id) as connection:
             require_coach(load_team(connection, team_id))
+            require_real_data_onboarding_ready(connection, team_id)
             player_id = connection.execute(
                 text("""
                     INSERT INTO app.player
@@ -400,6 +402,7 @@ def create_players_bulk(
     try:
         with user_transaction(user_id) as connection:
             require_coach(load_team(connection, team_id))
+            require_real_data_onboarding_ready(connection, team_id)
             taken = {
                 number
                 for number in connection.execute(
@@ -528,6 +531,7 @@ def invite_player(
     try:
         with user_transaction(user_id) as connection:
             player = require_coach(load_player(connection, player_id))
+            require_real_data_onboarding_ready(connection, player.team_id)
             if player.off_roster:
                 # The helper refuses this too, but its one "not linkable" branch
                 # cannot say which cause applied. Name it here instead of
@@ -608,7 +612,8 @@ def create_goal(
 ) -> Goal:
     try:
         with user_transaction(user_id) as connection:
-            require_coach(load_player(connection, player_id))
+            player = require_coach(load_player(connection, player_id))
+            require_real_data_onboarding_ready(connection, player.team_id)
             row = connection.execute(
                 text(f"""
                     INSERT INTO app.development_goal

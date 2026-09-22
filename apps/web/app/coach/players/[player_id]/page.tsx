@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { DevelopmentTimeline } from "../../../../components/development-timeline";
 import {
   fetchCoachEvidence,
+  fetchErasureImpact,
   fetchGoals,
   fetchPlayerReflections,
+  fetchRetentionStatus,
   fetchRoster,
   fetchTeams,
 } from "../../../../lib/api";
@@ -19,6 +22,7 @@ import {
   sectionTitle,
   tertiary,
 } from "../../ui";
+import { ErasePlayer } from "./erase-player";
 import { GoalSection } from "./goal-form";
 import { InvitePlayer } from "./invite-player";
 
@@ -53,13 +57,17 @@ export default async function Player({
   const player = roster?.find((row) => row.id === player_id);
   // Absent or hidden by policy both land on not-found.
   if (!player) notFound();
-  const goalsResult = await fetchGoals(token, player.id);
+  const [goalsResult, retention] = await Promise.all([
+    fetchGoals(token, player.id),
+    fetchRetentionStatus(token, player.team_id),
+  ]);
   const goals = goalsResult ?? [];
-  const [evidence, reflections] = await Promise.all([
+  const [evidence, reflections, erasureImpact] = await Promise.all([
     Promise.all(
       goals.map((goal) => fetchCoachEvidence(token, player.id, goal.id)),
     ),
     fetchPlayerReflections(token, player.id),
+    fetchErasureImpact(token, player.id),
   ]);
   const evidenceUnavailable =
     goalsResult === null || evidence.some((sets) => sets === null);
@@ -137,27 +145,37 @@ export default async function Player({
                 // Archiving hides the account name but not the link, and an
                 // off-roster player cannot be linked at all, so neither state
                 // may offer the control.
-                linkable={!player.account_linked && player.active}
+                linkable={
+                  retention?.confirmed === true &&
+                  !player.account_linked &&
+                  player.active
+                }
               />
             </dd>
           </div>
         </dl>
 
         <h2 className={`${sectionTitle} mt-8`}>Development goal</h2>
-        <GoalSection
-          playerId={player.id}
-          name={player.display_name}
-          active={
-            active
-              ? {
-                  id: active.id,
-                  title: active.title,
-                  description: active.description,
-                  setOn: day(active.created_at),
-                }
-              : null
-          }
-        />
+        {retention?.confirmed === true ? (
+          <GoalSection
+            playerId={player.id}
+            name={player.display_name}
+            active={
+              active
+                ? {
+                    id: active.id,
+                    title: active.title,
+                    description: active.description,
+                    setOn: day(active.created_at),
+                  }
+                : null
+            }
+          />
+        ) : (
+          <p role="alert" className="mt-3 text-[15px] text-error">
+            Confirm retention setup on the roster page before adding real data.
+          </p>
+        )}
 
         {closed.length > 0 ? (
           <details className="mt-8 max-w-170">
@@ -198,6 +216,21 @@ export default async function Player({
             />
           )}
         </div>
+        {erasureImpact ? (
+          <ErasePlayer
+            name={player.display_name}
+            impact={erasureImpact}
+            idempotencyKey={randomUUID()}
+          />
+        ) : (
+          <p
+            role="alert"
+            className="mt-8 max-w-170 border-t border-line pt-5 text-[15px] leading-[1.5] text-error"
+          >
+            Permanent-deletion impact could not be verified. Confirm retention
+            setup on the roster page or try again.
+          </p>
+        )}
       </section>
     </>
   );

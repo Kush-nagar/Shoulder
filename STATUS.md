@@ -9,16 +9,16 @@ against Git and GitHub before editing anything.
 
 | Field | Value |
 |---|---|
-| Last verified `main` | `ac41577` (PR #56, Task 19 optional reflections) |
-| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17); Block 06 Tasks 18-19 |
-| Current block | Block 06. Task 20 email delivery is implemented and behaviorally verified on its task branch. |
-| Current worker / branch | Task 20 email delivery / `block-06-t20-email-delivery` |
-| Open PRs | Not checked in this task. This run did not push or open a Task 20 PR. |
-| Database revision | `0012_email_delivery` on this branch; `0011_optional_reflections` on `main`. The local up/down/up migration cycle passed. |
-| Last full verification | Task 20, 2026-09-20: the named mocked-send, duplicate suppression, safe-link, private-subject, reflection-deletion, and database-isolation checks passed. `scripts/check.ps1` passed formatting, lint, type checks, 50 Node tests, 1,454 Python tests (357 environment-gated skips), generated contracts, production build, bundle scan, and Chromium/Firefox smoke. WebKit could not launch because Windows Application Control blocks Playwright's cached `icuuc77.dll`; the test did not start. |
-| Blockers | Local full-check completion is blocked only by the workstation's WebKit DLL policy. No test or security policy was weakened; run WebKit on an allowed host or CI before merge. |
+| Last verified `main` | `de5903e` (PR #58, Task 21 development evidence timeline) |
+| Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17); Block 06 (Tasks 18-21) |
+| Current block | Block 07. Task 22 retention, deletion, and first-party product events is implemented and locally verified on its task branch. |
+| Current worker / branch | Task 22 retention and deletion / `block-07-t22-retention-deletion-and-first-party-produ` |
+| Open PRs | Not checked in this task. This run did not push or open a Task 22 PR. |
+| Database revision | `0013_retention_deletion` on this branch; `0012_email_delivery` on the branch base. The local empty/up/down/up migration cycle passed. |
+| Last full verification | Task 22, 2026-09-21: `scripts/check-db.ps1` passed 1,478 tests against local Supabase/Postgres/MinIO with 18 documented media-tool skips. `scripts/check.ps1` passed formatting, lint, type checks, 53 Node tests, 1,478 Python tests (385 environment-gated skips), generated contracts, production build, bundle scan, and Chromium/Firefox/WebKit smoke. |
+| Blockers | Real-data onboarding remains blocked until the owner records the season cutoff, notice, collateral-deletion scope, responsible operator, and verified provider backup maximum of at most 30 days. Task 23 remains blocked by the mandatory real-use gate. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Run the unchanged WebKit smoke gate on an allowed host, review and merge Task 20, then Task 21 becomes eligible. Tasks 23 and later remain blocked by `gates.real_use_gate`. |
+| Next action | Review and merge Task 22, apply revision `0013_retention_deletion` to the development project with disposable fixtures, then complete the mandatory real-use gate before Task 23. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -173,12 +173,13 @@ owner decision.
 
 ## Current state
 
-- Current phase: Phase C — the manual product. Tasks 14-19 are merged. Task 20
-  is implemented and behaviorally verified on `block-06-t20-email-delivery`;
-  local WebKit launch remains blocked by the host policy noted above.
+- Current phase: Phase C — the manual product. Tasks 14-21 are merged. Task 22
+  is implemented and locally verified on
+  `block-07-t22-retention-deletion-and-first-party-produ`; real-data onboarding
+  and Task 23 remain blocked by their explicit human gates.
 - Task 1 — Repository, CI, and first deployment: **complete for the owner-authorized local scope** under ADR 0012. Deployment is pending explicit approval.
-- Checkout: Task 20 is written in
-  `D:\Shoulder-agents\block-06-t20-email-delivery`. One writer per
+- Checkout: Task 22 is written in
+  `D:\Shoulder-agents\block-07-t22-retention-deletion-and-first-party-produ`. One writer per
   checkout.
 - Application: health shell, Task 3 authentication/session boundary, and the Task 4 core identity schema with baseline RLS, separated database roles, and role-aware `/v1/me`.
 - Repository: configured origin `Kush-nagar/Shoulder`; owner authorized the Task 1 commit, branch push, and pull request. Repository settings remain unchanged.

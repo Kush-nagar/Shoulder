@@ -1,7 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { apiWrite, type Goal, type GoalStatus } from "../../../../lib/api";
+import {
+  apiWrite,
+  type DeletionStatus,
+  type Goal,
+  type GoalStatus,
+} from "../../../../lib/api";
 import { requireCoach } from "../../session";
 import type { ActionState } from "../../ui";
 
@@ -90,4 +95,67 @@ export async function closeGoal(
         "You can no longer change this goal. Nothing was changed. Reload the page.",
     };
   return { message: "Could not save. Nothing was changed. Try again." };
+}
+
+export async function erasePlayerData(
+  _previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const token = await requireCoach();
+  const playerId = String(form.get("player_id") ?? "");
+  const idempotencyKey = String(form.get("idempotency_key") ?? "");
+  const videoCount = Number(form.get("expected_video_count"));
+  const clipCount = Number(form.get("expected_other_player_clip_count"));
+  const challenge = String(form.get("challenge") ?? "");
+  const confirmations = {
+    collateral_deletion_confirmed:
+      form.get("collateral_deletion_confirmed") === "on",
+    notice_confirmed: form.get("notice_confirmed") === "on",
+    unrelated_data_reviewed: form.get("unrelated_data_reviewed") === "on",
+  };
+  if (
+    !Number.isInteger(videoCount) ||
+    videoCount < 0 ||
+    !Number.isInteger(clipCount) ||
+    clipCount < 0 ||
+    !Object.values(confirmations).every(Boolean) ||
+    idempotencyKey.length < 1 ||
+    idempotencyKey.length > 200
+  )
+    return {
+      message: "Complete every deletion confirmation. Nothing was changed.",
+    };
+
+  const reply = await apiWrite<DeletionStatus>(
+    token,
+    `/v1/players/${playerId}/erasure`,
+    "POST",
+    {
+      expected_video_count: videoCount,
+      expected_other_player_clip_count: clipCount,
+      challenge,
+      ...confirmations,
+    },
+    { "Idempotency-Key": idempotencyKey },
+  );
+  if (reply.status === 202) {
+    revalidatePath("/coach/roster");
+    revalidatePath(`/coach/players/${playerId}`);
+    return {
+      message:
+        "Deletion started. The roster’s deletion operations show active cleanup and backup expiry separately.",
+      ok: true,
+    };
+  }
+  if (reply.problem === "deletion-impact-changed")
+    return {
+      message:
+        "The shared-footage impact changed. Close this dialog, reload, and review the new counts.",
+    };
+  if (reply.problem === "deletion-challenge-mismatch")
+    return { message: "Type the displayed deletion phrase exactly." };
+  return {
+    message:
+      "Deletion could not be started. Nothing is being reported as deleted. Try again.",
+  };
 }

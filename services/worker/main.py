@@ -19,9 +19,10 @@ import socket
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from services.worker import delivery, jobs, media
+from services.worker import delivery, jobs, media, retention
 
 logger = logging.getLogger("shoulder.worker")
 
@@ -31,7 +32,11 @@ logger = logging.getLogger("shoulder.worker")
 Handler = Callable[[jobs.Job, Callable[[float | None], bool]], None]
 # Tasks 11 and 12 register `transcode` and `thumbnail`. A kind with no handler
 # here is never claimed, so it waits in the queue instead of burning attempts.
-HANDLERS: dict[str, Handler] = {**media.HANDLERS, **delivery.HANDLERS}
+HANDLERS: dict[str, Handler] = {
+    **media.HANDLERS,
+    **delivery.HANDLERS,
+    **retention.HANDLERS,
+}
 
 IDLE_SLEEP_SECONDS = 2.0
 SWEEP_INTERVAL_SECONDS = 30.0
@@ -72,8 +77,12 @@ class Worker:
             return
         self._last_sweep = now
         recovered = jobs.sweep_expired_leases()
+        retention.enqueue_due_sweep()
+        removed_scratch = retention.sweep_scratch(now=datetime.now(UTC))
         if recovered:
             logger.info("recovered %s expired lease(s)", recovered)
+        if removed_scratch:
+            logger.info("removed %s expired scratch directorie(s)", removed_scratch)
 
     def execute(self, job: jobs.Job) -> None:
         handler = HANDLERS.get(job.kind)

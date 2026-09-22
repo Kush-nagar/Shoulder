@@ -228,6 +228,57 @@ EXPECTED_POLICIES = {
         "ALL",
         "{shoulder_migration}",
     ),
+    # 0013: confirmations are coach-readable. Content-free deletion manifests
+    # and events are restricted to the operator; no interactive-role policy
+    # exists for either table.
+    (
+        "retention_policy_confirmation",
+        "retention_policy_confirmation_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "retention_policy_confirmation",
+        "retention_confirmation_coach_select",
+        "SELECT",
+        "{shoulder_api}",
+    ),
+    (
+        "deletion_manifest",
+        "deletion_manifest_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "deletion_manifest",
+        "deletion_manifest_operator_select",
+        "SELECT",
+        "{shoulder_operator}",
+    ),
+    (
+        "deletion_manifest_object",
+        "deletion_manifest_object_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "deletion_manifest_object",
+        "deletion_manifest_object_operator_select",
+        "SELECT",
+        "{shoulder_operator}",
+    ),
+    (
+        "product_event",
+        "product_event_owner_maintenance",
+        "ALL",
+        "{shoulder_migration}",
+    ),
+    (
+        "product_event",
+        "product_event_operator_select",
+        "SELECT",
+        "{shoulder_operator}",
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -261,6 +312,14 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "is_player_reflection_author",
     "save_player_reflection",
     "delete_player_reflection",
+    "confirm_retention_policy",
+    "record_review_started",
+    "record_player_opened",
+    "player_erasure_impact",
+    "request_player_erasure",
+    "deletion_manifest_status",
+    "team_deletion_statuses",
+    "confirm_manifest_backup_expired",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
@@ -274,6 +333,19 @@ EXPECTED_WORKER_FUNCTIONS = {
     "email_delivery_input",
     "complete_email_delivery",
     "suppress_email_delivery",
+    "enqueue_retention_sweep",
+    "prepare_retention_sweep",
+    "deletion_manifest_input",
+    "fail_deletion_object",
+    "complete_deletion_object",
+    "deletion_auth_account",
+    "fail_deletion_auth",
+    "deletion_suppression_record",
+    "fail_deletion_suppression",
+    "expired_deletion_ledgers",
+    "fail_deletion_ledger_cleanup",
+    "complete_deletion_ledger_cleanup",
+    "finalize_deletion_manifest",
 }
 
 
@@ -422,6 +494,9 @@ class PolicySurfaceTests(DatabaseTestCase):
                     "player_reflection_request",
                     "email_delivery",
                     "email_reflection_event",
+                    "deletion_manifest",
+                    "deletion_manifest_object",
+                    "product_event",
                 )
             }
             | {
@@ -434,11 +509,17 @@ class PolicySurfaceTests(DatabaseTestCase):
                 # column-level and snapshotted in `test_database_video.py`.
                 ("shoulder_worker", "processing_job", "SELECT"),
                 ("shoulder_worker", "video", "SELECT"),
+                ("shoulder_operator", "deletion_manifest", "SELECT"),
+                ("shoulder_operator", "deletion_manifest_object", "SELECT"),
+                ("shoulder_operator", "product_event", "SELECT"),
             },
         )
         self.assertEqual(set(functions), EXPECTED_RUNTIME_FUNCTIONS)
         # Bootstrap authority stays with the operator role alone.
-        self.assertEqual(set(operator_functions), {"bootstrap_initial_team"})
+        self.assertEqual(
+            set(operator_functions),
+            {"bootstrap_initial_team", "replay_deletion_suppression"},
+        )
         self.assertEqual(set(worker_functions), EXPECTED_WORKER_FUNCTIONS)
 
     def test_definer_helpers_cannot_escalate(self) -> None:
@@ -959,6 +1040,9 @@ class ContextIsolationTests(IsolationHarness):
                         "player_reflection_request",
                         "email_delivery",
                         "email_reflection_event",
+                        "deletion_manifest",
+                        "deletion_manifest_object",
+                        "product_event",
                     ):
                         self.assertEqual(
                             self.refused_as(identity, f"SELECT 1 FROM app.{table}"),

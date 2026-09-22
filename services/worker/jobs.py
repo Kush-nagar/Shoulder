@@ -58,6 +58,8 @@ class Job:
     kind: str
     video_id: UUID | None
     email_delivery_id: UUID | None
+    player_id: UUID | None
+    deletion_manifest_id: UUID | None
     attempts: int
     max_attempts: int
     payload: dict[str, Any]
@@ -138,8 +140,9 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
                     error_code = NULL,
                     error_message = NULL
                 WHERE id = :id AND status = 'queued'
-                RETURNING id, kind, video_id, email_delivery_id, attempts,
-                          max_attempts, payload, locked_by
+                RETURNING id, kind, video_id, email_delivery_id, player_id,
+                          deletion_manifest_id, attempts, max_attempts,
+                          payload, locked_by
             """),
             {"id": candidate, "worker_id": worker_id},
         ).one()
@@ -148,6 +151,8 @@ def claim(worker_id: str, kinds: tuple[str, ...]) -> Job | None:
         kind=row.kind,
         video_id=row.video_id,
         email_delivery_id=row.email_delivery_id,
+        player_id=row.player_id,
+        deletion_manifest_id=row.deletion_manifest_id,
         attempts=row.attempts,
         max_attempts=row.max_attempts,
         payload=dict(row.payload),
@@ -324,25 +329,29 @@ def sweep_expired_leases(lease_seconds: int = LEASE_SECONDS) -> int:
             text("""
                 UPDATE app.processing_job SET
                     status = CASE
+                        WHEN cancel_requested_at IS NOT NULL THEN 'cancelled'
                         WHEN attempts < max_attempts THEN 'queued' ELSE 'failed'
                     END,
                     available_at = CASE
-                        WHEN attempts < max_attempts
+                        WHEN cancel_requested_at IS NULL AND attempts < max_attempts
                         THEN now() + make_interval(
                             secs => least(:base * 2 ^ (attempts - 1), :ceiling)
                         )
                         ELSE available_at
                     END,
                     finished_at = CASE
-                        WHEN attempts < max_attempts THEN NULL ELSE now()
+                        WHEN cancel_requested_at IS NULL AND attempts < max_attempts
+                        THEN NULL ELSE now()
                     END,
                     -- A requeued job carries no error. The Block 03 coach
                     -- surface reads these columns, and "waiting to retry" must
                     -- not read there as "this failed".
                     error_code = CASE
+                        WHEN cancel_requested_at IS NOT NULL THEN NULL
                         WHEN attempts < max_attempts THEN NULL ELSE 'lease_expired'
                     END,
                     error_message = CASE
+                        WHEN cancel_requested_at IS NOT NULL THEN NULL
                         WHEN attempts < max_attempts THEN NULL
                         ELSE 'Shoulder stopped preparing this video and could'
                              || ' not finish it.'
