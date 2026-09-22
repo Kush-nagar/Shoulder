@@ -72,9 +72,19 @@ DEFAULT_GATE_TIMEOUT_SECONDS = 3600
 # state and credentials are the two that would actually be catastrophic, and
 # both are gitignored already -- this is the second lock on the same door,
 # because `git add -A` is one typo in an ignore file away from a leak.
+#
+# `.env.example` is the exception, and it is not a loophole: four of them are
+# tracked in this repository as the documentation of what a process needs, they
+# hold key names with the values left empty, and the secret scanner in
+# `tests/repository.test.mjs` reads them on every run. Refusing them refused
+# task 22 after it had implemented, verified, been reviewed and passed the
+# gated suite -- for editing a file the repository deliberately keeps. The
+# suffixes are spelled out rather than generalised to "anything after .env",
+# because `.env.local` and `.env.remote` are exactly what this must still
+# catch.
 NEVER_COMMIT = re.compile(
-    r"(^|/)(\.env($|\..*)|\.agentops/|\.tools/|.*\.pem$|.*\.key$|"
-    r"secrets?\.(json|ya?ml|txt)$)",
+    r"(^|/)(\.env(?!\.(example|sample|template)$)($|\..*)|\.agentops/|"
+    r"\.tools/|.*\.pem$|.*\.key$|secrets?\.(json|ya?ml|txt)$)",
     re.IGNORECASE,
 )
 
