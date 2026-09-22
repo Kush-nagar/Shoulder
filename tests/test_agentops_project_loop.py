@@ -620,6 +620,32 @@ class TestCommitGuards(ProjectCase):
         self.assertTrue(project.forbidden_paths(["infra/tls/server.key"]))
         self.assertFalse(project.forbidden_paths(["services/api/app.py"]))
 
+    def test_an_env_example_is_documentation_rather_than_a_secret(self) -> None:
+        """Four are tracked here, holding key names with empty values.
+
+        Refusing them stopped task 22 after it had implemented, verified, been
+        reviewed and passed the gated suite, for editing a file this
+        repository deliberately keeps.
+        """
+        self.assertFalse(
+            project.forbidden_paths(
+                [
+                    ".env.example",
+                    "apps/web/.env.example",
+                    "services/worker/.env.example",
+                    "services/api/.env.sample",
+                    "infra/.env.template",
+                ]
+            )
+        )
+
+    def test_a_real_env_file_is_still_refused(self) -> None:
+        """The exception is the three documentation suffixes and nothing
+        else: `.env.local` and `.env.remote` are what this exists to catch."""
+        for path in (".env", ".env.local", ".env.remote", "apps/web/.env.production"):
+            with self.subTest(path=path):
+                self.assertTrue(project.forbidden_paths([path]))
+
 
 class TestTheWholeBacklog(ProjectCase):
     def test_the_loop_exits_complete_when_nothing_is_outstanding(self) -> None:
