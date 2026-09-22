@@ -211,8 +211,8 @@ class LateDerivativeCleanupTests(unittest.TestCase):
         transaction = MagicMock()
         transaction.__enter__.return_value = connection
         with (
-            patch.object(media.jobs, "transaction", return_value=transaction),
-            patch.object(media.storage, "delete_object") as delete_object,
+            patch("services.worker.jobs.transaction", return_value=transaction),
+            patch.object(storage, "delete_object") as delete_object,
         ):
             media._discard_video_derivatives_if_deleting(video_id)
 
@@ -233,8 +233,8 @@ class LateDerivativeCleanupTests(unittest.TestCase):
         transaction = MagicMock()
         transaction.__enter__.return_value = connection
         with (
-            patch.object(media.jobs, "transaction", return_value=transaction),
-            patch.object(media.storage, "delete_object") as delete_object,
+            patch("services.worker.jobs.transaction", return_value=transaction),
+            patch.object(storage, "delete_object") as delete_object,
         ):
             media._discard_video_derivatives_if_deleting(uuid4())
         delete_object.assert_not_called()
