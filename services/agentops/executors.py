@@ -230,10 +230,42 @@ RESET_PATTERN = re.compile(
 # mismatched zone putting the lane back an hour early, which costs one refused
 # probe and re-cools -- strictly better than sleeping five hours through a
 # reset that already happened.
+#
+# Codex prints this two ways: "try again at 11:54 PM" and "try again at
+# Sep 21st, 2026 1:03 AM". Only the bare form matched at first, so the dated
+# one fell back to the five-hour window and woke at 06:53Z for a reset at
+# 06:03Z. Matching the date fixed that, but skipping it did not: the date was
+# read as decoration on the assumption it always meant today or tomorrow.
+#
+# It does not. A spent weekly allowance says "try again at Sep 26th, 2026
+# 11:56 PM" -- five days out -- and skipping the date resolved that to 11:56
+# PM tonight. The lane would have come back, been refused in seconds,
+# re-cooled, and repeated that every night for five days.
+#
+# So a named date is used when it is there, and only the time is guessed at
+# when it is not: without a date, a time already past means tomorrow, which is
+# the nearest reading that is not in the past.
 CLOCK_RESET_PATTERN = re.compile(
-    r"try again at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
+    r"try again at\s+(?:(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})"
+    r"(?:st|nd|rd|th)?,?\s*(?:(?P<year>\d{4}),?)?\s*)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<meridiem>am|pm)?",
     re.IGNORECASE,
 )
+
+MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
 
 
 # Where the harness itself speaks, as opposed to where it relays what a model
@@ -332,9 +364,9 @@ def _clock_reset(text: str) -> str:
     found = CLOCK_RESET_PATTERN.search(text)
     if found is None:
         return ""
-    hour = int(found.group(1))
-    minute = int(found.group(2) or 0)
-    meridiem = (found.group(3) or "").lower()
+    hour = int(found.group("hour"))
+    minute = int(found.group("minute") or 0)
+    meridiem = (found.group("meridiem") or "").lower()
     if meridiem == "pm" and hour != 12:
         hour += 12
     elif meridiem == "am" and hour == 12:
@@ -343,7 +375,23 @@ def _clock_reset(text: str) -> str:
         return ""
     now = datetime.now().astimezone()
     reset = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if reset <= now:
+    month = MONTHS.get((found.group("month") or "")[:3].lower())
+    if month is not None:
+        try:
+            reset = reset.replace(
+                year=int(found.group("year") or now.year),
+                month=month,
+                day=int(found.group("day")),
+            )
+        except ValueError:
+            # A day that does not exist in that month. The harness said
+            # something this cannot read, so say nothing rather than invent a
+            # date, and let the declared window stand.
+            return ""
+        # A named date without a year, already behind us, is next year's.
+        if reset <= now and not found.group("year"):
+            reset = reset.replace(year=now.year + 1)
+    elif reset <= now:
         reset += timedelta(days=1)
     return reset.isoformat()
 
