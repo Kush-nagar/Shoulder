@@ -834,7 +834,12 @@ def transcode_job(job: jobs.Job, keep_going: Progress) -> None:
                 raise Cancelled
 
         with jobs.transaction() as connection:
-            _finish(connection, video_id, key, played)
+            finished = _finish(connection, video_id, key, played)
+        if not finished:
+            _discard_video_derivatives_if_deleting(video_id)
+    except Cancelled:
+        _discard_video_derivatives_if_deleting(video_id)
+        raise
     except (MediaError, storage.StorageError):
         _fail_if_final(job, video_id)
         raise
@@ -897,8 +902,13 @@ def thumbnail_job(job: jobs.Job, keep_going: Progress) -> None:
                     INDEX_CONTENT_TYPE,
                     report=keep_going,
                 )
+                if not keep_going(1.0):
+                    raise Cancelled
             except storage.TransferAborted:
                 raise Cancelled from None
+    except Cancelled:
+        _discard_video_derivatives_if_deleting(video_id)
+        raise
     except (MediaError, storage.StorageError):
         # A missing timeline does not make a video unwatchable, so this never
         # marks the video failed; the job row carries the failure.
@@ -1017,6 +1027,28 @@ def _fail_if_final(job: jobs.Job, video_id: UUID) -> None:
     """Tell the coach the truth once the queue has stopped retrying."""
     if job.attempts >= job.max_attempts:
         _mark_failed(video_id)
+
+
+def _discard_video_derivatives_if_deleting(video_id: UUID) -> None:
+    """Remove a late worker write only after the database fences the video."""
+    with jobs.transaction() as connection:
+        status = connection.execute(
+            text("SELECT status FROM app.video WHERE id = :video_id"),
+            {"video_id": str(video_id)},
+        ).scalar_one_or_none()
+    if status not in (None, "deletion_pending", "deleted"):
+        return
+    keys = [
+        storage.playback_key(video_id),
+        storage.thumbnail_index_key(video_id),
+        *(storage.sprite_key(video_id, sheet) for sheet in range(4)),
+    ]
+    for key in keys:
+        try:
+            storage.delete_object(key)
+        except storage.StorageError:
+            # The durable deletion manifest retries and verifies every key.
+            pass
 
 
 class _Workspace:

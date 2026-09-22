@@ -4,6 +4,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from services.api.auth import authenticated_identity
@@ -32,7 +33,12 @@ def list_observations(
 ) -> list[Observation]:
     try:
         with user_transaction(user_id) as connection:
-            return list_observations_service(connection, video_id, player_id)
+            rows = list_observations_service(connection, video_id, player_id)
+            connection.execute(
+                text("SELECT private.record_review_started(:video_id, :player_id)"),
+                {"video_id": str(video_id), "player_id": str(player_id)},
+            )
+            return rows
     except DBAPIError:
         raise unavailable() from None
 

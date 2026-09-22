@@ -146,14 +146,17 @@ class PlaybackApiTests(DatabaseTestCase):
                     "height": 720,
                     "fps": 30,
                     "ready_at": "now()",
+                    "derivatives_expires_at": "now()",
                 }
             )
-        names = ", ".join(key for key in fields if key != "ready_at")
-        values = ", ".join(f":{key}" for key in fields if key != "ready_at")
+        sql_values = {"ready_at", "derivatives_expires_at"}
+        names = ", ".join(key for key in fields if key not in sql_values)
+        values = ", ".join(f":{key}" for key in fields if key not in sql_values)
         if ready:
-            names += ", ready_at"
-            values += ", now()"
+            names += ", ready_at, derivatives_expires_at"
+            values += ", now(), now() + interval '30 days'"
             fields.pop("ready_at")
+            fields.pop("derivatives_expires_at")
         with self.admin.connect() as connection, connection.begin():
             connection.execute(
                 text(f"INSERT INTO app.video ({names}) VALUES ({values})"), fields

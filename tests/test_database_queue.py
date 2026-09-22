@@ -286,6 +286,23 @@ class QueueTests(VideoWorld):
         self.assertEqual(jobs.sweep_expired_leases(), 0)
         self.assertEqual(self.job_row(job.id).status, "running")
 
+    def test_an_expired_cancelled_lease_is_never_requeued(self) -> None:
+        self.clear_queue()
+        (job_id,) = self.enqueue(1)
+        job = jobs.claim("cancelled-worker", self.kinds)
+        assert job is not None
+        with self.admin.connect() as connection, connection.begin():
+            self.assertEqual(jobs.request_cancel(connection, job_id), 1)
+        self.expire_lease(job_id)
+
+        self.assertEqual(jobs.sweep_expired_leases(), 1)
+        row = self.job_row(job_id)
+        self.assertEqual(row.status, "cancelled")
+        self.assertIsNotNone(row.finished_at)
+        self.assertIsNone(row.locked_by)
+        self.assertIsNone(row.error_code)
+        self.assertIsNone(jobs.claim("replacement-worker", self.kinds))
+
     def test_a_crashed_worker_cannot_finish_a_job_it_no_longer_holds(self) -> None:
         """The recovered job belongs to whoever claims it next."""
         self.clear_queue()

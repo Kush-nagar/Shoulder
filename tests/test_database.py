@@ -19,9 +19,11 @@ from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
+from services.api import db as api_db
 from services.api.auth import authenticated_identity, get_verifier
 from services.api.main import app
 from services.api.routes import authorized_operator
+from services.worker import jobs
 
 ADMIN_URL = os.environ.get("MIGRATION_DATABASE_URL")
 RUNTIME_URL = os.environ.get("DATABASE_URL")
@@ -59,6 +61,11 @@ TABLES = (
     # 0012 - Task 20 content-free email outbox and reflection digest events.
     "email_delivery",
     "email_reflection_event",
+    # 0013 - Task 22 retention, deletion manifests, and product events.
+    "retention_policy_confirmation",
+    "deletion_manifest",
+    "deletion_manifest_object",
+    "product_event",
 )
 
 
@@ -211,7 +218,9 @@ class DatabaseTestCase(unittest.TestCase):
             {"user_id": None if user_id is None else str(user_id)},
         )
 
-    def admin_insert_team(self, coach_id: UUID, name: str) -> UUID:
+    def admin_insert_team(
+        self, coach_id: UUID, name: str, *, retention_confirmed: bool = True
+    ) -> UUID:
         with self.admin.connect() as connection, connection.begin():
             team_id = connection.execute(
                 text("""
@@ -229,6 +238,21 @@ class DatabaseTestCase(unittest.TestCase):
                 """),
                 {"team": team_id, "coach": coach_id},
             )
+            if retention_confirmed:
+                connection.execute(
+                    text("""
+                        INSERT INTO app.retention_policy_confirmation (
+                            team_id, confirmed_by, operator_user_id,
+                            confirmed_season_end_at, provider_backup_max_days,
+                            notice_confirmed_at,
+                            collateral_deletion_confirmed_at,
+                            provider_backup_confirmed_at
+                        ) SELECT id, :coach, :coach, season_end_at, 30,
+                                 now(), now(), now()
+                          FROM app.team WHERE id = :team
+                    """),
+                    {"team": team_id, "coach": coach_id},
+                )
         return UUID(str(team_id))
 
     def admin_insert_player(self, team_id: UUID, **columns: Any) -> UUID:
@@ -374,9 +398,16 @@ class SchemaContractTests(DatabaseTestCase):
                     ).scalar_one()
                 )
         with self.operator.connect() as connection:
-            self.assertFalse(
+            # The operator can read only the three content-free Task 22 tables;
+            # schema USAGE is necessary for those explicit SELECT grants.
+            self.assertTrue(
                 connection.execute(
                     text("SELECT has_schema_privilege(current_user, 'app', 'USAGE')")
+                ).scalar_one()
+            )
+            self.assertFalse(
+                connection.execute(
+                    text("SELECT has_schema_privilege(current_user, 'app', 'CREATE')")
                 ).scalar_one()
             )
             self.assertFalse(
@@ -766,6 +797,9 @@ class RuntimeIsolationTests(DatabaseTestCase):
                         "player_reflection_request",
                         "email_delivery",
                         "email_reflection_event",
+                        "deletion_manifest",
+                        "deletion_manifest_object",
+                        "product_event",
                     ):
                         with self.assertRaises(ProgrammingError) as caught:
                             self.visible(user_id, f"SELECT 1 FROM app.{table}")
@@ -884,6 +918,7 @@ class ZMigrationTests(unittest.TestCase):
         config = Config("alembic.ini")
         engine = create_engine(str(ADMIN_URL))
         try:
+            self.dispose_cached_role_engines()
             command.downgrade(config, "base")
             with engine.connect() as connection:
                 self.assertEqual(self.table_count(connection), 0)
@@ -910,14 +945,25 @@ class ZMigrationTests(unittest.TestCase):
                 # the failure trigger, the reserved-edit trigger, and 0011's
                 # three runtime reflection helpers plus two internal helpers,
                 # and 0012's three fenced worker helpers plus five outbox and
-                # source-transition trigger functions.
-                self.assertEqual(self.function_count(connection), 46)
+                # source-transition trigger functions. 0013 adds retention,
+                # deletion, replay, event, and operator-confirmation helpers.
+                self.assertEqual(self.function_count(connection), 81)
+                # This helper intentionally counts only the baseline auth-sync
+                # trigger; Task 22 trigger coverage lives in the policy suite.
                 self.assertEqual(self.trigger_count(connection), 1)
         finally:
             command.upgrade(config, "head")
             # The downgrade dropped the login roles; later suites still need them.
             restore_login_passwords(engine)
+            self.dispose_cached_role_engines()
             engine.dispose()
+
+    @staticmethod
+    def dispose_cached_role_engines() -> None:
+        for factory in (api_db.get_engine, jobs.get_engine):
+            if factory.cache_info().currsize:
+                factory().dispose()
+            factory.cache_clear()
 
     @staticmethod
     def table_count(connection: Connection) -> int:

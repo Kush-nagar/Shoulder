@@ -27,6 +27,9 @@ export type EvidenceItem = Schema["EvidenceItem"];
 export type CoachEvidenceSet = Schema["CoachEvidenceSet"];
 export type ClipUrl = Schema["ClipUrl"];
 export type PlayerReflection = Schema["PlayerReflection"];
+export type RetentionStatus = Schema["RetentionStatus"];
+export type PlayerErasureImpact = Schema["PlayerErasureImpact"];
+export type DeletionStatus = Schema["DeletionStatus"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */
 /**
@@ -48,12 +51,12 @@ async function request<T>(
   init?: RequestInit,
 ): Promise<ApiReply<T>> {
   try {
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    if (init?.body) headers.set("Content-Type", "application/json");
     const response = await fetch(`${authConfig(process.env).apiUrl}${path}`, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      },
+      headers,
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(5000),
@@ -188,6 +191,39 @@ export async function fetchPlayerReflections(
   ).data;
 }
 
+export async function fetchRetentionStatus(
+  token: string,
+  teamId: string,
+): Promise<RetentionStatus | null> {
+  return (
+    await request<RetentionStatus>(
+      token,
+      `/v1/teams/${teamId}/retention-status`,
+    )
+  ).data;
+}
+
+export async function fetchErasureImpact(
+  token: string,
+  playerId: string,
+): Promise<PlayerErasureImpact | null> {
+  return (
+    await request<PlayerErasureImpact>(
+      token,
+      `/v1/players/${playerId}/erasure-impact`,
+    )
+  ).data;
+}
+
+export async function fetchTeamDeletions(
+  token: string,
+  teamId: string,
+): Promise<DeletionStatus[] | null> {
+  return (
+    await request<DeletionStatus[]>(token, `/v1/teams/${teamId}/deletions`)
+  ).data;
+}
+
 export async function fetchObservations(
   token: string,
   videoId: string,
@@ -206,6 +242,11 @@ export function apiWrite<T>(
   path: string,
   method: "POST" | "PATCH",
   body: unknown,
+  headers?: Record<string, string>,
 ): Promise<ApiReply<T>> {
-  return request<T>(token, path, { method, body: JSON.stringify(body) });
+  return request<T>(token, path, {
+    method,
+    body: JSON.stringify(body),
+    headers,
+  });
 }

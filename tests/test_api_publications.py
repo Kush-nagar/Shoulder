@@ -18,11 +18,13 @@ from sqlalchemy.exc import DBAPIError
 from services.api import storage
 from services.api.auth import authenticated_identity
 from services.api.main import app
-from services.worker import delivery, jobs
+from services.worker import delivery, jobs, retention
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
 from test_database import CONFIGURED, DatabaseTestCase, sqlstate  # noqa: E402
+
+RETENTION_NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 
 
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
@@ -712,6 +714,106 @@ class PublicationApiTests(DatabaseTestCase):
         visible = self.evidence()[0]["items"]
         self.assertEqual(len(visible), 2)
 
+    def test_obsolete_and_cancelled_exports_expire_at_the_exact_boundary(
+        self,
+    ) -> None:
+        publication = self.publish([0, 1, 2]).json()
+        cancelled = self.client_for(self.coach).post(
+            f"/v1/review-publications/{publication['id']}/cancel"
+        )
+        self.assertEqual(cancelled.status_code, 200, cancelled.text)
+
+        worker = f"export-clock-{uuid4()}"
+        with self.admin.connect() as connection, connection.begin():
+            clips = (
+                connection.execute(
+                    text("""
+                    SELECT clip.id
+                    FROM app.review_publication_item item
+                    JOIN app.evidence_clip clip
+                      ON clip.judgment_id = item.judgment_id
+                     AND clip.version = item.requested_clip_version
+                    WHERE item.publication_id = :publication
+                    ORDER BY item.ordinal
+                """),
+                    {"publication": publication["id"]},
+                )
+                .scalars()
+                .all()
+            )
+            connection.execute(
+                text("""
+                    UPDATE app.review_publication SET
+                        cancelled_at = :terminal,
+                        private_exports_expires_at = :deadline
+                    WHERE id = :publication
+                """),
+                {
+                    "terminal": RETENTION_NOW - timedelta(days=7),
+                    "deadline": RETENTION_NOW,
+                    "publication": publication["id"],
+                },
+            )
+            connection.execute(
+                text("""
+                    UPDATE app.evidence_clip
+                    SET delete_after = CASE WHEN id = :obsolete THEN :deadline END
+                    WHERE id = ANY(:clips)
+                """),
+                {
+                    "obsolete": clips[0],
+                    "deadline": RETENTION_NOW,
+                    "clips": clips,
+                },
+            )
+            job = connection.execute(
+                text("""
+                    INSERT INTO app.processing_job (
+                        kind, idempotency_key, status, attempts, max_attempts,
+                        locked_at, locked_by, heartbeat_at
+                    ) VALUES (
+                        'retention_sweep', :key, 'running', 1, 5,
+                        :at, :worker, :at
+                    ) RETURNING id
+                """),
+                {
+                    "key": f"export-clock:{uuid4()}",
+                    "at": RETENTION_NOW,
+                    "worker": worker,
+                },
+            ).scalar_one()
+            before = connection.execute(
+                text("SELECT private.prepare_retention_sweep(:job, :worker, :at)"),
+                {
+                    "job": job,
+                    "worker": worker,
+                    "at": RETENTION_NOW - timedelta(microseconds=1),
+                },
+            ).scalar_one()
+            at_boundary = connection.execute(
+                text("SELECT private.prepare_retention_sweep(:job, :worker, :at)"),
+                {"job": job, "worker": worker, "at": RETENTION_NOW},
+            ).scalar_one()
+
+        self.assertEqual(before, 0)
+        self.assertEqual(at_boundary, 3)
+        with self.admin.connect() as connection:
+            rows = connection.execute(
+                text("""
+                    SELECT manifest.evidence_clip_id, manifest.deadline_at,
+                           clip.status
+                    FROM app.deletion_manifest manifest
+                    JOIN app.evidence_clip clip
+                      ON clip.id = manifest.evidence_clip_id
+                    WHERE manifest.team_id = :team
+                      AND manifest.kind = 'export_cleanup'
+                """),
+                {"team": self.team},
+            ).all()
+        self.assertEqual({row.evidence_clip_id for row in rows}, set(clips))
+        self.assertTrue(all(row.deadline_at == RETENTION_NOW for row in rows))
+        self.assertTrue(all(row.status == "deleted" for row in rows))
+
     def admin_finalize(self, publication_id: str) -> bool:
         with self.admin.connect() as connection, connection.begin():
             return bool(
@@ -1114,6 +1216,452 @@ class PublicationApiTests(DatabaseTestCase):
         self.assertNotIn("text", marker_columns)
         self.assertNotIn("payload", marker_columns)
         self.assertLessEqual(longest_marker, timedelta(days=7))
+
+    def test_shared_footage_erasure_is_fenced_fk_safe_and_idempotent(self) -> None:
+        first = self.publish([0, 1, 2]).json()
+        self.finish(first["id"])
+        reflected = self.save_reflection(
+            self.judgments[0]["id"], "I saw the space before receiving."
+        )
+        self.assertEqual(reflected.status_code, 200, reflected.text)
+
+        other_goal = self.admin_insert_goal(self.other_player)
+        other_judgments: list[dict[str, Any]] = []
+        for index in range(3):
+            start = 25000 + index * 3000
+            with self.admin.connect() as connection, connection.begin():
+                observation = connection.execute(
+                    text("""
+                        INSERT INTO app.observation (
+                            video_id, player_id, t_start_ms, t_end_ms,
+                            source, created_by
+                        ) VALUES (
+                            :video, :player, :start, :finish,
+                            'coach_manual', :coach
+                        ) RETURNING id
+                    """),
+                    {
+                        "video": self.video,
+                        "player": self.other_player,
+                        "start": start,
+                        "finish": start + 2000,
+                        "coach": self.coach,
+                    },
+                ).scalar_one()
+            response = self.client_for(self.coach).post(
+                f"/v1/observations/{observation}/judgments",
+                json={
+                    "goal_id": str(other_goal),
+                    "verdict": "applied",
+                    "comment_text": f"Other player comment {index}.",
+                    "clip_start_ms": start,
+                    "clip_end_ms": start + 1000,
+                },
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            other_judgments.append(cast("dict[str, Any]", response.json()))
+
+        other_publication = self.client_for(self.coach).post(
+            f"/v1/reviews/{self.game}/{self.other_player}/publish",
+            headers={"Idempotency-Key": "other-first"},
+            json={
+                "goal_id": str(other_goal),
+                "replaces_publication_id": None,
+                "items": [
+                    {"judgment_id": item["id"], "version": item["version"]}
+                    for item in other_judgments
+                ],
+            },
+        )
+        self.assertEqual(other_publication.status_code, 202, other_publication.text)
+        self.finish(other_publication.json()["id"])
+        other_reflection = self.save_reflection(
+            other_judgments[0]["id"],
+            "I kept the next option open.",
+            actor=self.other_player_account,
+        )
+        self.assertEqual(other_reflection.status_code, 200, other_reflection.text)
+
+        edited = self.client_for(self.coach).patch(
+            f"/v1/judgments/{other_judgments[0]['id']}",
+            headers={"If-Match": '"1"'},
+            json={
+                "verdict": "opportunity",
+                "comment_text": "A pending replacement.",
+                "clip_start_ms": 25000,
+                "clip_end_ms": 26200,
+            },
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        other_judgments[0] = cast("dict[str, Any]", edited.json())
+        exporting = self.client_for(self.coach).post(
+            f"/v1/reviews/{self.game}/{self.other_player}/publish",
+            headers={"Idempotency-Key": "other-replacement"},
+            json={
+                "goal_id": str(other_goal),
+                "replaces_publication_id": other_publication.json()["id"],
+                "items": [
+                    {"judgment_id": item["id"], "version": item["version"]}
+                    for item in other_judgments
+                ],
+            },
+        )
+        self.assertEqual(exporting.status_code, 202, exporting.text)
+        self.assertEqual(exporting.json()["status"], "exporting")
+        with self.admin.connect() as connection:
+            late_job = connection.execute(
+                text("""
+                    SELECT id FROM app.processing_job
+                    WHERE review_publication_id = :publication
+                      AND status = 'queued' LIMIT 1
+                """),
+                {"publication": exporting.json()["id"]},
+            ).scalar_one()
+
+        impact = self.client_for(self.coach).get(
+            f"/v1/players/{self.player}/erasure-impact"
+        )
+        self.assertEqual(impact.status_code, 200, impact.text)
+        deletion_request = {
+            "expected_video_count": impact.json()["video_count"],
+            "expected_other_player_clip_count": impact.json()[
+                "other_player_clip_count"
+            ],
+            "challenge": impact.json()["challenge"],
+            "collateral_deletion_confirmed": True,
+            "notice_confirmed": True,
+            "unrelated_data_reviewed": True,
+        }
+        rejected_key = self.client_for(self.coach).post(
+            f"/v1/players/{self.player}/erasure",
+            headers={"Idempotency-Key": "player-name-must-not-reach-manifest"},
+            json=deletion_request,
+        )
+        self.assertEqual(rejected_key.status_code, 422, rejected_key.text)
+        erasure_key = str(uuid4())
+        requested = self.client_for(self.coach).post(
+            f"/v1/players/{self.player}/erasure",
+            headers={"Idempotency-Key": erasure_key},
+            json=deletion_request,
+        )
+        self.assertEqual(requested.status_code, 202, requested.text)
+        replay = self.client_for(self.coach).post(
+            f"/v1/players/{self.player}/erasure",
+            headers={"Idempotency-Key": erasure_key},
+            json=deletion_request,
+        )
+        self.assertEqual(replay.status_code, 202, replay.text)
+        self.assertEqual(replay.json()["id"], requested.json()["id"])
+
+        with (
+            self.assertRaises(DBAPIError) as direct_enqueue,
+            self.runtime.connect() as connection,
+            connection.begin(),
+        ):
+            self.as_user(connection, self.coach)
+            connection.execute(
+                text("""
+                    INSERT INTO app.processing_job (
+                        video_id, deletion_manifest_id, kind,
+                        idempotency_key, payload, max_attempts
+                    ) VALUES (
+                        :video, :manifest, 'video_retention_delete',
+                        :key, '{}'::jsonb, 20
+                    )
+                """),
+                {
+                    "video": self.video,
+                    "manifest": requested.json()["id"],
+                    "key": f"forged-delete:{uuid4()}",
+                },
+            )
+        self.assertEqual(sqlstate(direct_enqueue.exception), "42501")
+
+        with self.admin.connect() as connection:
+            self.assertEqual(
+                connection.execute(
+                    text("SELECT status FROM app.processing_job WHERE id = :id"),
+                    {"id": late_job},
+                ).scalar_one(),
+                "cancelled",
+            )
+            delayed = connection.execute(
+                text("""
+                    SELECT private.complete_evidence_clip(
+                        :job, 'late-worker', 1200, 1000, repeat('b', 64)
+                    )
+                """),
+                {"job": late_job},
+            ).scalar_one()
+            late_key = connection.execute(
+                text("""
+                    SELECT clip.storage_key
+                    FROM app.processing_job job
+                    JOIN app.review_publication_item item
+                      ON item.publication_id = job.review_publication_id
+                     AND item.judgment_id = job.judgment_id
+                    JOIN app.evidence_clip clip
+                      ON clip.judgment_id = item.judgment_id
+                     AND clip.version = item.requested_clip_version
+                    WHERE job.id = :job
+                """),
+                {"job": late_job},
+            ).scalar_one()
+            disposable = connection.execute(
+                text("""
+                    SELECT private.evidence_clip_object_disposable(
+                        :job, 'late-worker', :key
+                    )
+                """),
+                {"job": late_job, "key": late_key},
+            ).scalar_one()
+        self.assertFalse(delayed)
+        self.assertTrue(disposable)
+        self.assertEqual(self.evidence(), [])
+        self.assertEqual(self.evidence(self.other_player_account), [])
+        with self.runtime.connect() as connection, connection.begin():
+            self.as_user(connection, self.other_player_account)
+            fenced_rows = connection.execute(
+                text("""
+                    SELECT
+                      (SELECT count(*) FROM app.review_publication
+                       WHERE id = :publication),
+                      (SELECT count(*) FROM app.judgment
+                       WHERE id = :judgment),
+                      (SELECT count(*) FROM app.judgment_revision
+                       WHERE judgment_id = :judgment),
+                      (SELECT count(*) FROM app.evidence_clip
+                       WHERE judgment_id = :judgment)
+                """),
+                {
+                    "publication": other_publication.json()["id"],
+                    "judgment": other_judgments[0]["id"],
+                },
+            ).one()
+        self.assertEqual(tuple(fenced_rows), (0, 0, 0, 0))
+
+        job = jobs.claim("retention-test", ("player_data_delete",))
+        self.assertIsNotNone(job)
+        assert job is not None
+        deleted_objects: list[str] = []
+        with (
+            mock.patch.object(
+                retention.storage,
+                "delete_object",
+                side_effect=deleted_objects.append,
+            ),
+            mock.patch.object(retention.storage, "head_object", return_value=None),
+            mock.patch.object(retention.storage, "write_deletion_suppression"),
+            mock.patch.object(retention.accounts, "delete_auth_user") as delete_auth,
+        ):
+            retention.deletion_job(job, lambda _progress: True)
+        delete_auth.assert_called_once_with(self.player_account)
+        self.assertTrue(jobs.succeed(job.id, job.locked_by))
+        first_sweep_count = len(deleted_objects)
+        self.assertGreater(first_sweep_count, 0)
+
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("""
+                    UPDATE app.processing_job SET available_at = now()
+                    WHERE deletion_manifest_id = :manifest
+                      AND idempotency_key = :key
+                """),
+                {
+                    "manifest": requested.json()["id"],
+                    "key": f"delete-manifest-final:{requested.json()['id']}",
+                },
+            )
+        final_job = jobs.claim("retention-final-sweep", ("player_data_delete",))
+        self.assertIsNotNone(final_job)
+        assert final_job is not None
+        with (
+            mock.patch.object(
+                retention.storage,
+                "delete_object",
+                side_effect=deleted_objects.append,
+            ),
+            mock.patch.object(retention.storage, "head_object", return_value=None),
+            mock.patch.object(retention.storage, "write_deletion_suppression"),
+            mock.patch.object(retention.accounts, "delete_auth_user") as repeated_auth,
+        ):
+            retention.deletion_job(final_job, lambda _progress: True)
+        repeated_auth.assert_not_called()
+        self.assertTrue(jobs.succeed(final_job.id, final_job.locked_by))
+        self.assertEqual(len(deleted_objects), first_sweep_count * 2)
+
+        with self.admin.connect() as connection:
+            counts = connection.execute(
+                text("""
+                    SELECT
+                      (SELECT count(*) FROM app.video WHERE id = :video),
+                      (SELECT count(*) FROM app.observation WHERE video_id = :video),
+                      (SELECT count(*) FROM app.judgment),
+                      (SELECT count(*) FROM app.judgment_revision),
+                      (SELECT count(*) FROM app.player_reflection),
+                      (SELECT count(*) FROM app.evidence_clip),
+                      (SELECT count(*) FROM app.review_publication)
+                """),
+                {"video": self.video},
+            ).one()
+            target_rows = connection.execute(
+                text("""
+                    SELECT
+                      (SELECT count(*) FROM app.player WHERE id = :player),
+                      (SELECT count(*) FROM app.development_goal
+                       WHERE player_id = :player),
+                      (SELECT count(*) FROM app.user_account WHERE id = :account)
+                """),
+                {"player": self.player, "account": self.player_account},
+            ).one()
+            unrelated = connection.execute(
+                text("""
+                    SELECT
+                      (SELECT count(*) FROM app.player WHERE id = :player),
+                      (SELECT count(*) FROM app.development_goal WHERE id = :goal),
+                      (SELECT count(*) FROM app.user_account WHERE id = :account)
+                """),
+                {
+                    "player": self.other_player,
+                    "goal": other_goal,
+                    "account": self.other_player_account,
+                },
+            ).one()
+        self.assertEqual(tuple(counts), (0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(tuple(target_rows), (0, 0, 0))
+        self.assertEqual(tuple(unrelated), (1, 1, 1))
+
+        pending_backup = self.client_for(self.coach).get(
+            f"/v1/deletions/{requested.json()['id']}"
+        )
+        self.assertEqual(pending_backup.json()["status"], "awaiting_backup")
+        self.assertEqual(pending_backup.json()["failure_code"], "backup_expiry_pending")
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("""
+                    UPDATE app.deletion_manifest SET backup_expires_at = now()
+                    WHERE id = :manifest
+                """),
+                {"manifest": requested.json()["id"]},
+            )
+        completed = self.client_for(self.coach).post(
+            f"/v1/deletions/{requested.json()['id']}/backup-expired"
+        )
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.assertEqual(completed.json()["status"], "completed")
+        repeated = self.client_for(self.coach).post(
+            f"/v1/deletions/{requested.json()['id']}/backup-expired"
+        )
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+
+    def test_first_party_events_cover_review_publish_open_without_content(self) -> None:
+        review = self.client_for(self.coach).get(
+            f"/v1/videos/{self.video}/observations",
+            params={"player_id": str(self.player)},
+        )
+        self.assertEqual(review.status_code, 200, review.text)
+        first = self.publish([0, 1, 2]).json()
+        self.finish(first["id"])
+        self.evidence()
+
+        with self.operator.connect() as connection:
+            rows = connection.execute(
+                text("""
+                    SELECT event_type, dedupe_key
+                    FROM app.product_event
+                    WHERE team_id = :team
+                """),
+                {"team": self.team},
+            ).all()
+        event_types = {str(row.event_type) for row in rows}
+        self.assertTrue(
+            {
+                "review_started",
+                "clip_marked",
+                "draft_saved",
+                "publish_requested",
+                "clip_ready",
+                "player_opened",
+            }.issubset(event_types)
+        )
+        serialized = " ".join(
+            f"{row.event_type} {row.dedupe_key}" for row in rows
+        ).lower()
+        for forbidden in (
+            "comment",
+            "reflection",
+            "filename",
+            "signed",
+            "token",
+            "i checked",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_deleted_reflection_is_suppressed_after_backup_restore(self) -> None:
+        first = self.publish([0, 1, 2]).json()
+        self.finish(first["id"])
+        saved = self.save_reflection(
+            self.judgments[0]["id"], "I checked the space before the pass."
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        reflection = cast("dict[str, Any]", saved.json())
+        removed = self.delete_reflection(self.judgments[0]["id"], reflection)
+        self.assertEqual(removed.status_code, 204, removed.text)
+
+        with self.admin.connect() as connection:
+            manifest = connection.execute(
+                text("""
+                    SELECT id, team_id, reflection_id, requested_at,
+                           backup_expires_at
+                    FROM app.deletion_manifest
+                    WHERE kind = 'reflection_erasure'
+                      AND reflection_id = :reflection
+                """),
+                {"reflection": reflection["id"]},
+            ).one()
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(
+                text("""
+                    INSERT INTO app.player_reflection (
+                        id, judgment_id, player_id, text,
+                        judgment_version_at_save, etag
+                    ) VALUES (
+                        :id, :judgment, :player, :body, :version, :etag
+                    )
+                """),
+                {
+                    "id": reflection["id"],
+                    "judgment": self.judgments[0]["id"],
+                    "player": self.player,
+                    "body": "Restored private text must disappear.",
+                    "version": reflection["judgment_version_at_save"],
+                    "etag": reflection["etag"],
+                },
+            )
+        with self.operator.connect() as connection, connection.begin():
+            connection.execute(
+                text("""
+                    SELECT private.replay_deletion_suppression(
+                        :manifest, 'reflection_erasure', :team, :reflection,
+                        :requested, :backup
+                    )
+                """),
+                {
+                    "manifest": manifest.id,
+                    "team": manifest.team_id,
+                    "reflection": manifest.reflection_id,
+                    "requested": manifest.requested_at,
+                    "backup": manifest.backup_expires_at,
+                },
+            )
+        with self.admin.connect() as connection:
+            self.assertEqual(
+                connection.execute(
+                    text("SELECT count(*) FROM app.player_reflection WHERE id = :id"),
+                    {"id": reflection["id"]},
+                ).scalar_one(),
+                0,
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

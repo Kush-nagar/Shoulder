@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import {
   apiWrite,
   type BulkResult,
+  type DeletionStatus,
   fetchTeams,
   type InviteResult,
+  type RetentionStatus,
   type RosterPlayer,
 } from "../../../lib/api";
 import { parseRoster } from "../../../lib/roster";
@@ -173,5 +175,77 @@ export async function invitePlayer(
       reply.status,
       "This player is already linked to an account. Nothing was changed.",
     ),
+  };
+}
+
+export async function confirmRetention(
+  _previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const token = await requireCoach();
+  const current = await team(token);
+  if (!current) return { message: "No team is set up yet." };
+  const backupDays = Number(String(form.get("provider_backup_max_days") ?? ""));
+  if (!Number.isInteger(backupDays) || backupDays < 1 || backupDays > 30)
+    return {
+      message:
+        "Enter the provider’s confirmed backup maximum, from 1 to 30 days.",
+    };
+  const confirmations = {
+    season_cutoff_confirmed: form.get("season_cutoff_confirmed") === "on",
+    provider_backup_expiry_confirmed:
+      form.get("provider_backup_expiry_confirmed") === "on",
+    notice_confirmed: form.get("notice_confirmed") === "on",
+    collateral_deletion_confirmed:
+      form.get("collateral_deletion_confirmed") === "on",
+    operator_confirmed: form.get("operator_confirmed") === "on",
+  };
+  if (!Object.values(confirmations).every(Boolean))
+    return {
+      message: "Confirm every operational requirement before continuing.",
+    };
+  const reply = await apiWrite<RetentionStatus>(
+    token,
+    `/v1/teams/${current.team_id}/retention-confirmation`,
+    "POST",
+    { provider_backup_max_days: backupDays, ...confirmations },
+  );
+  if (reply.status === 200) {
+    revalidatePath("/coach/roster");
+    revalidatePath("/coach/upload");
+    return { message: "Retention and deletion setup confirmed.", ok: true };
+  }
+  return {
+    message:
+      reply.status === 422
+        ? "Check every confirmation and the backup maximum. Nothing was saved."
+        : "Could not confirm the setup. Nothing was saved. Try again.",
+  };
+}
+
+export async function confirmBackupExpiry(
+  _previous: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const token = await requireCoach();
+  const manifestId = String(form.get("manifest_id") ?? "");
+  const reply = await apiWrite<DeletionStatus>(
+    token,
+    `/v1/deletions/${manifestId}/backup-expired`,
+    "POST",
+    {},
+  );
+  if (reply.status === 200) {
+    revalidatePath("/coach/roster");
+    return {
+      message: "Backup expiry confirmed; deletion is complete.",
+      ok: true,
+    };
+  }
+  return {
+    message:
+      reply.problem === "backup-not-expired"
+        ? "The provider’s confirmed backup deadline has not arrived yet."
+        : "Could not confirm backup expiry. Nothing was changed.",
   };
 }

@@ -10,6 +10,7 @@ are derived from the generated `video.id` and a fixed extension allowlist; a
 caller's filename never reaches a key, a path, or a command.
 """
 
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -41,6 +42,8 @@ PART_URL_SECONDS = 900
 GET_URL_SECONDS = 900
 # Player evidence has a tighter residual-access bound than coach playback.
 PLAYER_GET_URL_SECONDS = 300
+DELETION_LEDGER_PREFIX = "deletion-ledger/"
+DELETION_LEDGER_MAX_BYTES = 4096
 
 # Extension -> stored extension and accepted browser content type. The browser
 # MIME is a hint only; `docs/04-api.md` requires probing before trusting it,
@@ -165,6 +168,11 @@ def evidence_key(judgment_id: UUID, version: int) -> str:
     if version < 1:
         raise StorageError("clip version is outside the allowed range")
     return f"clips/{judgment_id}/{version}.mp4"
+
+
+def deletion_ledger_key(manifest_id: UUID) -> str:
+    """Content-free replay marker, addressed only by the manifest UUID."""
+    return f"{DELETION_LEDGER_PREFIX}{manifest_id}.json"
 
 
 def sprite_key(video_id: UUID, sheet: int) -> str:
@@ -321,6 +329,97 @@ def sign_player_get(key: str, seconds: int = PLAYER_GET_URL_SECONDS) -> str:
 def delete_object(key: str) -> None:
     """Delete one exact object. S3 deletion is idempotent for an absent key."""
     _call("delete_object", Bucket=bucket(), Key=key)
+
+
+def write_deletion_suppression(
+    *,
+    manifest_id: UUID,
+    kind: str,
+    team_id: UUID,
+    target_id: UUID | None,
+    requested_at: str,
+    backup_expires_at: str,
+) -> None:
+    """Persist the minimal replay record outside the database backup."""
+    if kind not in {
+        "player_erasure",
+        "season_expiry",
+        "video_source",
+        "video_all",
+        "export_cleanup",
+        "reflection_erasure",
+    }:
+        raise StorageError("unsupported deletion suppression kind")
+    body = json.dumps(
+        {
+            "backup_expires_at": backup_expires_at,
+            "kind": kind,
+            "manifest_id": str(manifest_id),
+            "requested_at": requested_at,
+            "target_id": str(target_id) if target_id is not None else None,
+            "team_id": str(team_id),
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    if len(body) > DELETION_LEDGER_MAX_BYTES:  # pragma: no cover - fixed shape
+        raise StorageError("deletion suppression record is too large")
+    _call(
+        "put_object",
+        Bucket=bucket(),
+        Key=deletion_ledger_key(manifest_id),
+        Body=body,
+        ContentType="application/json",
+    )
+
+
+def list_deletion_suppressions() -> list[str]:
+    """List replay records without logging or returning provider metadata."""
+    keys: list[str] = []
+    continuation: str | None = None
+    while True:
+        arguments: dict[str, Any] = {
+            "Bucket": bucket(),
+            "Prefix": DELETION_LEDGER_PREFIX,
+            "MaxKeys": 1000,
+        }
+        if continuation is not None:
+            arguments["ContinuationToken"] = continuation
+        response = _call("list_objects_v2", **arguments)
+        keys.extend(
+            str(item["Key"])
+            for item in response.get("Contents", [])
+            if str(item.get("Key", "")).startswith(DELETION_LEDGER_PREFIX)
+        )
+        if not response.get("IsTruncated"):
+            return keys
+        continuation = str(response["NextContinuationToken"])
+
+
+def read_deletion_suppression(key: str) -> dict[str, Any]:
+    """Read one bounded ledger record for restore replay."""
+    if not key.startswith(DELETION_LEDGER_PREFIX):
+        raise StorageError("deletion suppression key is invalid")
+    response = _call("get_object", Bucket=bucket(), Key=key)
+    if int(response.get("ContentLength", DELETION_LEDGER_MAX_BYTES + 1)) > (
+        DELETION_LEDGER_MAX_BYTES
+    ):
+        response["Body"].close()
+        raise StorageError("deletion suppression record is too large")
+    body = response["Body"]
+    try:
+        data = body.read(DELETION_LEDGER_MAX_BYTES + 1)
+    finally:
+        body.close()
+    if len(data) > DELETION_LEDGER_MAX_BYTES:
+        raise StorageError("deletion suppression record is too large")
+    try:
+        parsed = json.loads(data)
+    except (TypeError, ValueError):
+        raise StorageError("deletion suppression record is invalid") from None
+    if not isinstance(parsed, dict):
+        raise StorageError("deletion suppression record is invalid")
+    return parsed
 
 
 def list_parts(key: str, upload_id: str) -> list[StoredPart]:
@@ -488,7 +587,9 @@ def head_object(key: str) -> int | None:
         response = getattr(get_client(), "head_object")(Bucket=bucket(), Key=key)
     except ClientError as error:
         status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        if status in (403, 404):
+        # A permission failure cannot prove absence. Treating it as deletion
+        # would allow a manifest to complete while the object still exists.
+        if status == 404:
             return None
         code = error_code(error)
         logger.warning("storage head_object failed: %s", code)

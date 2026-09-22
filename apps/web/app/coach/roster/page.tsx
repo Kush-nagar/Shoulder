@@ -1,13 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { fetchRoster, fetchTeams, type RosterPlayer } from "../../../lib/api";
+import {
+  fetchRetentionStatus,
+  fetchRoster,
+  fetchTeamDeletions,
+  fetchTeams,
+  type RosterPlayer,
+} from "../../../lib/api";
 import { requireCoach } from "../session";
 import { PageHeader } from "../shell";
 import { componentTitle, focus, metadata, sectionTitle, tertiary } from "../ui";
 import { AddPlayer } from "./add-player";
 import { ArchivePlayer } from "./archive-player";
 import { BulkPaste } from "./bulk-paste";
+import { DeletionRecords } from "./deletion-records";
+import { RetentionSetup } from "./retention-setup";
 import { RosterSearch } from "./search";
 
 export const dynamic = "force-dynamic";
@@ -157,10 +165,15 @@ export default async function Roster() {
   }
   // Archiving is soft, and this screen offers the archived rows as a section,
   // so they must be requested explicitly.
-  const roster = await fetchRoster(token, team.team_id, true);
+  const [roster, retention, deletions] = await Promise.all([
+    fetchRoster(token, team.team_id, true),
+    fetchRetentionStatus(token, team.team_id),
+    fetchTeamDeletions(token, team.team_id),
+  ]);
   if (roster === null) notFound();
   const players = roster.filter((player) => player.active);
   const archived = roster.filter((player) => !player.active);
+  const onboardingReady = retention?.confirmed === true;
 
   // One tree for both states. Every client form keeps the same slot among its
   // siblings, so saving the first player neither remounts a form nor hides it
@@ -174,6 +187,14 @@ export default async function Roster() {
         description={empty ? undefined : `${players.length} on the roster`}
       />
       <Body>
+        {retention === null ? (
+          <p role="alert" className="mb-6 text-[15px] leading-[1.5] text-error">
+            Retention setup could not be loaded. Real data remains unavailable
+            until it can be verified.
+          </p>
+        ) : !retention.confirmed ? (
+          <RetentionSetup seasonEndAt={retention.season_end_at} />
+        ) : null}
         {empty ? (
           <div>
             <h2 className={sectionTitle}>Build your roster</h2>
@@ -187,12 +208,18 @@ export default async function Roster() {
         ) : (
           table
         )}
-        <AddPlayer />
-        <div className="mt-6 border-t border-line pt-4">
-          <BulkPaste
-            heading={empty ? "Add several at once" : "Add several more at once"}
-          />
-        </div>
+        {onboardingReady ? (
+          <>
+            <AddPlayer />
+            <div className="mt-6 border-t border-line pt-4">
+              <BulkPaste
+                heading={
+                  empty ? "Add several at once" : "Add several more at once"
+                }
+              />
+            </div>
+          </>
+        ) : null}
         {archived.length > 0 ? (
           <details className="mt-6 border-t border-line pt-4">
             <summary
@@ -218,6 +245,20 @@ export default async function Roster() {
             </p>
           </details>
         ) : null}
+        {deletions === null ? (
+          <p role="alert" className="mt-8 text-[15px] leading-[1.5] text-error">
+            Deletion operations could not be loaded. No completion is being
+            claimed.
+          </p>
+        ) : (
+          <DeletionRecords
+            records={deletions.map((record) => ({
+              ...record,
+              backup_confirmation_due:
+                Date.parse(record.backup_expires_at) <= Date.now(),
+            }))}
+          />
+        )}
       </Body>
     </>
   );

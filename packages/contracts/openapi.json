@@ -232,6 +232,118 @@
         "title": "CoachEvidenceSet",
         "type": "object"
       },
+      "DeletionStatus": {
+        "properties": {
+          "active_cleanup_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Cleanup Verified At"
+          },
+          "backup_expires_at": {
+            "format": "date-time",
+            "title": "Backup Expires At",
+            "type": "string"
+          },
+          "backup_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Verified At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "video_source",
+              "video_all",
+              "export_cleanup",
+              "season_expiry",
+              "player_erasure",
+              "reflection_erasure"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "other_player_clip_count": {
+            "title": "Other Player Clip Count",
+            "type": "integer"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "awaiting_backup",
+              "completed",
+              "unresolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "video_count": {
+            "title": "Video Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "requested_at",
+          "active_cleanup_verified_at",
+          "backup_expires_at",
+          "backup_verified_at",
+          "completed_at",
+          "failure_code",
+          "video_count",
+          "other_player_clip_count"
+        ],
+        "title": "DeletionStatus",
+        "type": "object"
+      },
       "EvidenceDot": {
         "properties": {
           "judgment_id": {
@@ -1333,6 +1445,104 @@
         "title": "PlayerCreate",
         "type": "object"
       },
+      "PlayerErasureImpact": {
+        "properties": {
+          "can_request": {
+            "title": "Can Request",
+            "type": "boolean"
+          },
+          "challenge": {
+            "title": "Challenge",
+            "type": "string"
+          },
+          "other_player_clip_count": {
+            "title": "Other Player Clip Count",
+            "type": "integer"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "remaining_goal_count": {
+            "title": "Remaining Goal Count",
+            "type": "integer"
+          },
+          "remaining_linked_account_count": {
+            "title": "Remaining Linked Account Count",
+            "type": "integer"
+          },
+          "remaining_player_count": {
+            "title": "Remaining Player Count",
+            "type": "integer"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          },
+          "video_count": {
+            "title": "Video Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id",
+          "team_id",
+          "video_count",
+          "other_player_clip_count",
+          "remaining_player_count",
+          "remaining_goal_count",
+          "remaining_linked_account_count",
+          "can_request",
+          "challenge"
+        ],
+        "title": "PlayerErasureImpact",
+        "type": "object"
+      },
+      "PlayerErasureRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Challenge",
+            "type": "string"
+          },
+          "collateral_deletion_confirmed": {
+            "title": "Collateral Deletion Confirmed",
+            "type": "boolean"
+          },
+          "expected_other_player_clip_count": {
+            "minimum": 0.0,
+            "title": "Expected Other Player Clip Count",
+            "type": "integer"
+          },
+          "expected_video_count": {
+            "minimum": 0.0,
+            "title": "Expected Video Count",
+            "type": "integer"
+          },
+          "notice_confirmed": {
+            "title": "Notice Confirmed",
+            "type": "boolean"
+          },
+          "unrelated_data_reviewed": {
+            "title": "Unrelated Data Reviewed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expected_video_count",
+          "expected_other_player_clip_count",
+          "challenge",
+          "collateral_deletion_confirmed",
+          "notice_confirmed",
+          "unrelated_data_reviewed"
+        ],
+        "title": "PlayerErasureRequest",
+        "type": "object"
+      },
       "PlayerPatch": {
         "description": "Only the fields present in the request are written.",
         "properties": {
@@ -1529,6 +1739,119 @@
           "request_created_at"
         ],
         "title": "ReflectionSaveRequest",
+        "type": "object"
+      },
+      "RetentionConfirmationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "collateral_deletion_confirmed": {
+            "title": "Collateral Deletion Confirmed",
+            "type": "boolean"
+          },
+          "notice_confirmed": {
+            "title": "Notice Confirmed",
+            "type": "boolean"
+          },
+          "operator_confirmed": {
+            "title": "Operator Confirmed",
+            "type": "boolean"
+          },
+          "provider_backup_expiry_confirmed": {
+            "title": "Provider Backup Expiry Confirmed",
+            "type": "boolean"
+          },
+          "provider_backup_max_days": {
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Provider Backup Max Days",
+            "type": "integer"
+          },
+          "season_cutoff_confirmed": {
+            "title": "Season Cutoff Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider_backup_max_days",
+          "season_cutoff_confirmed",
+          "provider_backup_expiry_confirmed",
+          "notice_confirmed",
+          "collateral_deletion_confirmed",
+          "operator_confirmed"
+        ],
+        "title": "RetentionConfirmationRequest",
+        "type": "object"
+      },
+      "RetentionStatus": {
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "confirmed_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed By"
+          },
+          "operator_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator User Id"
+          },
+          "provider_backup_max_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Backup Max Days"
+          },
+          "season_end_at": {
+            "format": "date-time",
+            "title": "Season End At",
+            "type": "string"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "confirmed",
+          "season_end_at"
+        ],
+        "title": "RetentionStatus",
         "type": "object"
       },
       "ReviewPublication": {
@@ -2564,6 +2887,96 @@
         "summary": "Identity"
       }
     },
+    "/v1/deletions/{manifest_id}": {
+      "get": {
+        "operationId": "read_deletion_status_v1_deletions__manifest_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Deletion Status"
+      }
+    },
+    "/v1/deletions/{manifest_id}/backup-expired": {
+      "post": {
+        "operationId": "record_backup_expiry_v1_deletions__manifest_id__backup_expired_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Backup Expiry"
+      }
+    },
     "/v1/games": {
       "post": {
         "operationId": "create_game_v1_games_post",
@@ -3407,6 +3820,122 @@
         "summary": "Archive Player"
       }
     },
+    "/v1/players/{player_id}/erasure": {
+      "post": {
+        "operationId": "start_player_erasure_v1_players__player_id__erasure_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayerErasureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Player Erasure"
+      }
+    },
+    "/v1/players/{player_id}/erasure-impact": {
+      "get": {
+        "operationId": "read_erasure_impact_v1_players__player_id__erasure_impact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerErasureImpact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Erasure Impact"
+      }
+    },
     "/v1/players/{player_id}/goals": {
       "get": {
         "description": "A coach reads their player's goals; a player reads only their own.",
@@ -3972,6 +4501,55 @@
         "summary": "Bootstrap Team"
       }
     },
+    "/v1/teams/{team_id}/deletions": {
+      "get": {
+        "operationId": "read_team_deletions_v1_teams__team_id__deletions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeletionStatus"
+                  },
+                  "title": "Response Read Team Deletions V1 Teams  Team Id  Deletions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Team Deletions"
+      }
+    },
     "/v1/teams/{team_id}/games": {
       "get": {
         "operationId": "list_games_v1_teams__team_id__games_get",
@@ -4210,6 +4788,106 @@
           }
         ],
         "summary": "Create Players Bulk"
+      }
+    },
+    "/v1/teams/{team_id}/retention-confirmation": {
+      "post": {
+        "operationId": "record_retention_confirmation_v1_teams__team_id__retention_confirmation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionConfirmationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Retention Confirmation"
+      }
+    },
+    "/v1/teams/{team_id}/retention-status": {
+      "get": {
+        "operationId": "read_retention_status_v1_teams__team_id__retention_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Retention Status"
       }
     },
     "/v1/videos/{video_id}": {

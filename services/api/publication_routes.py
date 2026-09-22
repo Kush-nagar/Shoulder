@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from services.api import storage
@@ -164,6 +165,10 @@ def player_evidence(
     try:
         with user_transaction(user_id) as connection:
             rows = evidence_sets(connection, goal_id)
+            connection.execute(
+                text("SELECT private.record_player_opened(:goal_id)"),
+                {"goal_id": str(goal_id)},
+            )
     except DBAPIError:
         raise unavailable() from None
     grouped: list[EvidenceSet] = []

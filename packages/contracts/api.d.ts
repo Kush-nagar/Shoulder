@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/deletions/{manifest_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Deletion Status */
+        get: operations["read_deletion_status_v1_deletions__manifest_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/deletions/{manifest_id}/backup-expired": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Backup Expiry */
+        post: operations["record_backup_expiry_v1_deletions__manifest_id__backup_expired_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/games": {
         parameters: {
             query?: never;
@@ -325,6 +359,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/players/{player_id}/erasure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Player Erasure */
+        post: operations["start_player_erasure_v1_players__player_id__erasure_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/players/{player_id}/erasure-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Erasure Impact */
+        get: operations["read_erasure_impact_v1_players__player_id__erasure_impact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/players/{player_id}/goals": {
         parameters: {
             query?: never;
@@ -489,6 +557,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Team Deletions */
+        get: operations["read_team_deletions_v1_teams__team_id__deletions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/games": {
         parameters: {
             query?: never;
@@ -541,6 +626,40 @@ export interface paths {
          * @description Preview or commit a pasted roster. A partial write never happens.
          */
         post: operations["create_players_bulk_v1_teams__team_id__players_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/retention-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Retention Confirmation */
+        post: operations["record_retention_confirmation_v1_teams__team_id__retention_confirmation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/retention-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Retention Status */
+        get: operations["read_retention_status_v1_teams__team_id__retention_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -822,6 +941,46 @@ export interface components {
              * Format: date-time
              */
             published_at: string;
+        };
+        /** DeletionStatus */
+        DeletionStatus: {
+            /** Active Cleanup Verified At */
+            active_cleanup_verified_at: string | null;
+            /**
+             * Backup Expires At
+             * Format: date-time
+             */
+            backup_expires_at: string;
+            /** Backup Verified At */
+            backup_verified_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Failure Code */
+            failure_code: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video_source" | "video_all" | "export_cleanup" | "season_expiry" | "player_erasure" | "reflection_erasure";
+            /** Other Player Clip Count */
+            other_player_clip_count: number;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "awaiting_backup" | "completed" | "unresolved";
+            /** Video Count */
+            video_count: number;
         };
         /** EvidenceDot */
         EvidenceDot: {
@@ -1307,6 +1466,48 @@ export interface components {
             /** Position */
             position?: string | null;
         };
+        /** PlayerErasureImpact */
+        PlayerErasureImpact: {
+            /** Can Request */
+            can_request: boolean;
+            /** Challenge */
+            challenge: string;
+            /** Other Player Clip Count */
+            other_player_clip_count: number;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Remaining Goal Count */
+            remaining_goal_count: number;
+            /** Remaining Linked Account Count */
+            remaining_linked_account_count: number;
+            /** Remaining Player Count */
+            remaining_player_count: number;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+            /** Video Count */
+            video_count: number;
+        };
+        /** PlayerErasureRequest */
+        PlayerErasureRequest: {
+            /** Challenge */
+            challenge: string;
+            /** Collateral Deletion Confirmed */
+            collateral_deletion_confirmed: boolean;
+            /** Expected Other Player Clip Count */
+            expected_other_player_clip_count: number;
+            /** Expected Video Count */
+            expected_video_count: number;
+            /** Notice Confirmed */
+            notice_confirmed: boolean;
+            /** Unrelated Data Reviewed */
+            unrelated_data_reviewed: boolean;
+        };
         /**
          * PlayerPatch
          * @description Only the fields present in the request are written.
@@ -1393,6 +1594,44 @@ export interface components {
             request_created_at: string;
             /** Text */
             text: string;
+        };
+        /** RetentionConfirmationRequest */
+        RetentionConfirmationRequest: {
+            /** Collateral Deletion Confirmed */
+            collateral_deletion_confirmed: boolean;
+            /** Notice Confirmed */
+            notice_confirmed: boolean;
+            /** Operator Confirmed */
+            operator_confirmed: boolean;
+            /** Provider Backup Expiry Confirmed */
+            provider_backup_expiry_confirmed: boolean;
+            /** Provider Backup Max Days */
+            provider_backup_max_days: number;
+            /** Season Cutoff Confirmed */
+            season_cutoff_confirmed: boolean;
+        };
+        /** RetentionStatus */
+        RetentionStatus: {
+            /** Confirmed */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Operator User Id */
+            operator_user_id?: string | null;
+            /** Provider Backup Max Days */
+            provider_backup_max_days?: number | null;
+            /**
+             * Season End At
+             * Format: date-time
+             */
+            season_end_at: string;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
         };
         /** ReviewPublication */
         ReviewPublication: {
@@ -1851,6 +2090,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthIdentity"];
+                };
+            };
+        };
+    };
+    read_deletion_status_v1_deletions__manifest_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                manifest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_backup_expiry_v1_deletions__manifest_id__backup_expired_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                manifest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2399,6 +2700,74 @@ export interface operations {
             };
         };
     };
+    start_player_erasure_v1_players__player_id__erasure_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlayerErasureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_erasure_impact_v1_players__player_id__erasure_impact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerErasureImpact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_goals_v1_players__player_id__goals_get: {
         parameters: {
             query?: never;
@@ -2749,6 +3118,37 @@ export interface operations {
             };
         };
     };
+    read_team_deletions_v1_teams__team_id__deletions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionStatus"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_games_v1_teams__team_id__games_get: {
         parameters: {
             query?: {
@@ -2890,6 +3290,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkResult"];
+                };
+            };
+        };
+    };
+    record_retention_confirmation_v1_teams__team_id__retention_confirmation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetentionConfirmationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_retention_status_v1_teams__team_id__retention_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -15,7 +15,7 @@ client.
 """
 
 import base64
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -28,6 +28,7 @@ from services.api import storage
 from services.api.auth import authenticated_identity
 from services.api.db import user_transaction
 from services.api.problems import Problem
+from services.api.retention_service import require_real_data_onboarding_ready
 from services.api.routes import (
     PRIVATE,
     load_team,
@@ -61,7 +62,7 @@ GAME_RETURNING = "id, team_id, opponent, played_at, kind, notes, created_at"
 VIDEO_COLUMNS = """
     v.id, v.game_id, v.original_filename, v.content_type, v.size_bytes,
     v.status, v.duration_ms, v.width, v.height, v.created_at,
-    v.upload_completed_at, v.source_expires_at, v.ready_at,
+    v.upload_completed_at, v.source_expires_at, v.derivatives_expires_at, v.ready_at,
     (SELECT count(*) FROM app.video_upload_part p WHERE p.video_id = v.id)
         AS uploaded_parts
 """
@@ -76,6 +77,7 @@ GAMES_PAGE_LIMIT = 50
 # derivatives expire with the season, and a retry never extends either.
 SOURCE_RETENTION_DAYS = 90
 DERIVATIVE_RETENTION_DAYS = 365
+UPLOAD_RETENTION_DAYS = 7
 # `docs/02-architecture.md`: completion enqueues transcode and thumbnail work.
 # The keys are deterministic, so a repeated completion collapses to one job.
 JOB_KINDS = ("transcode", "thumbnail")
@@ -208,6 +210,7 @@ def create_game(
     try:
         with user_transaction(user_id) as connection:
             require_coach(load_team(connection, request.team_id))
+            require_real_data_onboarding_ready(connection, request.team_id)
             row = connection.execute(
                 text(f"""
                     INSERT INTO app.game
@@ -327,7 +330,8 @@ def create_upload(
     key: str | None = None
     try:
         with user_transaction(user_id) as connection:
-            require_coach(load_game(connection, game_id))
+            game = require_coach(load_game(connection, game_id))
+            require_real_data_onboarding_ready(connection, game.team_id)
             # The id is generated first so the key depends only on it; the row
             # is written in the same statement that reserves the id.
             video_id = connection.execute(text("SELECT gen_random_uuid()")).scalar_one()
@@ -387,8 +391,7 @@ def sign_upload_parts(
     """Short-lived PUT URLs, each naming one object, one verb, and one part."""
     with user_transaction(user_id) as connection:
         video = require_coach(load_video(connection, video_id))
-    if video.status != "uploading" or not video.multipart_upload_id:
-        raise Problem(409, "That upload is no longer open.", "upload-not-in-progress")
+    require_upload_open(video)
     total = storage.part_count(video.size_bytes)
     requested = sorted(set(request.part_numbers))
     if any(number < 1 or number > total for number in requested):
@@ -484,6 +487,7 @@ def read_upload_state(
             video = require_coach(load_video(connection, video_id))
             assembled = False
             if video.status == "uploading" and video.multipart_upload_id:
+                require_upload_open(video)
                 assembled, stored = survey(video)
                 if not assembled:
                     reconcile_parts(connection, video, stored)
@@ -546,10 +550,7 @@ def complete_upload(
             video = require_coach(load_video(connection, video_id))
             if video.status == "uploaded":
                 return completed_response(video)
-            if video.status != "uploading" or not video.multipart_upload_id:
-                raise Problem(
-                    409, "That upload can no longer be completed.", "upload-not-open"
-                )
+            require_upload_open(video, conflict_code="upload-not-open")
             assembled, listed = survey(video)
             stored = [] if assembled else reconcile_parts(connection, video, listed)
             total = storage.part_count(video.size_bytes)
@@ -572,12 +573,14 @@ def complete_upload(
         with user_transaction(user_id) as connection:
             # Authorized again: a membership can be revoked while storage works.
             video = require_coach(load_video(connection, video_id))
+            if video.status == "uploading":
+                require_upload_open(video)
             if size != declared:
                 # Committed before the 409 is raised. Raising inside the
                 # transaction would roll the terminal state back, leaving the
                 # row `uploading` forever with an assembled object behind it and
                 # no `first_terminal_failure_at` for the Task 22 sweeper.
-                mark_failed(connection, video_id)
+                mark_failed(connection, video_id, "rejected")
                 rejected = True
             else:
                 rejected = False
@@ -680,22 +683,30 @@ def completed_response(video: Any) -> UploadCompleted:
     )
 
 
-def mark_failed(connection: Connection, video_id: UUID) -> None:
+def mark_failed(
+    connection: Connection, video_id: UUID, failure_kind: str = "processing"
+) -> None:
     """Terminal state for an attempt that produced no usable object.
 
     `first_terminal_failure_at` is set once with `coalesce`, never reset: it is
     the deadline `docs/10-security-privacy.md` measures cleanup from.
     """
+    if failure_kind not in {"abandoned", "rejected", "processing"}:
+        raise ValueError("unsupported video failure kind")
     connection.execute(
         text("""
             UPDATE app.video SET
                 status = 'failed',
                 multipart_upload_id = NULL,
                 first_terminal_failure_at =
-                    coalesce(first_terminal_failure_at, now())
+                    coalesce(first_terminal_failure_at, now()),
+                abandoned_at = CASE WHEN :failure_kind = 'abandoned'
+                    THEN coalesce(abandoned_at, now()) ELSE abandoned_at END,
+                rejected_at = CASE WHEN :failure_kind = 'rejected'
+                    THEN coalesce(rejected_at, now()) ELSE rejected_at END
             WHERE id = :video_id AND status = 'uploading'
         """),
-        {"video_id": str(video_id)},
+        {"video_id": str(video_id), "failure_kind": failure_kind},
     )
     connection.execute(
         text("DELETE FROM app.video_upload_part WHERE video_id = :video_id"),
@@ -729,7 +740,7 @@ def abort_upload(
                 )
             if video.status == "uploading" and video.multipart_upload_id:
                 storage.abort_multipart(video.original_key, video.multipart_upload_id)
-            mark_failed(connection, video_id)
+            mark_failed(connection, video_id, "abandoned")
             row = load_video(connection, video_id)
     except storage.StorageError:
         raise storage_unavailable() from None
@@ -760,6 +771,30 @@ def require_ready(video: Any) -> Any:
             409,
             "Shoulder is still preparing this video.",
             "video-not-ready",
+        )
+    if (
+        video.derivatives_expires_at is None
+        or video.derivatives_expires_at <= datetime.now(UTC)
+    ):
+        raise Problem(
+            410,
+            "This match video has reached its retention deadline.",
+            "video-expired",
+        )
+    return video
+
+
+def require_upload_open(
+    video: Any, *, conflict_code: str = "upload-not-in-progress"
+) -> Any:
+    """Enforce the initiation-based incomplete-upload deadline at access time."""
+    if video.status != "uploading" or not video.multipart_upload_id:
+        raise Problem(409, "That upload is no longer open.", conflict_code)
+    if video.created_at + timedelta(days=UPLOAD_RETENTION_DAYS) <= datetime.now(UTC):
+        raise Problem(
+            410,
+            "That unfinished upload has reached its retention deadline.",
+            "upload-expired",
         )
     return video
 
