@@ -6,7 +6,8 @@
     3,
     4,
     5,
-    6
+    6,
+    7
   ],
   "completed_tasks": [
     1,
@@ -29,7 +30,8 @@
     18,
     19,
     20,
-    21
+    21,
+    22
   ],
   "evidence": {
     "1": "docs/task-1-verification.md (PR #1)",
@@ -46,6 +48,7 @@
     "2": "docs/task-2-verification.md",
     "20": "merged branch block-06-t20-email-delivery (pull request for the canonical task branch was merged into main)",
     "21": "merged branch block-06-t21-development-timeline (pull request for the canonical task branch was merged into main)",
+    "22": "merged branch block-07-t22-retention-deletion-and-first-party-produ (pull request for the canonical task branch was merged into main)",
     "3": "docs/task-3-verification.md (PR #3)",
     "4": "docs/task-4-verification.md (PR #5)",
     "5": "docs/task-5-verification.md (PR #6)",
@@ -59,5 +62,5 @@
     "real_use_gate": false
   },
   "last_verified_main": "dab524f9c75c3e8dfac430422f717e57ef61985f",
-  "updated_at": "2026-09-20T21:06:06+00:00"
+  "updated_at": "2026-09-22T02:51:25+00:00"
 }
