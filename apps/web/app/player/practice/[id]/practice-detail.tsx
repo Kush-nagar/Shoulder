@@ -9,21 +9,9 @@ import type {
   PracticeVideoDetail,
 } from "../types";
 
-// W2 owns ../pose/analyze.ts. The specifier is a template so this file
-// typechecks before that module lands; swap to a static
-// `import("../pose/analyze")` once it does.
-type Analyze = (
-  video: HTMLVideoElement,
-  canvas: HTMLCanvasElement | null,
-  onProgress?: (fraction: number) => void,
-) => Promise<PracticeFeatures>;
-
-async function loadAnalyzer(): Promise<Analyze> {
-  const name = "analyze";
-  const loaded = (await import(`../pose/${name}`)) as {
-    analyzePractice: Analyze;
-  };
-  return loaded.analyzePractice;
+// Loaded on demand so MediaPipe stays out of the page bundle.
+async function loadAnalyzer() {
+  return (await import("../pose/analyze")).analyzePractice;
 }
 
 type Analysis =
