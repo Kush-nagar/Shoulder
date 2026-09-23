@@ -3,6 +3,7 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from services.api.demo_routes import router as demo_router
 from services.api.judgment_routes import router as judgment_router
 from services.api.observation_routes import router as observation_router
 from services.api.practice_routes import router as practice_router
@@ -22,6 +23,7 @@ app.include_router(publication_router)
 app.include_router(reflection_router)
 app.include_router(retention_router)
 app.include_router(practice_router)
+app.include_router(demo_router)
 install_problem_handlers(app)
 
 

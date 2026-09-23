@@ -2,7 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
-import { fetchMe } from "../../lib/api";
+import { fetchMe, joinDemo } from "../../lib/api";
 import { verifiedRedirectPath } from "../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../lib/auth/server";
 
@@ -17,7 +17,10 @@ export const playerSession = cache(async () => {
     token = null;
   }
   if (!token) return null;
-  const me = await fetchMe(token);
+  let me = await fetchMe(token);
+  if (me && !me.roles.length && !me.player && (await joinDemo(token))) {
+    me = await fetchMe(token);
+  }
   if (!me?.roles.includes("player") || !me.player) {
     return { token, player: null };
   }

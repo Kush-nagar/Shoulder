@@ -338,6 +338,8 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "deletion_manifest_status",
     "team_deletion_statuses",
     "confirm_manifest_backup_expired",
+    # 0015 (ADR 0021): public-demo self-join, bounded to age_group 'DEMO'.
+    "demo_join",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.

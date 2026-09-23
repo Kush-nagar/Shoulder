@@ -432,6 +432,20 @@
         "title": "DeletionStatus",
         "type": "object"
       },
+      "DemoJoin": {
+        "properties": {
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player_id"
+        ],
+        "title": "DemoJoin",
+        "type": "object"
+      },
       "Drill": {
         "additionalProperties": false,
         "properties": {
@@ -3484,6 +3498,29 @@
           }
         ],
         "summary": "Record Backup Expiry"
+      }
+    },
+    "/v1/demo/join": {
+      "post": {
+        "operationId": "join_demo_v1_demo_join_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoJoin"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Join Demo"
       }
     },
     "/v1/games": {
