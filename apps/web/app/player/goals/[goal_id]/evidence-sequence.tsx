@@ -297,13 +297,13 @@ export function EvidenceSequence({
       >
         Back to your clips
       </Link>
-      <header className="mt-5 border-l-2 border-action pl-4">
-        <p className="text-[14px] font-semibold leading-[1.35] text-muted">
+      <header className="mt-4 rounded-[14px] bg-ink px-5 py-5 text-paper">
+        <p className="text-[14px] font-semibold leading-[1.35] text-paper/75">
           What you’re working on
         </p>
         <h1
           id="goal-title"
-          className="mt-2 text-[26px] font-semibold leading-[1.15]"
+          className="mt-2 text-[24px] font-semibold leading-[1.2] text-balance"
         >
           {goalTitle}
         </h1>
@@ -365,12 +365,12 @@ export function EvidenceSequence({
           </div>
         ) : null}
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted tabular-nums">
           <span>
             {selectedSet.game_label} · Shared{" "}
             {sharedDate(selectedSet.published_at)}
           </span>
-          <span aria-live="polite">
+          <span aria-live="polite" className="font-semibold text-ink-2">
             Clip {clipIndex + 1} of {selectedSet.items.length}
           </span>
         </div>
