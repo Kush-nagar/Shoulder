@@ -197,8 +197,40 @@ def retention_sweep_job(
             text("SELECT private.prepare_retention_sweep(:job_id, :worker_id)"),
             {"job_id": str(job.id), "worker_id": job.locked_by},
         )
+    # After the coach sweep, so a practice storage failure cannot delay it.
+    purge_practice_videos(job, keep_going)
     if not keep_going(1.0):
         raise Cancelled
+
+
+def purge_practice_videos(
+    job: jobs.Job, keep_going: Callable[[float | None], bool]
+) -> int:
+    """Delete expired player practice objects, verify absence, then rows."""
+    with jobs.transaction() as connection:
+        expired = connection.execute(
+            text(
+                "SELECT id, object_key FROM private.expired_practice_videos("
+                ":job_id, :worker_id)"
+            ),
+            {"job_id": str(job.id), "worker_id": job.locked_by},
+        ).all()
+    for row in expired:
+        if not keep_going(None):
+            raise Cancelled
+        try:
+            storage.delete_object(row.object_key)
+            if storage.head_object(row.object_key) is not None:
+                raise RetentionError("practice object absence was not verified")
+        except Exception:
+            # The row stays, so the next hourly sweep retries this object.
+            raise RetentionError("practice object deletion failed") from None
+        with jobs.transaction() as connection:
+            connection.execute(
+                text("SELECT private.purge_practice_video(:job_id, :worker_id, :id)"),
+                {"job_id": str(job.id), "worker_id": job.locked_by, "id": str(row.id)},
+            )
+    return len(expired)
 
 
 def _manifest_objects(job: jobs.Job) -> tuple[UUID, list[Any]]:

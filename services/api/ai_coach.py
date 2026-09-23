@@ -14,8 +14,8 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from services.api.practice_schemas import AiCoachResult, Drill, PracticeFeatures
 from services.api.problems import Problem
+from services.api.schemas import AiCoachResult, Drill, PracticeFeatures
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "deepseek/deepseek-chat"

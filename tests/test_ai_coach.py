@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from services.api import ai_coach
 from services.api.ai_coach import AiCoachError, generate_feedback
-from services.api.practice_schemas import PracticeFeatures
+from services.api.schemas import PracticeFeatures
 
 KEY = "sk-test-not-a-real-key"
 FEATURES = PracticeFeatures.model_validate(

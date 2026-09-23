@@ -729,3 +729,114 @@ class DeletionStatus(BaseModel):
     failure_code: str | None
     video_count: int
     other_player_clip_count: int
+
+
+# Block 08P (ADR 0021): player practice videos and AI coach feedback.
+
+PracticeContentType = Literal["video/mp4", "video/quicktime", "video/webm"]
+PracticeStatus = Literal["uploading", "ready", "deleted"]
+Angle = Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)]
+
+
+class PracticeVideoCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: PracticeContentType
+    size_bytes: int = Field(ge=1, le=524288000)
+    title: str | None = Field(default=None, max_length=80)
+
+
+class PracticeUploadSession(BaseModel):
+    """One presigned PUT; the browser must send exactly `content_type`."""
+
+    id: UUID
+    upload_url: str
+    content_type: PracticeContentType
+    expires_in_seconds: int
+
+
+class PracticeVideoComplete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int | None = Field(default=None, ge=1, le=600000)
+
+
+class PracticeVideo(BaseModel):
+    id: UUID
+    status: PracticeStatus
+    content_type: PracticeContentType
+    size_bytes: int
+    duration_ms: int | None
+    title: str | None
+    created_at: datetime
+    upload_completed_at: datetime | None
+    expires_at: datetime | None
+
+
+class PracticeVideoDetail(PracticeVideo):
+    # Short-lived, object-specific; null until the upload is ready.
+    playback_url: str | None
+    playback_expires_in_seconds: int | None
+
+
+class AnglePercentiles(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    p10: Angle
+    p50: Angle
+    p90: Angle
+
+
+class StanceWidth(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    p50: float = Field(ge=0, le=10, allow_inf_nan=False)
+
+
+class PracticeFeatures(BaseModel):
+    """Aggregate, non-identifying movement features. No landmarks, ever.
+
+    `extra="forbid"` rejects any extra key, so a landmark array cannot ride
+    along; every field is a bounded scalar or a small scalar object.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    frames_analyzed: int = Field(ge=1, le=200000)
+    fps: float = Field(gt=0, le=240, allow_inf_nan=False)
+    duration_ms: int = Field(ge=1, le=600000)
+    knee_flexion_deg: AnglePercentiles
+    hip_flexion_deg: AnglePercentiles
+    trunk_lean_deg: AnglePercentiles
+    head_turns: int = Field(ge=0, le=10000)
+    head_turns_per_min: float = Field(ge=0, le=600, allow_inf_nan=False)
+    stance_width_ratio: StanceWidth
+    visibility_mean: float = Field(ge=0, le=1, allow_inf_nan=False)
+
+
+class Drill(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=80)
+    why: str = Field(min_length=1, max_length=300)
+    how: str = Field(min_length=1, max_length=400)
+
+
+class AiCoachResult(BaseModel):
+    """What `services.api.ai_coach.generate_feedback` returns after filtering."""
+
+    body: str = Field(min_length=1, max_length=1200)
+    drills: list[Drill] = Field(max_length=3)
+    model: str = Field(min_length=1, max_length=200)
+
+
+class AiCoachFeedback(BaseModel):
+    """An AI suggestion, never a `judgment`; labelled as such in the UI."""
+
+    id: UUID
+    practice_video_id: UUID
+    development_goal_id: UUID | None
+    model: str
+    body: str
+    drills: list[Drill]
+    created_at: datetime
