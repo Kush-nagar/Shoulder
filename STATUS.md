@@ -48,6 +48,17 @@ block, not inside it.
 
 <!-- agentops:progress:end -->
 
+### Pre-existing: `scripts/check-player.ps1` fails on `main`
+
+Found 2026-09-23 while verifying Block 08P. First, every spec's workspace reset
+`TRUNCATE` was refused because later tables (0012 email events, 0014 practice)
+reference the truncated ones; Block 08P fixed that with `CASCADE`. Behind it,
+15 tests (3 browsers x 5) fail identically on `main` (`cab8276`, with only the
+reset fix applied) and on the block branch: four coach-playback tests show
+"Shoulder could not open this video", and the phone matrix never shows
+"Written for an earlier version of this clip". Not caused by Block 08P; needs
+its own investigation.
+
 ### Standing gap: the Docker-backed suites do not run in CI
 
 `scripts/check.ps1`, which is what CI runs, executes the smoke suite only. The
