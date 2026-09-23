@@ -228,7 +228,8 @@ export function ReflectionEditor({
         htmlFor={`reflection-${judgmentId}`}
         className="text-[16px] font-semibold"
       >
-        What did you notice?
+        What did you notice?{" "}
+        <span className="font-normal text-muted">(optional)</span>
       </label>
       <textarea
         id={`reflection-${judgmentId}`}
@@ -237,7 +238,7 @@ export function ReflectionEditor({
         rows={4}
         disabled={!reflection && !evidenceAvailable}
         onChange={(event) => changeText(event.target.value)}
-        className={`mt-2 w-full resize-y rounded-lg border border-line-strong bg-paper p-3 text-[16px] leading-6 ${focus}`}
+        className={`mt-2 block w-full resize-y rounded-lg border border-line-strong bg-paper p-3 text-[16px] leading-6 transition-colors duration-150 hover:border-ink-2 disabled:opacity-60 ${focus}`}
       />
       <div className="mt-3 flex flex-wrap gap-2">
         <button
@@ -250,7 +251,7 @@ export function ReflectionEditor({
         </button>
         {onSkip ? (
           <button type="button" onClick={onSkip} className={action}>
-            Skip
+            Skip for now
           </button>
         ) : null}
         {reflection ? (
