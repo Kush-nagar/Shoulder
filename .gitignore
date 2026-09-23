@@ -30,3 +30,6 @@ frames/
 # artifact anything here reads. Ignored so an unattended `git add -A` cannot
 # sweep several hundred generated files into a task branch.
 graphify-out/
+
+# Copied from @mediapipe/tasks-vision by apps/web/scripts/copy-mediapipe.mjs.
+apps/web/public/mediapipe/
