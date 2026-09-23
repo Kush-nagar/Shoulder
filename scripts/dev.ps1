@@ -52,6 +52,9 @@ $env:R2_BUCKET = 'shoulder-local'
 $env:R2_REGION = 'auto'
 $env:R2_ACCESS_KEY_ID = $local['MINIO_ROOT_USER']
 $env:R2_SECRET_ACCESS_KEY = $local['MINIO_ROOT_PASSWORD']
+# AI coach (ADR 0021). Absent key: the feature returns 502 and stores nothing.
+$env:OPENROUTER_API_KEY = $local['OPENROUTER_API_KEY']
+$env:AI_COACH_MODEL = $local['AI_COACH_MODEL']
 
 $api = Start-Process -FilePath ./.tools/uv.exe -PassThru -NoNewWindow -ArgumentList @(
     'run', '--locked', 'python', '-m', 'uvicorn', 'services.api.main:app',

@@ -279,6 +279,24 @@ EXPECTED_POLICIES = {
         "SELECT",
         "{shoulder_operator}",
     ),
+    # 0014 (ADR 0021): practice videos and AI feedback are player-self only.
+    # No coach policy exists on either table.
+    *(
+        (table, f"{table}_{suffix}", verb, role)
+        for table in ("practice_video", "ai_coach_feedback")
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+            ("player_insert", "INSERT", "{shoulder_api}"),
+            ("player_delete", "DELETE", "{shoulder_api}"),
+        )
+    ),
+    (
+        "practice_video",
+        "practice_video_player_update",
+        "UPDATE",
+        "{shoulder_api}",
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -346,6 +364,9 @@ EXPECTED_WORKER_FUNCTIONS = {
     "fail_deletion_ledger_cleanup",
     "complete_deletion_ledger_cleanup",
     "finalize_deletion_manifest",
+    # 0014: the fenced practice-video expiry sweep.
+    "expired_practice_videos",
+    "purge_practice_video",
 }
 
 
@@ -504,6 +525,11 @@ class PolicySurfaceTests(DatabaseTestCase):
                 ("shoulder_api", "game", "INSERT"),
                 ("shoulder_api", "video_upload_part", "INSERT"),
                 ("shoulder_api", "video_upload_part", "DELETE"),
+                # ADR 0021: practice UPDATE is column-level (0014).
+                ("shoulder_api", "practice_video", "INSERT"),
+                ("shoulder_api", "practice_video", "DELETE"),
+                ("shoulder_api", "ai_coach_feedback", "INSERT"),
+                ("shoulder_api", "ai_coach_feedback", "DELETE"),
                 # ADR 0018: the worker reads every job and every video, and
                 # holds no INSERT or DELETE anywhere. Its UPDATE surface is
                 # column-level and snapshotted in `test_database_video.py`.
