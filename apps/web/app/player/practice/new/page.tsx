@@ -20,6 +20,9 @@ export default async function NewPracticePage() {
         Film from the side, with your whole body in the frame. Only you can see
         this video.
       </p>
+      <p className="mt-2 max-w-[48ch] text-[16px] leading-6 text-ink-2">
+        Only film yourself. Don't upload videos of other people.
+      </p>
       <UploadForm />
     </div>
   );

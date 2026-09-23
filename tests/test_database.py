@@ -69,6 +69,7 @@ TABLES = (
     # 0014 - Block 08P player practice videos and AI coach feedback.
     "practice_video",
     "ai_coach_feedback",
+    "ai_coach_usage",
 )
 
 

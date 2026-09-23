@@ -17,7 +17,7 @@ MIGRATION_ROLE = "shoulder_migration"
 API_ROLE = "shoulder_api"
 WORKER_ROLE = "shoulder_worker"
 OPERATOR_ROLE = "shoulder_operator"
-TABLES = ("practice_video", "ai_coach_feedback")
+TABLES = ("practice_video", "ai_coach_feedback", "ai_coach_usage")
 WORKER_FUNCTIONS = (
     "private.expired_practice_videos(uuid,text,timestamptz)",
     "private.purge_practice_video(uuid,text,uuid)",
@@ -32,11 +32,119 @@ SWEEP_FENCE = """
     )
 """
 # A ready video expires at its persisted clock; an upload never completed is
-# abandoned after seven days, like coach uploads.
+# abandoned after seven days, like coach uploads. A deleted row is kept one
+# hour, past the 15-minute PUT URL lifetime, so a late re-PUT is deleted too.
 EXPIRED = """
     (v.status = 'ready' AND v.expires_at <= p_now)
-    OR (v.status <> 'ready' AND v.created_at <= p_now - interval '7 days')
+    OR (v.status = 'uploading' AND v.created_at <= p_now - interval '7 days')
+    OR (v.status = 'deleted' AND v.deleted_at <= p_now - interval '1 hour')
 """
+# 0013's seed body, verbatim. 0014 appends practice objects so player erasure
+# and season expiry delete them before `app.player` cascades the rows away.
+SEED_0013 = """
+        CREATE OR REPLACE FUNCTION private.seed_deletion_manifest_objects(p_manifest_id uuid)
+        RETURNS void
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+        DECLARE v_manifest app.deletion_manifest%ROWTYPE;
+        BEGIN
+            SELECT * INTO v_manifest FROM app.deletion_manifest
+            WHERE id = p_manifest_id;
+            IF NOT FOUND THEN RETURN; END IF;
+
+            INSERT INTO app.deletion_manifest_object (
+                manifest_id, object_key, object_kind, multipart_upload_id
+            )
+            SELECT v_manifest.id, v.original_key, 'original', v.multipart_upload_id
+            FROM app.video v JOIN app.game g ON g.id = v.game_id
+            WHERE (
+                v_manifest.kind IN ('season_expiry', 'player_erasure')
+                AND g.team_id = v_manifest.team_id
+            ) OR (
+                v_manifest.kind IN ('video_source', 'video_all')
+                AND v.id = v_manifest.video_id
+            )
+            ON CONFLICT (manifest_id, object_key) DO NOTHING;
+
+            IF v_manifest.kind <> 'video_source' THEN
+                INSERT INTO app.deletion_manifest_object (
+                    manifest_id, object_key, object_kind
+                )
+                SELECT v_manifest.id, coalesce(
+                           v.playback_key,
+                           'playback/' || v.id::text || '/coach-720p.mp4'
+                       ), 'playback'
+                FROM app.video v JOIN app.game g ON g.id = v.game_id
+                WHERE (
+                    v_manifest.kind IN ('season_expiry', 'player_erasure')
+                    AND g.team_id = v_manifest.team_id
+                ) OR (v_manifest.kind = 'video_all' AND v.id = v_manifest.video_id)
+                ON CONFLICT (manifest_id, object_key) DO NOTHING;
+
+                INSERT INTO app.deletion_manifest_object (
+                    manifest_id, object_key, object_kind
+                )
+                SELECT v_manifest.id,
+                       'thumbs/' || v.id::text || '/' || name.value, 'thumbnail'
+                FROM app.video v JOIN app.game g ON g.id = v.game_id
+                CROSS JOIN (VALUES
+                    ('index.json'), ('sprite-0.jpg'), ('sprite-1.jpg'),
+                    ('sprite-2.jpg'), ('sprite-3.jpg')
+                ) AS name(value)
+                WHERE (
+                    v_manifest.kind IN ('season_expiry', 'player_erasure')
+                    AND g.team_id = v_manifest.team_id
+                ) OR (v_manifest.kind = 'video_all' AND v.id = v_manifest.video_id)
+                ON CONFLICT (manifest_id, object_key) DO NOTHING;
+            END IF;
+
+            INSERT INTO app.deletion_manifest_object (
+                manifest_id, object_key, object_kind
+            )
+            SELECT v_manifest.id, clip.storage_key, 'evidence_clip'
+            FROM app.evidence_clip clip
+            JOIN app.judgment judgment ON judgment.id = clip.judgment_id
+            JOIN app.observation observation ON observation.id = judgment.observation_id
+            JOIN app.video video ON video.id = observation.video_id
+            JOIN app.game game ON game.id = video.game_id
+            WHERE (
+                v_manifest.kind IN ('season_expiry', 'player_erasure')
+                AND game.team_id = v_manifest.team_id
+            ) OR (
+                v_manifest.kind = 'video_all' AND video.id = v_manifest.video_id
+            ) OR (
+                v_manifest.kind = 'export_cleanup'
+                AND clip.id = v_manifest.evidence_clip_id
+            )
+            ON CONFLICT (manifest_id, object_key) DO NOTHING;
+        END;
+        $$
+"""
+PRACTICE_SEED = """
+            INSERT INTO app.deletion_manifest_object (
+                manifest_id, object_key, object_kind
+            )
+            SELECT v_manifest.id, practice.object_key, 'practice'
+            FROM app.practice_video practice
+            JOIN app.player player ON player.id = practice.player_id
+            WHERE (
+                v_manifest.kind = 'player_erasure'
+                AND player.id = v_manifest.player_id
+            ) OR (
+                v_manifest.kind = 'season_expiry'
+                AND player.team_id = v_manifest.team_id
+            )
+            ON CONFLICT (manifest_id, object_key) DO NOTHING;
+        END;
+        $$
+"""
+SEED_TAIL = """
+        END;
+        $$
+"""
+SEED_0014 = SEED_0013[: SEED_0013.rindex(SEED_TAIL)] + PRACTICE_SEED
+OBJECT_KINDS_0013 = (
+    "'original', 'playback', 'thumbnail', 'evidence_clip', 'research_artifact'"
+)
 
 
 def upgrade() -> None:
@@ -64,6 +172,9 @@ def upgrade() -> None:
             created_at timestamptz NOT NULL DEFAULT now(),
             upload_completed_at timestamptz,
             expires_at timestamptz,
+            deleted_at timestamptz,
+            CONSTRAINT practice_video_deleted_shape
+                CHECK ((status = 'deleted') = (deleted_at IS NOT NULL)),
             CONSTRAINT practice_video_ready_shape CHECK (
                 status <> 'ready'
                 OR (upload_completed_at IS NOT NULL AND expires_at IS NOT NULL
@@ -109,6 +220,19 @@ def upgrade() -> None:
             f" ON app.ai_coach_feedback ({column})"
         )
 
+    # Quota survives video deletion: a counter, not a count of feedback rows.
+    # ponytail: rows are never purged (one tiny row per player per day); they
+    # cascade on player erasure. Add a sweep if the table ever matters.
+    op.execute("""
+        CREATE TABLE app.ai_coach_usage (
+            player_id uuid NOT NULL REFERENCES app.player (id) ON DELETE CASCADE,
+            used_on date NOT NULL,
+            count integer NOT NULL
+                CONSTRAINT ai_coach_usage_count CHECK (count BETWEEN 0 AND 10),
+            PRIMARY KEY (player_id, used_on)
+        )
+    """)
+
     for table in TABLES:
         op.execute(f"ALTER TABLE app.{table} OWNER TO {MIGRATION_ROLE}")
         op.execute(f"ALTER TABLE app.{table} ENABLE ROW LEVEL SECURITY")
@@ -123,6 +247,8 @@ def upgrade() -> None:
                 FOR SELECT TO {API_ROLE}
                 USING (private.is_player_self(player_id))
         """)
+        if table == "ai_coach_usage":
+            continue
         op.execute(f"""
             CREATE POLICY {table}_player_delete ON app.{table}
                 FOR DELETE TO {API_ROLE}
@@ -140,6 +266,17 @@ def upgrade() -> None:
     """)
     op.execute(f"""
         CREATE POLICY practice_video_player_update ON app.practice_video
+            FOR UPDATE TO {API_ROLE}
+            USING (private.is_player_self(player_id))
+            WITH CHECK (private.is_player_self(player_id))
+    """)
+    op.execute(f"""
+        CREATE POLICY ai_coach_usage_player_insert ON app.ai_coach_usage
+            FOR INSERT TO {API_ROLE}
+            WITH CHECK (private.is_player_self(player_id))
+    """)
+    op.execute(f"""
+        CREATE POLICY ai_coach_usage_player_update ON app.ai_coach_usage
             FOR UPDATE TO {API_ROLE}
             USING (private.is_player_self(player_id))
             WITH CHECK (private.is_player_self(player_id))
@@ -193,10 +330,23 @@ def upgrade() -> None:
 
     op.execute(f"GRANT SELECT, INSERT, DELETE ON app.practice_video TO {API_ROLE}")
     op.execute(
-        "GRANT UPDATE (status, duration_ms, upload_completed_at, expires_at)"
+        "GRANT UPDATE (status, duration_ms, upload_completed_at, expires_at,"
+        " deleted_at)"
         f" ON app.practice_video TO {API_ROLE}"
     )
     op.execute(f"GRANT SELECT, INSERT, DELETE ON app.ai_coach_feedback TO {API_ROLE}")
+    op.execute(f"GRANT SELECT, INSERT ON app.ai_coach_usage TO {API_ROLE}")
+    op.execute(f"GRANT UPDATE (count) ON app.ai_coach_usage TO {API_ROLE}")
+    op.execute(
+        "ALTER TABLE app.deletion_manifest_object"
+        " DROP CONSTRAINT deletion_object_kind_allowed"
+    )
+    op.execute(
+        "ALTER TABLE app.deletion_manifest_object"
+        " ADD CONSTRAINT deletion_object_kind_allowed"
+        f" CHECK (object_kind IN ({OBJECT_KINDS_0013}, 'practice'))"
+    )
+    op.execute(SEED_0014)
     for function in WORKER_FUNCTIONS:
         op.execute(f"ALTER FUNCTION {function} OWNER TO {MIGRATION_ROLE}")
         op.execute(
@@ -207,7 +357,21 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(SEED_0013)
+    op.execute(
+        "DELETE FROM app.deletion_manifest_object WHERE object_kind = 'practice'"
+    )
+    op.execute(
+        "ALTER TABLE app.deletion_manifest_object"
+        " DROP CONSTRAINT deletion_object_kind_allowed"
+    )
+    op.execute(
+        "ALTER TABLE app.deletion_manifest_object"
+        " ADD CONSTRAINT deletion_object_kind_allowed"
+        f" CHECK (object_kind IN ({OBJECT_KINDS_0013}))"
+    )
     for function in WORKER_FUNCTIONS:
         op.execute(f"DROP FUNCTION IF EXISTS {function}")
+    op.execute("DROP TABLE IF EXISTS app.ai_coach_usage")
     op.execute("DROP TABLE IF EXISTS app.ai_coach_feedback")
     op.execute("DROP TABLE IF EXISTS app.practice_video")

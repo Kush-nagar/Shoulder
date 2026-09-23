@@ -106,7 +106,8 @@ class DemoJoinDatabaseTests(DatabaseTestCase):
                 text("SELECT display_name FROM app.player WHERE id = :id"),
                 {"id": player_id},
             ).scalar_one()
-        self.assertEqual(name, "Visitor Name")
+        # Fixed, non-identifying: neither the real name nor the email.
+        self.assertEqual(name, "Demo player")
 
     def test_join_is_idempotent(self) -> None:
         visitor = self.create_auth_user("demo.again@example.test")

@@ -333,12 +333,17 @@ def sign_get(key: str, seconds: int = GET_URL_SECONDS) -> str:
     return str(url)
 
 
-def sign_put(key: str, content_type: str) -> str:
-    """A presigned single PUT for one object; the signed type must be sent."""
+def sign_put(key: str, content_type: str, size_bytes: int) -> str:
+    """A presigned single PUT for one object of exactly the declared type and size."""
     url = _call(
         "generate_presigned_url",
         ClientMethod="put_object",
-        Params={"Bucket": bucket(), "Key": key, "ContentType": content_type},
+        Params={
+            "Bucket": bucket(),
+            "Key": key,
+            "ContentType": content_type,
+            "ContentLength": size_bytes,
+        },
         ExpiresIn=PART_URL_SECONDS,
     )
     return str(url)

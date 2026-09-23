@@ -8,10 +8,12 @@ row is written. Any upstream failure stores nothing.
 """
 
 import logging
-from typing import Annotated
+from collections.abc import Callable, Coroutine
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.routing import APIRoute
 from sqlalchemy.exc import DBAPIError
 
 from services.api import ai_coach, storage
@@ -19,17 +21,16 @@ from services.api.auth import authenticated_identity
 from services.api.db import user_transaction
 from services.api.practice_service import (
     active_goal,
-    delete_video_row,
+    consume_feedback_quota,
     feedback_model,
     insert_feedback,
     insert_video,
     load_video,
-    lock_player_feedback,
+    mark_deleted,
     mark_ready,
     new_video_id,
     own_player_id,
     own_videos,
-    require_feedback_quota,
     video_feedback,
     video_model,
 )
@@ -48,14 +49,38 @@ from services.api.schemas import (
 from services.api.video import storage_unavailable
 
 logger = logging.getLogger("shoulder.practice")
-router = APIRouter(prefix="/v1/player/practice-videos")
-FEATURES_MAX_BYTES = 4096
+BODY_MAX_BYTES = 4096
 
 
-async def bounded_features_body(request: Request) -> None:
-    """Refuse an oversized features body before it is parsed."""
-    if len(await request.body()) > FEATURES_MAX_BYTES:
-        raise Problem(413, "Those practice features are too large.")
+class BoundedBodyRoute(APIRoute):
+    """Refuse an oversized body before FastAPI reads or parses it.
+
+    FastAPI reads the whole body before running dependencies, so the bound has
+    to wrap the route handler itself. Every practice request body is small.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def bounded(request: Request) -> Response:
+            too_large = Problem(413, "Those practice features are too large.")
+            declared = request.headers.get("content-length")
+            if declared is not None and (
+                not declared.isdigit() or int(declared) > BODY_MAX_BYTES
+            ):
+                raise too_large
+            body = b""
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > BODY_MAX_BYTES:
+                    raise too_large
+            request._body = body  # Starlette's cache; the handler reads it.
+            return await handler(request)
+
+        return bounded
+
+
+router = APIRouter(prefix="/v1/player/practice-videos", route_class=BoundedBodyRoute)
 
 
 def _not_ready() -> Problem:
@@ -86,7 +111,7 @@ def create_practice_video(
                 size_bytes=request.size_bytes,
                 title=request.title,
             )
-            url = storage.sign_put(key, request.content_type)
+            url = storage.sign_put(key, request.content_type, request.size_bytes)
     except storage.StorageError:
         raise storage_unavailable() from None
     except DBAPIError:
@@ -119,7 +144,7 @@ def complete_practice_video(
             if size != video.size_bytes or content_type != video.content_type:
                 # What arrived is not what was declared; keep none of it.
                 storage.delete_object(video.object_key)
-                delete_video_row(connection, video_id)
+                mark_deleted(connection, video_id)
                 mismatch = True
             else:
                 mismatch = False
@@ -180,9 +205,10 @@ def delete_practice_video(
         with user_transaction(user_id) as connection:
             video = load_video(connection, video_id, lock=True)
             # Object first: a storage failure leaves the row, so a retry can
-            # still find the key. Feedback rows cascade with the video row.
+            # still find the key. The row stays hidden as `deleted` until the
+            # sweep re-deletes the key after any live PUT URL has expired.
             storage.delete_object(video.object_key)
-            delete_video_row(connection, video_id)
+            mark_deleted(connection, video_id)
     except storage.StorageError:
         raise storage_unavailable() from None
     except DBAPIError:
@@ -194,7 +220,7 @@ def delete_practice_video(
     "/{video_id}/ai-feedback",
     response_model=AiCoachFeedback,
     status_code=201,
-    dependencies=[*PRIVATE, Depends(bounded_features_body)],
+    dependencies=PRIVATE,
 )
 def request_ai_feedback(
     video_id: UUID,
@@ -207,8 +233,11 @@ def request_ai_feedback(
             video = load_video(connection, video_id)
             if video.status != "ready":
                 raise _not_ready()
-            require_feedback_quota(connection, player_id)
             goal = active_goal(connection, player_id)
+        # Its own committed transaction, before the model runs: a request that
+        # fails upstream still spends quota, so retries cannot bypass it.
+        with user_transaction(user_id) as connection:
+            consume_feedback_quota(connection, player_id)
     except DBAPIError:
         raise unavailable() from None
 
@@ -224,8 +253,6 @@ def request_ai_feedback(
 
     try:
         with user_transaction(user_id) as connection:
-            lock_player_feedback(connection, player_id)
-            require_feedback_quota(connection, player_id)
             row = insert_feedback(
                 connection,
                 video_id=load_video(connection, video_id).id,

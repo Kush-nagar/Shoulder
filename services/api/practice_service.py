@@ -50,8 +50,8 @@ def own_player_id(connection: Connection) -> UUID:
 def load_video(connection: Connection, video_id: UUID, *, lock: bool = False) -> Any:
     row = connection.execute(
         text(
-            f"SELECT {VIDEO_COLUMNS} FROM app.practice_video WHERE id = :id"
-            + (" FOR UPDATE" if lock else "")
+            f"SELECT {VIDEO_COLUMNS} FROM app.practice_video"
+            " WHERE id = :id AND status <> 'deleted'" + (" FOR UPDATE" if lock else "")
         ),
         {"id": str(video_id)},
     ).one_or_none()
@@ -128,9 +128,22 @@ def mark_ready(connection: Connection, video_id: UUID, duration_ms: int | None) 
     ).one()
 
 
-def delete_video_row(connection: Connection, video_id: UUID) -> None:
+def mark_deleted(connection: Connection, video_id: UUID) -> None:
+    """Hide the row and drop its AI feedback now; the sweep purges the row.
+
+    The row is kept, not deleted, so the expiry sweep re-deletes the key once
+    any still-valid presigned PUT has expired.
+    """
     connection.execute(
-        text("DELETE FROM app.practice_video WHERE id = :id"), {"id": str(video_id)}
+        text("DELETE FROM app.ai_coach_feedback WHERE practice_video_id = :id"),
+        {"id": str(video_id)},
+    )
+    connection.execute(
+        text("""
+            UPDATE app.practice_video SET status = 'deleted', deleted_at = now()
+            WHERE id = :id AND status <> 'deleted'
+        """),
+        {"id": str(video_id)},
     )
 
 
@@ -159,28 +172,28 @@ def active_goal(connection: Connection, player_id: UUID) -> Any:
     ).one_or_none()
 
 
-def require_feedback_quota(connection: Connection, player_id: UUID) -> None:
-    used = connection.execute(
+def consume_feedback_quota(connection: Connection, player_id: UUID) -> None:
+    """Atomically take one of today's ten requests, or refuse with 429.
+
+    Counted in its own table, so deleting a video or feedback cannot refund it.
+    """
+    taken = connection.execute(
         text("""
-            SELECT count(*) FROM app.ai_coach_feedback
-            WHERE player_id = :player_id AND created_at > now() - interval '1 day'
+            INSERT INTO app.ai_coach_usage AS usage (player_id, used_on, count)
+            VALUES (:player_id, (now() AT TIME ZONE 'UTC')::date, 1)
+            ON CONFLICT (player_id, used_on) DO UPDATE
+                SET count = usage.count + 1
+                WHERE usage.count < :limit
+            RETURNING count
         """),
-        {"player_id": str(player_id)},
-    ).scalar_one()
-    if used >= FEEDBACK_PER_DAY:
+        {"player_id": str(player_id), "limit": FEEDBACK_PER_DAY},
+    ).one_or_none()
+    if taken is None:
         raise Problem(
             429,
             "You have asked for ten AI suggestions today. Try again tomorrow.",
             "ai-feedback-rate-limited",
         )
-
-
-def lock_player_feedback(connection: Connection, player_id: UUID) -> None:
-    """Serialize the recount-and-insert so concurrent calls cannot overshoot."""
-    connection.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 2101))"),
-        {"key": str(player_id)},
-    )
 
 
 def insert_feedback(

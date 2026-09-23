@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -77,6 +78,16 @@ class FeatureValidationTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     PracticeFeatures.model_validate({**FEATURES, **extra})
 
+    def test_declared_oversized_body_is_refused_before_reading(self) -> None:
+        app.dependency_overrides[authenticated_identity] = lambda: str(uuid4())
+        self.addCleanup(app.dependency_overrides.clear)
+        response = TestClient(app).post(
+            f"{BASE}/{uuid4()}/ai-feedback",
+            content=b"{}",
+            headers={"Content-Type": "application/json", "Content-Length": "5000"},
+        )
+        self.assertEqual(response.status_code, 413)
+
     def test_oversized_body_is_refused_before_parsing(self) -> None:
         app.dependency_overrides[authenticated_identity] = lambda: str(uuid4())
         self.addCleanup(app.dependency_overrides.clear)
@@ -94,6 +105,69 @@ class FeatureValidationTests(unittest.TestCase):
             AiCoachResult(body="x", drills=[Drill(**drill)] * 4, model="m")
         with self.assertRaises(ValidationError):
             AiCoachResult(body="x" * 1201, drills=[], model="m")
+
+
+class CopyFilterTests(unittest.TestCase):
+    def test_every_banned_term_is_refused(self) -> None:
+        for phrase in (
+            "Your grade is high",
+            "You graded well",
+            "Good grades",
+            "Keep grading your touch",
+            "Your score went up",
+            "You scored a goal",
+            "Compared with others",
+            "A fair comparison",
+            "Better than last week",
+            "Worse than before",
+            "Ninety per cent there",
+            "Ninety percent there",
+            "Ninety percentage",
+            "90％ there",
+            "90% there",
+            "An AI powered plan",
+            "An AI-powered plan",
+            "Top 5 in the league",
+            "top10 player",
+        ):
+            with self.subTest(phrase=phrase):
+                raw = json.dumps({"body": phrase, "drills": []})
+                with self.assertRaises(ai_coach.AiCoachError):
+                    ai_coach.check_output(raw)
+
+    def test_prompt_names_every_banned_word_class(self) -> None:
+        # A normal reply that trips the filter is a 502 that still spends quota.
+        prompt = ai_coach.SYSTEM_PROMPT.lower()
+        for word in (
+            "failed",
+            "weak",
+            "incorrect",
+            "insights",
+            "unlock",
+            "level up",
+            "elite",
+            "ai-powered",
+            "rank",
+            "rating",
+            "grade",
+            "score",
+            "compar",
+            "better than",
+            "worse than",
+            "percent",
+            "per cent",
+            "top followed by a number",
+            "%",
+            "out of n",
+        ):
+            with self.subTest(word=word):
+                self.assertIn(word, prompt)
+
+    def test_plain_coaching_passes(self) -> None:
+        raw = json.dumps(
+            {"body": "Look over your shoulder before the ball arrives.", "drills": []}
+        )
+        self.assertEqual(ai_coach.check_output(raw).drills, [])
 
 
 @unittest.skipUnless(CONFIGURED, "database URLs are not configured")
@@ -319,16 +393,13 @@ class PracticeTests(DatabaseTestCase):
 
     def test_rate_limit_is_ten_per_day_per_player(self) -> None:
         with self.admin.connect() as connection, connection.begin():
-            for _ in range(10):
-                connection.execute(
-                    text("""
-                        INSERT INTO app.ai_coach_feedback (
-                            practice_video_id, player_id, features, model, body,
-                            drills
-                        ) VALUES (:video, :player, '{}', 'm', 'b', '[]')
-                    """),
-                    {"video": self.video_a, "player": self.player_a},
-                )
+            connection.execute(
+                text("""
+                    INSERT INTO app.ai_coach_usage (player_id, used_on, count)
+                    VALUES (:player, (now() AT TIME ZONE 'UTC')::date, 10)
+                """),
+                {"player": self.player_a},
+            )
         with patch.object(ai_coach, "generate_feedback", return_value=RESULT) as model:
             limited = self.client_for(self.user_a).post(
                 f"{BASE}/{self.video_a}/ai-feedback", json=FEATURES
@@ -339,6 +410,82 @@ class PracticeTests(DatabaseTestCase):
         self.assertEqual(limited.status_code, 429)
         self.assertEqual(other.status_code, 201, other.text)
         self.assertEqual(model.call_count, 1)
+
+    def test_concurrent_requests_beyond_ten_get_429_without_model_calls(
+        self,
+    ) -> None:
+        client = self.client_for(self.user_a)
+
+        def ask(_index: int) -> int:
+            response = client.post(f"{BASE}/{self.video_a}/ai-feedback", json=FEATURES)
+            return int(response.status_code)
+
+        with (
+            patch.object(ai_coach, "generate_feedback", return_value=RESULT) as model,
+            ThreadPoolExecutor(max_workers=8) as pool,
+        ):
+            codes = sorted(pool.map(ask, range(14)))
+        self.assertEqual(codes, [201] * 10 + [429] * 4)
+        self.assertEqual(model.call_count, 10)
+
+    def test_deleting_a_video_does_not_refund_quota(self) -> None:
+        client = self.client_for(self.user_a)
+        with patch.object(ai_coach, "generate_feedback", return_value=RESULT):
+            for _ in range(10):
+                self.assertEqual(
+                    client.post(
+                        f"{BASE}/{self.video_a}/ai-feedback", json=FEATURES
+                    ).status_code,
+                    201,
+                )
+        with patch.object(storage, "delete_object"):
+            self.assertEqual(client.delete(f"{BASE}/{self.video_a}").status_code, 204)
+        fresh = self.admin_video(self.player_a, self.user_a)
+        with patch.object(ai_coach, "generate_feedback", return_value=RESULT) as model:
+            response = client.post(f"{BASE}/{fresh}/ai-feedback", json=FEATURES)
+        self.assertEqual(response.status_code, 429)
+        model.assert_not_called()
+
+    def test_deleted_video_is_hidden_and_its_feedback_is_gone(self) -> None:
+        client = self.client_for(self.user_a)
+        with patch.object(ai_coach, "generate_feedback", return_value=RESULT):
+            client.post(f"{BASE}/{self.video_a}/ai-feedback", json=FEATURES)
+        with patch.object(storage, "delete_object") as deleted:
+            self.assertEqual(client.delete(f"{BASE}/{self.video_a}").status_code, 204)
+        deleted.assert_called_once_with(storage.practice_key(self.video_a, "video/mp4"))
+        with (
+            patch.object(storage, "sign_get", return_value="https://signed"),
+            patch.object(ai_coach, "generate_feedback") as model,
+        ):
+            for method, path in (
+                ("GET", f"{BASE}/{self.video_a}"),
+                ("GET", f"{BASE}/{self.video_a}/ai-feedback"),
+                ("POST", f"{BASE}/{self.video_a}/ai-feedback"),
+                ("POST", f"{BASE}/{self.video_a}/complete"),
+                ("DELETE", f"{BASE}/{self.video_a}"),
+            ):
+                with self.subTest(method=method, path=path):
+                    body = FEATURES if path.endswith("ai-feedback") else {}
+                    response = client.request(method, path, json=body)
+                    self.assertEqual(response.status_code, 404, response.text)
+            model.assert_not_called()
+        self.assertEqual(client.get(BASE).json(), [])
+        self.assertEqual(
+            self.count(
+                "SELECT count(*) FROM app.ai_coach_feedback"
+                " WHERE practice_video_id = :id",
+                id=self.video_a,
+            ),
+            0,
+        )
+        self.assertEqual(
+            self.count(
+                "SELECT count(*) FROM app.practice_video"
+                " WHERE id = :id AND status = 'deleted' AND deleted_at IS NOT NULL",
+                id=self.video_a,
+            ),
+            1,
+        )
 
     def test_invalid_features_are_422_before_any_model_call(self) -> None:
         with patch.object(ai_coach, "generate_feedback") as model:
@@ -351,11 +498,12 @@ class PracticeTests(DatabaseTestCase):
 
     def test_complete_rejects_a_mismatched_object_and_deletes_it(self) -> None:
         client = self.client_for(self.user_a)
-        with patch.object(storage, "sign_put", return_value="https://put"):
+        with patch.object(storage, "sign_put", return_value="https://put") as signed:
             created = client.post(
                 BASE, json={"content_type": "video/mp4", "size_bytes": 100}
             )
         self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(signed.call_args.args[1:], ("video/mp4", 100))
         video_id = created.json()["id"]
         with patch.object(storage, "head_media", return_value=None):
             self.assertEqual(
@@ -368,12 +516,16 @@ class PracticeTests(DatabaseTestCase):
             response = client.post(f"{BASE}/{video_id}/complete", json={})
         self.assertEqual(response.status_code, 422)
         deleted.assert_called_once_with(f"practice/{video_id}/source.mp4")
+        # Kept hidden as `deleted`, so the sweep re-deletes a late re-PUT.
         self.assertEqual(
             self.count(
-                "SELECT count(*) FROM app.practice_video WHERE id = :id", id=video_id
+                "SELECT count(*) FROM app.practice_video"
+                " WHERE id = :id AND status = 'deleted'",
+                id=video_id,
             ),
-            0,
+            1,
         )
+        self.assertEqual(client.get(f"{BASE}/{video_id}").status_code, 404)
 
     @unittest.skipUnless(STORAGE_CONFIGURED, "object storage is not configured")
     def test_real_upload_round_trip_and_delete(self) -> None:
@@ -389,6 +541,13 @@ class PracticeTests(DatabaseTestCase):
                 "title": "Juggling",
             },
         ).json()
+        # The signed Content-Length refuses any other size.
+        wrong = httpx.put(
+            created["upload_url"],
+            content=payload + b"0",
+            headers={"Content-Type": "video/mp4"},
+        )
+        self.assertEqual(wrong.status_code, 403)
         put = httpx.put(
             created["upload_url"],
             content=payload,
@@ -402,6 +561,7 @@ class PracticeTests(DatabaseTestCase):
         self.assertEqual(httpx.get(detail["playback_url"]).content, payload)
         self.assertEqual(client.delete(f"{BASE}/{created['id']}").status_code, 204)
         self.assertIsNone(storage.head_object(f"practice/{created['id']}/source.mp4"))
+        self.assertEqual(client.get(f"{BASE}/{created['id']}").status_code, 404)
 
     # -- retention ------------------------------------------------------------
 
@@ -410,6 +570,20 @@ class PracticeTests(DatabaseTestCase):
         expired = self.admin_video(
             self.player_a, self.user_a, expires="now() - interval '1 second'"
         )
+        # A deleted row is purged only after the PUT URL lifetime has passed,
+        # so a re-PUT after deletion is deleted again.
+        old_deleted = self.admin_video(self.player_a, self.user_a)
+        new_deleted = self.admin_video(self.player_a, self.user_a)
+        with self.admin.connect() as connection, connection.begin():
+            for video, age in ((old_deleted, "2 hours"), (new_deleted, "1 minute")):
+                connection.execute(
+                    text(f"""
+                        UPDATE app.practice_video SET status = 'deleted',
+                            deleted_at = now() - interval '{age}'
+                        WHERE id = :id
+                    """),
+                    {"id": video},
+                )
         worker = f"practice-{uuid4()}"
         with self.admin.connect() as connection, connection.begin():
             job_id = connection.execute(
@@ -441,13 +615,67 @@ class PracticeTests(DatabaseTestCase):
             self.assertEqual(retention.purge_practice_videos(stale, lambda _p: True), 0)
             with patch.object(retention.storage, "head_object", return_value=None):
                 purged = retention.purge_practice_videos(job, lambda _p: True)
-        deleted.assert_called_once_with(storage.practice_key(expired, "video/mp4"))
-        self.assertEqual(purged, 1)
+        self.assertEqual(
+            {call.args[0] for call in deleted.call_args_list},
+            {storage.practice_key(v, "video/mp4") for v in (expired, old_deleted)},
+        )
+        self.assertEqual(purged, 2)
         remaining = self.count(
             "SELECT count(*) FROM app.practice_video WHERE id = ANY(:ids)",
-            ids=[expired, self.video_a],
+            ids=[expired, old_deleted, new_deleted, self.video_a],
         )
-        self.assertEqual(remaining, 1)
+        self.assertEqual(remaining, 2)
+
+    def test_erasure_and_season_expiry_seed_practice_objects(self) -> None:
+        manifests: list[UUID] = []
+
+        def cleanup() -> None:
+            with self.admin.connect() as connection, connection.begin():
+                connection.execute(
+                    text("DELETE FROM app.deletion_manifest WHERE id = ANY(:ids)"),
+                    {"ids": manifests},
+                )
+
+        self.addCleanup(cleanup)
+
+        def seeded(kind: str, player: UUID | None) -> set[str]:
+            with self.admin.connect() as connection, connection.begin():
+                manifest = connection.execute(
+                    text("""
+                        INSERT INTO app.deletion_manifest (
+                            kind, scope_key, team_id, player_id, deadline_at,
+                            backup_expires_at
+                        ) VALUES (
+                            :kind, :scope, :team, :player, now(),
+                            now() + interval '30 days'
+                        ) RETURNING id
+                    """),
+                    {
+                        "kind": kind,
+                        "scope": f"practice-test:{uuid4()}",
+                        "team": self.team,
+                        "player": player,
+                    },
+                ).scalar_one()
+                manifests.append(manifest)
+                connection.execute(
+                    text("SELECT private.seed_deletion_manifest_objects(:id)"),
+                    {"id": manifest},
+                )
+                return set(
+                    connection.execute(
+                        text("""
+                            SELECT object_key FROM app.deletion_manifest_object
+                            WHERE manifest_id = :id AND object_kind = 'practice'
+                        """),
+                        {"id": manifest},
+                    ).scalars()
+                )
+
+        key_a = storage.practice_key(self.video_a, "video/mp4")
+        key_b = storage.practice_key(self.video_b, "video/mp4")
+        self.assertEqual(seeded("player_erasure", self.player_a), {key_a})
+        self.assertEqual(seeded("season_expiry", None), {key_a, key_b})
 
 
 if __name__ == "__main__":  # pragma: no cover

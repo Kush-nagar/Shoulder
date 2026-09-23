@@ -39,6 +39,17 @@ college applications:
   its own player on the synthetic `age_group = 'DEMO'` team via
   `private.demo_join` (migration 0015), with a seeded goal attributed to the
   synthetic demo coach. Keep `DEMO_MODE` off in any real deployment.
-- Known gap before real data: player erasure does not yet add practice-video
-  objects to the deletion manifest (rows cascade; objects remain until the
-  90-day expiry sweep).
+- The demo accepts public sign-ins, so real footage of real people may be
+  uploaded. Mitigations: the demo player row always gets the fixed,
+  non-identifying name "Demo player" (no email or account name); practice
+  videos are visible to their player only; the player can delete any video at
+  any time (the object is deleted at once and again by the sweep an hour
+  later, after any presigned PUT has expired); every video expires 90 days
+  after upload; the upload page asks players to film only themselves.
+- Player erasure and season expiry add every `practice/*` object to the
+  deletion manifest (object kind `practice`, migration 0014), so objects are
+  deleted before `app.player` cascades the rows away.
+- AI requests are capped at ten per player per UTC day in `ai_coach_usage`,
+  taken before the model call; deleting videos or feedback does not refund
+  it. Usage rows (player id, date, count) are not swept; they cascade on
+  player erasure.

@@ -30,16 +30,24 @@ Suggest up to three concrete drills that support the coach's goal.
 Write in plain, encouraging language a teenager understands.
 Never give scores, ratings, grades, percentages, rankings, or comparisons with
 other players. Never give medical, injury, or diagnostic advice. Do not use the
-words failed, weak, incorrect, insights, unlock, level up, elite, or AI-powered.
+words failed, weak, incorrect, insights, unlock, level up, elite, AI-powered,
+rank, rating, rated, grade, score (in any sense: say "finish" or "put the ball
+in the net" instead), compare, comparison, better than, worse than, percent,
+per cent, percentile, or top followed by a number. Do not use the % sign, "N/10",
+or "out of N".
 Reply with strict JSON only, no text around it:
 {"body": "<at most 1000 characters>",
  "drills": [{"title": "<short>", "why": "<one or two sentences>", "how": "<steps>"}]}"""
 
 # AGENTS.md player-copy list plus score/rank vocabulary and numeric ratings.
 BANNED = re.compile(
-    r"\b(failed|weak|incorrect|performance score|insights?|unlock|level up|elite"
-    r"|ai-powered|rank(?:ed|ing|s)?|rating|rated|percent(?:age|ile)?)\b"
-    r"|%|\b\d+(?:\.\d+)?\s*/\s*10\b|\bout of\s+\d+",
+    # "score" is banned in any sense, "score a goal" included: a false refusal
+    # costs one retry, a leaked score costs the product rule.
+    r"\b(failed|weak|incorrect|insights?|unlock|level up|elite"
+    r"|ai[\s-]*powered|rank(?:ed|ing|s)?|rating|rated|grad(?:e|ed|es|ing)"
+    r"|scor(?:e|ed|es|ing)|compar\w*|better than|worse than|per\s?cent\w*"
+    r"|top\s*\d+)\b"
+    r"|[%％‰]|\b\d+(?:\.\d+)?\s*/\s*10\b|\bout of\s+\d+",
     re.IGNORECASE,
 )
 

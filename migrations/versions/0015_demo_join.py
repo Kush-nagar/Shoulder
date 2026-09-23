@@ -7,7 +7,8 @@ Revises: 0014_player_practice
 its own membership. It is bounded three ways: the team must carry the
 reserved `age_group = 'DEMO'` marker (set only by `scripts/seed_demo.py`), the
 caller must have no membership and no player row anywhere, and the only role
-it ever writes is `player`. The API calls it only when `DEMO_MODE=on`.
+it ever writes is `player`. The display name is always 'Demo player', so
+no email local-part or real name from a public sign-in is stored. The API calls it only when `DEMO_MODE=on`.
 """
 
 from alembic import op
@@ -32,7 +33,6 @@ def upgrade() -> None:
         DECLARE
             v_user_id uuid := private.current_user_id();
             v_coach_id uuid;
-            v_name text;
             v_player_id uuid;
         BEGIN
             IF v_user_id IS NULL THEN
@@ -60,21 +60,15 @@ def upgrade() -> None:
                 ORDER BY p.created_at, p.id LIMIT 1;
                 RETURN v_player_id;
             END IF;
-            SELECT pg_catalog.left(
-                coalesce(
-                    nullif(pg_catalog.btrim(a.display_name), ''),
-                    nullif(pg_catalog.split_part(a.email, '@', 1), ''),
-                    'Player'
-                ), 80
-            ) INTO v_name
-            FROM app.user_account a WHERE a.id = v_user_id;
-            IF NOT FOUND THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM app.user_account a WHERE a.id = v_user_id
+            ) THEN
                 RETURN NULL;
             END IF;
             INSERT INTO app.team_membership (team_id, user_id, role)
             VALUES (p_team_id, v_user_id, 'player');
             INSERT INTO app.player (team_id, display_name, user_id)
-            VALUES (p_team_id, v_name, v_user_id)
+            VALUES (p_team_id, 'Demo player', v_user_id)
             RETURNING id INTO v_player_id;
             INSERT INTO app.development_goal (player_id, title, created_by)
             VALUES (

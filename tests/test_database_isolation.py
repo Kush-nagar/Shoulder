@@ -297,6 +297,16 @@ EXPECTED_POLICIES = {
         "UPDATE",
         "{shoulder_api}",
     ),
+    # The AI quota counter: no DELETE, so a player cannot reset it.
+    *(
+        ("ai_coach_usage", f"ai_coach_usage_{suffix}", verb, role)
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+            ("player_insert", "INSERT", "{shoulder_api}"),
+            ("player_update", "UPDATE", "{shoulder_api}"),
+        )
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -532,6 +542,7 @@ class PolicySurfaceTests(DatabaseTestCase):
                 ("shoulder_api", "practice_video", "DELETE"),
                 ("shoulder_api", "ai_coach_feedback", "INSERT"),
                 ("shoulder_api", "ai_coach_feedback", "DELETE"),
+                ("shoulder_api", "ai_coach_usage", "INSERT"),
                 # ADR 0018: the worker reads every job and every video, and
                 # holds no INSERT or DELETE anywhere. Its UPDATE surface is
                 # column-level and snapshotted in `test_database_video.py`.
