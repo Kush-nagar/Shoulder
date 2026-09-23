@@ -41,7 +41,7 @@ test("secret-bearing files are ignored and tracked/new source contains no creden
     .split("\0")
     .filter(Boolean);
   const credential =
-    /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bAKIA[A-Z0-9]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b|\bsk_live_[A-Za-z0-9]{20,}\b)/;
+    /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bAKIA[A-Z0-9]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b|\bsk_live_[A-Za-z0-9]{20,}\b|\bGOCSPX-[A-Za-z0-9_-]{20,}\b)/;
   for (const file of files) {
     assert.ok(
       !/(^|\/)\.env(?:\.|$)/.test(file) || file.endsWith(".env.example"),

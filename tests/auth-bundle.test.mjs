@@ -12,7 +12,7 @@ test("production browser assets contain no server auth configuration or session 
   for (const file of files) {
     const content = readFileSync(join(root, file), "utf8");
     assert.ok(
-      !/SUPABASE_(?:SERVICE_ROLE|SECRET|PUBLISHABLE_KEY|AUTH_ISSUER|URL)|API_BASE_URL|refresh_token|shoulder-auth/.test(
+      !/SUPABASE_(?:SERVICE_ROLE|SECRET|PUBLISHABLE_KEY|AUTH_ISSUER|URL)|GOOGLE_CLIENT_(?:ID|SECRET)|GOCSPX-|API_BASE_URL|refresh_token|shoulder-auth/.test(
         content,
       ),
       `Server authentication content in browser asset: ${file}`,

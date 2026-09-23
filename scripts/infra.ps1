@@ -85,6 +85,22 @@ switch ($Action) {
         }
         $networkInfo = (& docker network inspect shoulder-supabase-local | ConvertFrom-Json)[0]
         if ($networkInfo.Options.'com.docker.network.bridge.host_binding_ipv4' -ne '127.0.0.1') { throw 'Local Supabase network must bind to loopback' }
+        # The CLI resolves config.toml `env(...)` from this process, not from
+        # .env.local. Google sign-in is optional locally: absent credentials
+        # leave the provider inert and the stack healthy. See ADR 0020.
+        $googleEnv = @{}
+        foreach ($line in Get-Content .env.local) {
+            if ($line -match '^\s*#' -or !$line.Trim()) { continue }
+            $pair = $line -split '=', 2
+            $googleEnv[$pair[0].Trim()] = $pair[1]
+        }
+        foreach ($name in @('SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID', 'SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET')) {
+            if (!(Get-Item "Env:$name" -ErrorAction SilentlyContinue)) {
+                $value = $googleEnv[$name]
+                if (!$value) { $value = '' }
+                Set-Item "Env:$name" $value
+            }
+        }
         # The CLI's success output includes local credentials; do not print or log it.
         $null = & $supabase start --network-id shoulder-supabase-local --exclude realtime,storage-api,imgproxy,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
         if ($LASTEXITCODE) { throw 'Supabase startup failed; inspect local container health without sharing credentials.' }

@@ -156,6 +156,38 @@ Inter Tight **5.3.0** is self-hosted from Fontsource; its included SIL Open Font
 License ships with the web app. See `assets/README.md` for exact source and
 license paths. Both SVGs render inline with their original vector geometry.
 
+## Run the whole app locally
+
+One command starts the containers, applies every Alembic migration, provisions
+the runtime role passwords for this run only, and serves the API and web:
+
+```powershell
+Set-Location D:\Shoulder
+.\scripts\dev.ps1
+```
+
+It prints the sign-in URL, the captured-mail URL, and the exact
+`bootstrap-team.ps1` invocation for the run's operator token. Sign in at
+`/auth/sign-in`, open the magic link from the captured mail UI, read the coach
+user id from `/auth/session`, then create the first team:
+
+```powershell
+.\scripts\bootstrap-team.ps1 -CoachUserId <uuid> -Token <printed token>
+```
+
+Ctrl+C stops the web and API; `.\scripts\infra.ps1 stop` stops the containers
+and preserves local volumes. Role passwords and the operator token are random
+per run, held in that process only, and never written to a file. The script
+requires `bootstrap-infra.ps1` and `bootstrap-auth.ps1` to have run once.
+
+Google sign-in is optional locally. Set
+`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` and
+`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET` in the ignored root `.env.local`,
+with `http://127.0.0.1:54321/auth/v1/callback` among the Google client's
+authorized redirect URIs. Without them the stack still starts and email sign-in
+is unaffected; only the Google button fails. See
+[ADR 0020](docs/decisions/0020-google-oauth-alongside-magic-links.md).
+
 ## Repository boundaries
 
 | Path | Task 1 responsibility |
