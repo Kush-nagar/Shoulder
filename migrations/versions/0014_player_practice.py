@@ -228,7 +228,7 @@ def upgrade() -> None:
             player_id uuid NOT NULL REFERENCES app.player (id) ON DELETE CASCADE,
             used_on date NOT NULL,
             count integer NOT NULL
-                CONSTRAINT ai_coach_usage_count CHECK (count BETWEEN 0 AND 10),
+                CONSTRAINT ai_coach_usage_count CHECK (count BETWEEN 0 AND 10),  -- = practice_service.FEEDBACK_PER_DAY
             PRIMARY KEY (player_id, used_on)
         )
     """)

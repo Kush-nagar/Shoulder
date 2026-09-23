@@ -42,7 +42,8 @@ Reply with strict JSON only, no text around it:
 # AGENTS.md player-copy list plus score/rank vocabulary and numeric ratings.
 BANNED = re.compile(
     # "score" is banned in any sense, "score a goal" included: a false refusal
-    # costs one retry, a leaked score costs the product rule.
+    # costs the player one of ten daily requests (the prompt steers the model
+    # away from these words); a leaked score costs the product rule.
     r"\b(failed|weak|incorrect|insights?|unlock|level up|elite"
     r"|ai[\s-]*powered|rank(?:ed|ing|s)?|rating|rated|grad(?:e|ed|es|ing)"
     r"|scor(?:e|ed|es|ing)|compar\w*|better than|worse than|per\s?cent\w*"
