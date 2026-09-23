@@ -104,7 +104,7 @@ export function PracticeDetail({
   useEffect(() => {
     if (confirmDelete) keepRef.current?.focus();
   }, [confirmDelete]);
-  const playable = video.status === "ready" && video.url && !playError;
+  const playable = video.status === "ready" && video.playback_url && !playError;
   const running = analysis.state === "running";
 
   async function analyze() {
@@ -190,7 +190,7 @@ export function PracticeDetail({
               {/* biome-ignore lint/a11y/useMediaCaption: the player's own practice video has no speech track to caption. */}
               <video
                 ref={videoRef}
-                src={video.url ?? undefined}
+                src={video.playback_url ?? undefined}
                 // Pose analysis reads frames, which needs a CORS-clean video.
                 crossOrigin="anonymous"
                 controls={!running}

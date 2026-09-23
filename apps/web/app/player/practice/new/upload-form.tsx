@@ -140,7 +140,6 @@ export function UploadForm() {
           title: title.trim() || null,
           content_type: picked.type,
           size_bytes: picked.file.size,
-          duration_ms: picked.durationMs,
         }),
         cache: "no-store",
       });
@@ -153,7 +152,12 @@ export function UploadForm() {
       setPhase("finishing");
       const complete = await fetch(
         `/api/player/practice/${ticket.id}/complete`,
-        { method: "POST", cache: "no-store" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ duration_ms: picked.durationMs }),
+          cache: "no-store",
+        },
       );
       if (!complete.ok) throw new Error("complete-failed");
       pendingId.current = null;
