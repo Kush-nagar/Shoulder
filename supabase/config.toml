@@ -47,6 +47,17 @@ enable_anonymous_sign_ins = false
 enable_confirmations = true
 max_frequency = "1m"
 
+# Google sign-in sits alongside magic links; see ADR 0020. Credentials reach
+# GoTrue through the process environment only, never this committed file, and
+# never the browser. Absent credentials leave the provider inert rather than
+# breaking local startup for a checkout without a Google client.
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET)"
+# Nonce validation stays on: skipping it allows replay with a stolen ID token.
+skip_nonce_check = false
+
 [edge_runtime]
 enabled = false
 

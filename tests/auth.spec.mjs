@@ -304,7 +304,7 @@ test("CSRF, invalid callbacks, signed-out and malformed sessions fail closed", a
   context,
   request,
 }) => {
-  for (const route of ["/auth/magic-link", "/auth/sign-out"]) {
+  for (const route of ["/auth/magic-link", "/auth/google", "/auth/sign-out"]) {
     for (const headers of [
       {},
       { Origin: "https://evil.invalid" },
@@ -350,4 +350,38 @@ test("CSRF, invalid callbacks, signed-out and malformed sessions fail closed", a
   expect(
     (await request.get("http://127.0.0.1:8000/v1/auth/identity")).status(),
   ).toBe(401);
+});
+
+test("Google sign-in starts a real PKCE flow and refuses unsafe entries", async ({
+  page,
+  context,
+  request,
+}) => {
+  await page.goto("/auth/sign-in");
+  const button = page.getByRole("button", { name: "Continue with Google" });
+  await expect(button).toBeVisible();
+  // The page's own tests locate its only heading and only status region
+  // without scoping, so the second sign-in path must add neither.
+  await expect(page.getByRole("heading")).toHaveText("Sign in to Shoulder");
+  expect(await page.locator("img").count()).toBe(0);
+
+  // The flow is server-initiated: only a POST starts it, and it leaves the
+  // code verifier behind for /auth/callback to exchange against.
+  expect(
+    (await request.get("/auth/google", { maxRedirects: 0 })).status(),
+  ).toBe(405);
+  const started = await context.request.post("/auth/google", {
+    headers: { Origin: origin },
+    maxRedirects: 0,
+  });
+  expect(started.status()).toBe(303);
+  // Supabase owns the authorize endpoint; the browser never reaches Google
+  // with a URL this application composed itself.
+  expect(started.headers().location).toContain("/auth/v1/authorize");
+  expect(started.headers().location).toContain("provider=google");
+  expect(
+    (await context.cookies()).some(
+      (c) => c.name.includes("code-verifier") && c.httpOnly,
+    ),
+  ).toBe(true);
 });

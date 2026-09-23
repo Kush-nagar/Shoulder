@@ -28,7 +28,7 @@ If a task conflicts with rules 1–4, stop and report the conflict. Do not imple
 | Web | Next.js App Router, TypeScript, Tailwind CSS |
 | API | FastAPI, Python 3.11, SQLAlchemy 2, Pydantic 2 |
 | Database | Postgres 17 on Supabase; non-exposed `app` schema; Alembic migrations |
-| Authentication | Supabase Auth magic links; Next.js owns secure session cookies |
+| Authentication | Supabase Auth magic links and Google OAuth; Next.js owns secure session cookies |
 | Browser/API boundary | Same-origin Next.js BFF forwards bearer tokens to FastAPI |
 | Object storage | Private Cloudflare R2 through the S3 API |
 | Video | ffmpeg to seekable H.264/AAC MP4; separate player clip exports |

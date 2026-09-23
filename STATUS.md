@@ -19,6 +19,7 @@ against Git and GitHub before editing anything.
 | Blockers | Real-data onboarding remains blocked until the owner records the season cutoff, notice, collateral-deletion scope, responsible operator, and verified provider backup maximum of at most 30 days. Task 23 remains blocked by the mandatory real-use gate. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
 | Next action | Review and merge Task 22, apply revision `0013_retention_deletion` to the development project with disposable fixtures, then complete the mandatory real-use gate before Task 23. |
+| Outside the task graph | Google OAuth sign-in was added alongside magic links on `google-oauth-sign-in` at the owner's request ([ADR 0020](docs/decisions/0020-google-oauth-alongside-magic-links.md)). No schema change. Google credentials are not yet issued, so the provider is configured but inert until the owner creates the OAuth client. |
 
 ### Concurrency and routing, as of 2026-09-19
 
