@@ -11,15 +11,15 @@ against Git and GitHub before editing anything.
 |---|---|
 | Last verified `main` | `de5903e` (PR #58, Task 21 development evidence timeline) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17); Block 06 (Tasks 18-21) |
-| Current block | Block 07. Task 22 retention, deletion, and first-party product events is implemented and locally verified on its task branch. |
-| Current worker / branch | Task 22 retention and deletion / `block-07-t22-retention-deletion-and-first-party-produ` |
+| Current block | Block 08P (outside the task graph, [ADR 0021](docs/decisions/0021-player-practice-and-ai-coach.md)): player practice uploads, on-device pose analysis, AI coach drill suggestions, PWA, and public demo self-join. Migrations `0014_player_practice`, `0015_demo_join`. Task 22 merged (#62). |
+| Current worker / branch | Coordinator / `block-08p-player-practice` |
 | Open PRs | Not checked in this task. This run did not push or open a Task 22 PR. |
 | Database revision | `0013_retention_deletion` on this branch; `0012_email_delivery` on the branch base. The local empty/up/down/up migration cycle passed. |
 | Last full verification | Task 22, 2026-09-21: `scripts/check-db.ps1` passed 1,478 tests against local Supabase/Postgres/MinIO with 18 documented media-tool skips. `scripts/check.ps1` passed formatting, lint, type checks, 53 Node tests, 1,478 Python tests (385 environment-gated skips), generated contracts, production build, bundle scan, and Chromium/Firefox/WebKit smoke. |
 | Blockers | Real-data onboarding remains blocked until the owner records the season cutoff, notice, collateral-deletion scope, responsible operator, and verified provider backup maximum of at most 30 days. Task 23 remains blocked by the mandatory real-use gate. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Review and merge Task 22, apply revision `0013_retention_deletion` to the development project with disposable fixtures, then complete the mandatory real-use gate before Task 23. |
-| Outside the task graph | Google OAuth sign-in was added alongside magic links on `google-oauth-sign-in` at the owner's request ([ADR 0020](docs/decisions/0020-google-oauth-alongside-magic-links.md)). No schema change. Google credentials are not yet issued, so the provider is configured but inert until the owner creates the OAuth client. |
+| Next action | Merge Block 08P, then deploy the synthetic-data demo (Vercel web, Fly API/worker, `DEMO_MODE=on`). Real-data onboarding stays blocked: retention decisions, real-use gate, consent review for AI feedback to minors, and two practice risks from the Block 08P re-review: an upload completed within 15 minutes after player erasure can leave an untracked object, and the API role can lower `ai_coach_usage.count` (move quota behind a definer function or a no-decrease trigger). |
+| Outside the task graph | Google OAuth (ADR 0020, merged #63). Block 08P (ADR 0021): the owner waived rule 5 for the player practice lane only; `judgment` authorship, no-scores, and full-match rules are unchanged. |
 
 ### Concurrency and routing, as of 2026-09-19
 
@@ -47,6 +47,17 @@ Maintained by `services/agentops/reconcile.py`. Edit around this
 block, not inside it.
 
 <!-- agentops:progress:end -->
+
+### Pre-existing: `scripts/check-player.ps1` fails on `main`
+
+Found 2026-09-23 while verifying Block 08P. First, every spec's workspace reset
+`TRUNCATE` was refused because later tables (0012 email events, 0014 practice)
+reference the truncated ones; Block 08P fixed that with `CASCADE`. Behind it,
+15 tests (3 browsers x 5) fail identically on `main` (`cab8276`, with only the
+reset fix applied) and on the block branch: four coach-playback tests show
+"Shoulder could not open this video", and the phone matrix never shows
+"Written for an earlier version of this clip". Not caused by Block 08P; needs
+its own investigation.
 
 ### Standing gap: the Docker-backed suites do not run in CI
 

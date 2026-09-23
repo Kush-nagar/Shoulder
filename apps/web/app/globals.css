@@ -42,3 +42,19 @@ body {
   color: var(--sh-ink);
   font-family: var(--font-inter-tight), Arial, sans-serif;
 }
+
+::selection {
+  background: var(--sh-action-soft);
+  color: var(--sh-ink);
+}
+
+/* docs/09: instant state changes when the viewer asks for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+}

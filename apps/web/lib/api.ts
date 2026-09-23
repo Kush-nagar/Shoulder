@@ -88,6 +88,18 @@ export async function fetchMe(token: string): Promise<Me | null> {
 }
 
 /**
+ * Public demo (ADR 0021): a team-less account joins the synthetic demo team.
+ * True only when the API created or found the caller's demo player; the
+ * endpoint answers 404 whenever the demo is off.
+ */
+export async function joinDemo(token: string): Promise<boolean> {
+  const reply = await request<Schema["DemoJoin"]>(token, "/v1/demo/join", {
+    method: "POST",
+  });
+  return reply.status === 200;
+}
+
+/**
  * Teams the caller belongs to. Deduplicated across a shell and its page.
  *
  * Null means the call failed; an empty array means the caller belongs to no

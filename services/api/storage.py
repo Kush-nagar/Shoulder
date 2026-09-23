@@ -43,6 +43,13 @@ GET_URL_SECONDS = 900
 # Player evidence has a tighter residual-access bound than coach playback.
 PLAYER_GET_URL_SECONDS = 300
 DELETION_LEDGER_PREFIX = "deletion-ledger/"
+# Player practice uploads (ADR 0021): one presigned PUT, no multipart.
+PRACTICE_MAX_BYTES = 500 * 1024 * 1024
+PRACTICE_MEDIA: dict[str, str] = {
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
+    "video/webm": "webm",
+}
 DELETION_LEDGER_MAX_BYTES = 4096
 
 # Extension -> stored extension and accepted browser content type. The browser
@@ -173,6 +180,13 @@ def evidence_key(judgment_id: UUID, version: int) -> str:
 def deletion_ledger_key(manifest_id: UUID) -> str:
     """Content-free replay marker, addressed only by the manifest UUID."""
     return f"{DELETION_LEDGER_PREFIX}{manifest_id}.json"
+
+
+def practice_key(practice_video_id: UUID, content_type: str) -> str:
+    """`practice/{id}/source.{ext}`; the extension comes from the allowlist."""
+    if content_type not in PRACTICE_MEDIA:
+        raise StorageError("unsupported media type")
+    return f"practice/{practice_video_id}/source.{PRACTICE_MEDIA[content_type]}"
 
 
 def sprite_key(video_id: UUID, sheet: int) -> str:
@@ -315,6 +329,22 @@ def sign_get(key: str, seconds: int = GET_URL_SECONDS) -> str:
         ClientMethod="get_object",
         Params={"Bucket": bucket(), "Key": key},
         ExpiresIn=seconds,
+    )
+    return str(url)
+
+
+def sign_put(key: str, content_type: str, size_bytes: int) -> str:
+    """A presigned single PUT for one object of exactly the declared type and size."""
+    url = _call(
+        "generate_presigned_url",
+        ClientMethod="put_object",
+        Params={
+            "Bucket": bucket(),
+            "Key": key,
+            "ContentType": content_type,
+            "ContentLength": size_bytes,
+        },
+        ExpiresIn=PART_URL_SECONDS,
     )
     return str(url)
 
@@ -583,6 +613,19 @@ def upload_object(
 
 def head_object(key: str) -> int | None:
     """Stored byte length, or None when the object is absent."""
+    response = _head(key)
+    return None if response is None else int(response["ContentLength"])
+
+
+def head_media(key: str) -> tuple[int, str] | None:
+    """Stored byte length and content type, or None when absent."""
+    response = _head(key)
+    if response is None:
+        return None
+    return int(response["ContentLength"]), str(response.get("ContentType") or "")
+
+
+def _head(key: str) -> Any:
     try:
         response = getattr(get_client(), "head_object")(Bucket=bucket(), Key=key)
     except ClientError as error:
@@ -598,4 +641,4 @@ def head_object(key: str) -> int | None:
         code = error_code(error)
         logger.warning("storage head_object failed: %s", code)
         raise StorageError("storage head_object failed", code) from None
-    return int(response["ContentLength"])
+    return response

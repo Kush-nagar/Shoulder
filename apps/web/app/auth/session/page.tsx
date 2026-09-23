@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { fetchMe } from "../../../lib/api";
+import { fetchMe, joinDemo } from "../../../lib/api";
 import { verifiedRedirectPath } from "../../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../../lib/auth/server";
 
@@ -29,6 +29,10 @@ export default async function Session({
   }
   if (me?.roles.includes("coach")) redirect("/coach/roster");
   if (me?.roles.includes("player") && me.player) redirect("/player");
+  // Public demo only: a team-less account becomes a synthetic demo player.
+  if (me && !me.roles.length && !me.player && (await joinDemo(token))) {
+    redirect(next?.startsWith("/player/") ? next : "/player");
+  }
   return (
     <main className="mx-auto max-w-md px-5 py-16">
       <h1 className="text-2xl font-semibold">You’re signed in.</h1>

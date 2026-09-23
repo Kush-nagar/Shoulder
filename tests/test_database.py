@@ -66,6 +66,10 @@ TABLES = (
     "deletion_manifest",
     "deletion_manifest_object",
     "product_event",
+    # 0014 - Block 08P player practice videos and AI coach feedback.
+    "practice_video",
+    "ai_coach_feedback",
+    "ai_coach_usage",
 )
 
 
@@ -947,7 +951,9 @@ class ZMigrationTests(unittest.TestCase):
                 # and 0012's three fenced worker helpers plus five outbox and
                 # source-transition trigger functions. 0013 adds retention,
                 # deletion, replay, event, and operator-confirmation helpers.
-                self.assertEqual(self.function_count(connection), 81)
+                # 0014 adds two fenced practice-video retention helpers.
+                # 0015 adds the demo self-join (ADR 0021).
+                self.assertEqual(self.function_count(connection), 84)
                 # This helper intentionally counts only the baseline auth-sync
                 # trigger; Task 22 trigger coverage lives in the policy suite.
                 self.assertEqual(self.trigger_count(connection), 1)
