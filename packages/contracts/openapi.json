@@ -1,6 +1,94 @@
 {
   "components": {
     "schemas": {
+      "AiCoachFeedback": {
+        "description": "An AI suggestion, never a `judgment`; labelled as such in the UI.",
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "development_goal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Development Goal Id"
+          },
+          "drills": {
+            "items": {
+              "$ref": "#/components/schemas/Drill"
+            },
+            "title": "Drills",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "practice_video_id": {
+            "format": "uuid",
+            "title": "Practice Video Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "practice_video_id",
+          "development_goal_id",
+          "model",
+          "body",
+          "drills",
+          "created_at"
+        ],
+        "title": "AiCoachFeedback",
+        "type": "object"
+      },
+      "AnglePercentiles": {
+        "additionalProperties": false,
+        "properties": {
+          "p10": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "P10",
+            "type": "number"
+          },
+          "p50": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "P50",
+            "type": "number"
+          },
+          "p90": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "P90",
+            "type": "number"
+          }
+        },
+        "required": [
+          "p10",
+          "p50",
+          "p90"
+        ],
+        "title": "AnglePercentiles",
+        "type": "object"
+      },
       "AuthIdentity": {
         "properties": {
           "user_id": {
@@ -342,6 +430,36 @@
           "other_player_clip_count"
         ],
         "title": "DeletionStatus",
+        "type": "object"
+      },
+      "Drill": {
+        "additionalProperties": false,
+        "properties": {
+          "how": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "How",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "why": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "why",
+          "how"
+        ],
+        "title": "Drill",
         "type": "object"
       },
       "EvidenceDot": {
@@ -1659,6 +1777,381 @@
         "title": "PlayerReflection",
         "type": "object"
       },
+      "PracticeFeatures": {
+        "additionalProperties": false,
+        "description": "Aggregate, non-identifying movement features. No landmarks, ever.\n\n`extra=\"forbid\"` rejects any extra key, so a landmark array cannot ride\nalong; every field is a bounded scalar or a small scalar object.",
+        "properties": {
+          "duration_ms": {
+            "maximum": 600000.0,
+            "minimum": 1.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "fps": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 240.0,
+            "title": "Fps",
+            "type": "number"
+          },
+          "frames_analyzed": {
+            "maximum": 200000.0,
+            "minimum": 1.0,
+            "title": "Frames Analyzed",
+            "type": "integer"
+          },
+          "head_turns": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Head Turns",
+            "type": "integer"
+          },
+          "head_turns_per_min": {
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Head Turns Per Min",
+            "type": "number"
+          },
+          "hip_flexion_deg": {
+            "$ref": "#/components/schemas/AnglePercentiles"
+          },
+          "knee_flexion_deg": {
+            "$ref": "#/components/schemas/AnglePercentiles"
+          },
+          "stance_width_ratio": {
+            "$ref": "#/components/schemas/StanceWidth"
+          },
+          "trunk_lean_deg": {
+            "$ref": "#/components/schemas/AnglePercentiles"
+          },
+          "visibility_mean": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Visibility Mean",
+            "type": "number"
+          }
+        },
+        "required": [
+          "frames_analyzed",
+          "fps",
+          "duration_ms",
+          "knee_flexion_deg",
+          "hip_flexion_deg",
+          "trunk_lean_deg",
+          "head_turns",
+          "head_turns_per_min",
+          "stance_width_ratio",
+          "visibility_mean"
+        ],
+        "title": "PracticeFeatures",
+        "type": "object"
+      },
+      "PracticeUploadSession": {
+        "description": "One presigned PUT; the browser must send exactly `content_type`.",
+        "properties": {
+          "content_type": {
+            "enum": [
+              "video/mp4",
+              "video/quicktime",
+              "video/webm"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "upload_url",
+          "content_type",
+          "expires_in_seconds"
+        ],
+        "title": "PracticeUploadSession",
+        "type": "object"
+      },
+      "PracticeVideo": {
+        "properties": {
+          "content_type": {
+            "enum": [
+              "video/mp4",
+              "video/quicktime",
+              "video/webm"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "ready",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "upload_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Completed At"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "content_type",
+          "size_bytes",
+          "duration_ms",
+          "title",
+          "created_at",
+          "upload_completed_at",
+          "expires_at"
+        ],
+        "title": "PracticeVideo",
+        "type": "object"
+      },
+      "PracticeVideoComplete": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "anyOf": [
+              {
+                "maximum": 600000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          }
+        },
+        "title": "PracticeVideoComplete",
+        "type": "object"
+      },
+      "PracticeVideoCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "enum": [
+              "video/mp4",
+              "video/quicktime",
+              "video/webm"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 524288000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "PracticeVideoCreate",
+        "type": "object"
+      },
+      "PracticeVideoDetail": {
+        "properties": {
+          "content_type": {
+            "enum": [
+              "video/mp4",
+              "video/quicktime",
+              "video/webm"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "playback_expires_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playback Expires In Seconds"
+          },
+          "playback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playback Url"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "ready",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "upload_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Completed At"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "content_type",
+          "size_bytes",
+          "duration_ms",
+          "title",
+          "created_at",
+          "upload_completed_at",
+          "expires_at",
+          "playback_url",
+          "playback_expires_in_seconds"
+        ],
+        "title": "PracticeVideoDetail",
+        "type": "object"
+      },
       "ReflectionDeleteRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2296,6 +2789,22 @@
           "url"
         ],
         "title": "SpriteSheet",
+        "type": "object"
+      },
+      "StanceWidth": {
+        "additionalProperties": false,
+        "properties": {
+          "p50": {
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "P50",
+            "type": "number"
+          }
+        },
+        "required": [
+          "p50"
+        ],
+        "title": "StanceWidth",
         "type": "object"
       },
       "TeamBootstrap": {
@@ -3717,6 +4226,312 @@
           }
         ],
         "summary": "Create Judgment"
+      }
+    },
+    "/v1/player/practice-videos": {
+      "get": {
+        "operationId": "list_practice_videos_v1_player_practice_videos_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PracticeVideo"
+                  },
+                  "title": "Response List Practice Videos V1 Player Practice Videos Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Practice Videos"
+      },
+      "post": {
+        "operationId": "create_practice_video_v1_player_practice_videos_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeVideoCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeUploadSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Practice Video"
+      }
+    },
+    "/v1/player/practice-videos/{video_id}": {
+      "delete": {
+        "operationId": "delete_practice_video_v1_player_practice_videos__video_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Practice Video"
+      },
+      "get": {
+        "operationId": "read_practice_video_v1_player_practice_videos__video_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeVideoDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Practice Video"
+      }
+    },
+    "/v1/player/practice-videos/{video_id}/ai-feedback": {
+      "get": {
+        "operationId": "list_ai_feedback_v1_player_practice_videos__video_id__ai_feedback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AiCoachFeedback"
+                  },
+                  "title": "Response List Ai Feedback V1 Player Practice Videos  Video Id  Ai Feedback Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Ai Feedback"
+      },
+      "post": {
+        "operationId": "request_ai_feedback_v1_player_practice_videos__video_id__ai_feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeFeatures"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCoachFeedback"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Ai Feedback"
+      }
+    },
+    "/v1/player/practice-videos/{video_id}/complete": {
+      "post": {
+        "operationId": "complete_practice_video_v1_player_practice_videos__video_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeVideoComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeVideo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Complete Practice Video"
       }
     },
     "/v1/players/{player_id}": {
