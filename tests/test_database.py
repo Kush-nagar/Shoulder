@@ -951,7 +951,7 @@ class ZMigrationTests(unittest.TestCase):
                 # source-transition trigger functions. 0013 adds retention,
                 # deletion, replay, event, and operator-confirmation helpers.
                 # 0014 adds two fenced practice-video retention helpers.
-                self.assertEqual(self.function_count(connection), 83)
+                self.assertEqual(self.function_count(connection), 84)
                 # This helper intentionally counts only the baseline auth-sync
                 # trigger; Task 22 trigger coverage lives in the policy suite.
                 self.assertEqual(self.trigger_count(connection), 1)

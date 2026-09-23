@@ -35,3 +35,10 @@ college applications:
 - The LLM output goes through a server-side filter (length, banned words from
   `AGENTS.md` player copy, no numbers presented as scores) before storage.
 - AI feedback is on demand, never a push or nudge.
+- Demo access: with `DEMO_MODE=on`, a signed-in account with no team becomes
+  its own player on the synthetic `age_group = 'DEMO'` team via
+  `private.demo_join` (migration 0015), with a seeded goal attributed to the
+  synthetic demo coach. Keep `DEMO_MODE` off in any real deployment.
+- Known gap before real data: player erasure does not yet add practice-video
+  objects to the deletion manifest (rows cascade; objects remain until the
+  90-day expiry sweep).
