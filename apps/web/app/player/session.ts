@@ -27,9 +27,9 @@ export const playerSession = cache(async () => {
     me = await fetchMe(token);
   }
   if (!me?.roles.includes("player") || !me.player) {
-    return { token, player: null };
+    return { token, player: null, me: null };
   }
-  return { token, player: me.player };
+  return { token, player: me.player, me };
 });
 
 export async function requirePlayerSession(destination?: string) {
@@ -44,5 +44,6 @@ export async function requirePlayerSession(destination?: string) {
   return {
     token: session.token,
     player: session.player,
+    me: session.me as NonNullable<typeof session.me>,
   };
 }
