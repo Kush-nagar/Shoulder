@@ -15,7 +15,7 @@ export function ReflectionList({
   if (reflections.length === 0) {
     return (
       <p className="mt-5 text-[16px] leading-6 text-muted">
-        You have not saved a reflection yet.
+        Notes you write on a clip show up here. They&apos;re optional.
       </p>
     );
   }

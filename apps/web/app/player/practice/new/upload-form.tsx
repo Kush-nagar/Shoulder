@@ -1,8 +1,10 @@
 "use client";
 
+import { Camera, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { formatBytes } from "../../../../lib/upload";
+import { chip } from "../../ui";
 import { clock, focus, primaryButton, secondaryButton } from "../format";
 import type { PracticeUploadStart } from "../types";
 
@@ -80,10 +82,12 @@ function discard(id: string | null) {
   );
 }
 
-export function UploadForm() {
+const SUGGESTIONS = ["Scanning", "First touch", "Passing", "Half-turn"];
+
+export function UploadForm({ initialTitle = "" }: { initialTitle?: string }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(initialTitle);
   const [phase, setPhase] = useState<Phase>("idle");
   const [loaded, setLoaded] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -190,7 +194,7 @@ export function UploadForm() {
   const percent = picked ? Math.round((loaded / picked.file.size) * 100) : 0;
   // A label is the visible control; the file input inside stays focusable.
   const pick =
-    "relative inline-flex min-h-12 w-full cursor-pointer items-center justify-center rounded-lg px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.98] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-45 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus";
+    "relative inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.98] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-45 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus";
 
   return (
     <form
@@ -200,47 +204,6 @@ export function UploadForm() {
         void upload();
       }}
     >
-      <fieldset disabled={busy} className="space-y-3">
-        <legend className="text-[16px] font-semibold">Video</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className={`${pick} bg-ink text-paper hover:bg-ink-2`}>
-            Record now
-            <input
-              type="file"
-              accept="video/*"
-              capture="environment"
-              className="sr-only"
-              onChange={(event) => void choose(event.target.files?.[0])}
-            />
-          </label>
-          <label
-            className={`${pick} border border-line-strong hover:bg-surface-subtle`}
-          >
-            Choose a video
-            <input
-              type="file"
-              accept="video/*"
-              className="sr-only"
-              onChange={(event) => void choose(event.target.files?.[0])}
-            />
-          </label>
-        </div>
-        <p className="text-[14px] leading-5 text-muted">
-          MP4, MOV, or WebM. Up to 500 MB and 10 minutes.
-        </p>
-        {picked ? (
-          <p className="rounded-lg bg-surface-subtle px-4 py-3 text-[15px] leading-6">
-            <span className="block truncate font-semibold">
-              {picked.file.name}
-            </span>
-            <span className="text-muted tabular-nums">
-              {formatBytes(picked.file.size)}
-              {picked.durationMs ? `, ${clock(picked.durationMs)}` : ""}
-            </span>
-          </p>
-        ) : null}
-      </fieldset>
-
       <div className="space-y-2">
         <label
           htmlFor="practice-title"
@@ -257,15 +220,74 @@ export function UploadForm() {
           autoComplete="off"
           onChange={(event) => setTitle(event.target.value)}
           aria-describedby="practice-title-help"
-          className={`block min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-[16px] transition-colors duration-150 hover:border-ink-2 ${focus}`}
+          className={`block min-h-11 w-full rounded-lg border border-control-border bg-surface px-3 text-[16px] transition-colors duration-150 hover:border-ink-2 ${focus}`}
         />
         <p
           id="practice-title-help"
           className="text-[14px] leading-5 text-muted"
         >
-          For example, “Weak foot passing” or “First touch against the wall”.
+          What you worked on. Tap one to fill it in.
         </p>
+        <div className="flex flex-wrap gap-2">
+          {SUGGESTIONS.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              disabled={busy}
+              onClick={() => setTitle(suggestion)}
+              aria-pressed={title === suggestion}
+              className={`${chip} min-h-11 px-4 text-[15px] transition-colors duration-150 hover:bg-surface-subtle aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper ${focus}`}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
       </div>
+
+      <fieldset disabled={busy} className="space-y-3">
+        <legend className="text-[16px] font-semibold">Video</legend>
+        <div className="rounded-xl border border-dashed border-control-border p-4 md:p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={`${pick} bg-ink text-paper hover:bg-ink-2`}>
+              <Camera size={20} strokeWidth={2} aria-hidden="true" />
+              Record now
+              <input
+                type="file"
+                accept="video/*"
+                capture="environment"
+                className="sr-only"
+                onChange={(event) => void choose(event.target.files?.[0])}
+              />
+            </label>
+            <label
+              className={`${pick} border border-control-border bg-surface hover:bg-surface-subtle`}
+            >
+              <Upload size={20} strokeWidth={2} aria-hidden="true" />
+              Choose a video
+              <input
+                type="file"
+                accept="video/*"
+                className="sr-only"
+                onChange={(event) => void choose(event.target.files?.[0])}
+              />
+            </label>
+          </div>
+          <p className="mt-3 text-[14px] leading-5 text-muted">
+            MP4, MOV, or WebM. Up to 500 MB and 10 minutes.
+          </p>
+          {picked ? (
+            <p className="mt-3 rounded-lg bg-surface-subtle px-4 py-3 text-[15px] leading-6">
+              <span className="block truncate font-semibold">
+                {picked.file.name}
+              </span>
+              <span className="text-muted tabular-nums">
+                {formatBytes(picked.file.size)}
+                {picked.durationMs ? `, ${clock(picked.durationMs)}` : ""}
+              </span>
+            </p>
+          ) : null}
+        </div>
+      </fieldset>
 
       {busy ? (
         <div className="space-y-2" aria-live="polite">

@@ -1,9 +1,4 @@
-export const focus =
-  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
-
-export const primaryButton = `inline-flex min-h-11 items-center justify-center rounded-lg bg-action px-5 text-[16px] font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-action-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 ${focus}`;
-
-export const secondaryButton = `inline-flex min-h-11 items-center justify-center rounded-lg border border-line-strong px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 ease-out hover:bg-surface-subtle active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 ${focus}`;
+export { focus, primaryButton, secondaryButton } from "../ui";
 
 export function practiceDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -21,4 +16,22 @@ export function clock(ms: number | null) {
 
 export function practiceTitle(title: string | null) {
   return title?.trim() || "Practice video";
+}
+
+export function monthLabel(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+export type PracticeStatus = "Uploading" | "Ready" | "Analysed";
+
+/** Status words for a practice video; "Analysed" once ideas exist. */
+export function practiceStatus(
+  status: string,
+  analysed = false,
+): PracticeStatus {
+  if (status === "uploading") return "Uploading";
+  return analysed ? "Analysed" : "Ready";
 }
