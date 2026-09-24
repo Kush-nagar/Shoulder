@@ -1,8 +1,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { ShoulderWordmark } from "../../../components/brand";
 import { fetchMe, joinDemo } from "../../../lib/api";
 import { verifiedRedirectPath } from "../../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../../lib/auth/server";
+import { savedTheme, themeAttribute } from "../../../lib/theme";
 
 export const dynamic = "force-dynamic";
 
@@ -38,27 +40,42 @@ export default async function Session({
   if (me && !me.roles.length && !me.player && (await joinDemo(token))) {
     redirect(next?.startsWith("/player/") ? next : "/player");
   }
+  const button =
+    "inline-flex min-h-12 items-center justify-center rounded-lg px-5 text-[16px] font-semibold transition-[background-color,transform] duration-150 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
   return (
-    <main className="mx-auto max-w-md px-5 py-16">
-      <h1 className="text-2xl font-semibold">You’re signed in.</h1>
-      <p className="mt-4">
-        {me
-          ? "Your identity is verified. Team access is not available yet."
-          : "Shoulder is taking longer than usual to load your space. Try again in a moment."}
-      </p>
-      {me ? null : (
-        <a
-          href="/auth/session"
-          className="mt-6 inline-block rounded border border-line p-3"
-        >
-          Try again
-        </a>
-      )}
-      <form action="/auth/sign-out" method="post" className="mt-6">
-        <button type="submit" className="rounded border border-line p-3">
-          Sign out
-        </button>
-      </form>
+    <main
+      data-theme={themeAttribute(await savedTheme())}
+      className="sh-themed flex min-h-dvh flex-col bg-paper px-5 pt-[max(2.5rem,env(safe-area-inset-top))] pb-8 text-ink sm:px-8"
+    >
+      <ShoulderWordmark className="h-auto w-36" />
+      <div className="my-auto w-full max-w-md py-12">
+        <h1 className="font-display text-[34px] leading-[1.05] md:text-[40px]">
+          You’re signed in.
+        </h1>
+        <p className="mt-3 text-[16px] leading-6 text-ink-2">
+          {me
+            ? "Your identity is verified. Team access is not available yet."
+            : "Shoulder is taking longer than usual to load your space. Try again in a moment."}
+        </p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          {me ? null : (
+            <a
+              href="/auth/session"
+              className={`${button} bg-action text-on-action hover:bg-action-hover`}
+            >
+              Try again
+            </a>
+          )}
+          <form action="/auth/sign-out" method="post">
+            <button
+              type="submit"
+              className={`${button} border border-control-border bg-surface hover:bg-surface-subtle`}
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
+      </div>
     </main>
   );
 }

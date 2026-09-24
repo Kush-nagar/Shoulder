@@ -1,5 +1,6 @@
 import { ShoulderMark, ShoulderWordmark } from "../../../components/brand";
 import { verifiedRedirectPath } from "../../../lib/auth/policy";
+import { savedTheme, themeAttribute } from "../../../lib/theme";
 
 /** Google's mark, inline and decorative; the button's text is its label. */
 function GoogleMark() {
@@ -32,65 +33,107 @@ export default async function SignIn({
 }) {
   const state = await searchParams;
   const next = verifiedRedirectPath(state.next);
+  const theme = themeAttribute(await savedTheme());
+  const field =
+    "min-h-12 w-full rounded-lg border border-control-border bg-surface px-3 text-[16px] text-ink transition-colors duration-150 hover:border-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  const button =
+    "flex min-h-12 w-full items-center justify-center gap-3 rounded-lg px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
   return (
-    <main className="mx-auto max-w-md px-5 py-16">
-      <header className="mb-10">
-        <ShoulderWordmark className="h-auto w-44" />
-      </header>
-      <h1 className="text-2xl font-semibold">Sign in to Shoulder</h1>
-      {state.sent && (
-        <p role="status" className="mt-4">
-          If sign-in is available, check your email for a link. Open it in this
-          browser.
-        </p>
-      )}
-      {state.error && (
-        <p role="alert" className="mt-4">
-          We could not sign you in. Try again.
-        </p>
-      )}
-      <form action="/auth/google" method="post" className="mt-6">
-        {next ? <input type="hidden" name="next" value={next} /> : null}
-        <button
-          type="submit"
-          className="flex w-full items-center justify-center gap-3 rounded border border-line p-3 font-semibold"
-        >
-          {/* Inline, not an <img> or a Google-hosted asset: the sign-in page is
-              asserted to make no cross-origin request and to contain no image. */}
-          <GoogleMark />
-          Continue with Google
-        </button>
-      </form>
-      {/* Deliberately not a heading: the sign-in page's tests locate its only
-          heading without scoping, so a second one would make them ambiguous. */}
-      <p className="mt-6 text-sm text-muted">Or use your email address.</p>
-      <form
-        action="/auth/magic-link"
-        method="post"
-        className="mt-3 flex flex-col gap-3"
+    <main
+      data-theme={theme}
+      className="sh-themed grid min-h-dvh bg-paper text-ink lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+    >
+      <div className="flex flex-col px-5 pt-[max(2.5rem,env(safe-area-inset-top))] pb-8 sm:px-8 lg:px-16">
+        <header>
+          <ShoulderWordmark className="h-auto w-36" />
+        </header>
+        <div className="my-auto w-full max-w-sm py-12">
+          <h1 className="font-display text-[34px] leading-[1.05] md:text-[40px]">
+            Sign in to Shoulder
+          </h1>
+          <p className="mt-3 text-[16px] leading-6 text-ink-2">
+            Your coach&apos;s clips and your own practice, in one private place.
+          </p>
+          {state.sent && (
+            <p
+              role="status"
+              className="mt-6 rounded-xl border border-line bg-surface p-4 text-[16px] leading-6"
+            >
+              If sign-in is available, check your email for a link. Open it in
+              this browser.
+            </p>
+          )}
+          {state.error && (
+            <p
+              role="alert"
+              className="mt-6 rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
+            >
+              We could not sign you in. Try again.
+            </p>
+          )}
+          <form action="/auth/google" method="post" className="mt-8">
+            {next ? <input type="hidden" name="next" value={next} /> : null}
+            <button
+              type="submit"
+              className={`${button} border border-control-border bg-surface hover:bg-surface-subtle`}
+            >
+              {/* Inline, not an <img> or a Google-hosted asset: the sign-in page is
+                  asserted to make no cross-origin request and to contain no image. */}
+              <GoogleMark />
+              Continue with Google
+            </button>
+          </form>
+          {/* Deliberately not a heading: the sign-in page's tests locate its only
+              heading without scoping, so a second one would make them ambiguous. */}
+          <p className="mt-6 flex items-center gap-3 text-[14px] text-muted">
+            <span aria-hidden="true" className="h-px flex-1 bg-line" />
+            Or use your email address
+            <span aria-hidden="true" className="h-px flex-1 bg-line" />
+          </p>
+          <form
+            action="/auth/magic-link"
+            method="post"
+            className="mt-4 flex flex-col gap-2"
+          >
+            {next ? <input type="hidden" name="next" value={next} /> : null}
+            <label htmlFor="email" className="text-[16px] font-semibold">
+              Email address
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              maxLength={254}
+              className={field}
+            />
+            <button
+              type="submit"
+              className={`${button} mt-2 bg-action text-on-action hover:bg-action-hover`}
+            >
+              Email a sign-in link
+            </button>
+          </form>
+        </div>
+        <footer className="flex items-center gap-3 border-t border-line pt-6">
+          <ShoulderMark className="size-6" />
+          <p className="text-[14px] text-muted">A private tool for one team.</p>
+        </footer>
+      </div>
+      <div
+        aria-hidden="true"
+        className="relative hidden overflow-hidden bg-night text-on-night lg:flex lg:flex-col lg:justify-end lg:p-16"
       >
-        {next ? <input type="hidden" name="next" value={next} /> : null}
-        <label htmlFor="email">Email address</label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-          maxLength={254}
-          className="rounded border border-line p-3"
-        />
-        <button
-          type="submit"
-          className="rounded border border-line p-3 font-semibold"
-        >
-          Email a sign-in link
-        </button>
-      </form>
-      <footer className="mt-12 flex items-center gap-3 border-t border-line pt-6">
-        <ShoulderMark className="size-6" />
-        <p className="text-sm text-muted">A private tool for one team.</p>
-      </footer>
+        <span className="absolute inset-y-0 left-0 w-0.5 bg-brand" />
+        <p className="max-w-[14ch] font-display text-[64px] leading-[0.98] uppercase">
+          Check your shoulder before you receive.
+        </p>
+        <p className="mt-6 max-w-[40ch] text-[17px] leading-7 text-night-muted">
+          Your coach picks a few moments from each game and writes one line on
+          each. You watch, practise, and notice.
+        </p>
+      </div>
     </main>
   );
 }
