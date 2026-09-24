@@ -246,7 +246,9 @@ def request_ai_feedback(
         generated = ai_coach.generate_feedback(features, goal.title if goal else None)
         result = AiCoachResult.model_validate(generated.model_dump())
     except Exception as error:  # noqa: BLE001 - any upstream failure is a 502
-        logger.warning("ai coach failed: %s", type(error).__name__)
+        # `reason` is a fixed internal string (never the key or model text).
+        reason = getattr(error, "reason", type(error).__name__)
+        logger.warning("ai coach failed: %s", reason)
         raise Problem(
             502, "The AI coach could not answer right now. Try again later."
         ) from None

@@ -19,6 +19,8 @@ from services.api.schemas import AiCoachResult, Drill, PracticeFeatures
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "deepseek/deepseek-chat"
+# OpenRouter tries these in order when the primary's provider is overloaded.
+DEFAULT_FALLBACKS = "deepseek/deepseek-v3.2,google/gemini-2.5-flash"
 TIMEOUT_S = 30
 
 SYSTEM_PROMPT = """You are a youth soccer training assistant for players aged 13 to 18.
@@ -105,13 +107,15 @@ def generate_feedback(
     if not key:
         raise AiCoachError("OPENROUTER_API_KEY not set")
     model = os.environ.get("AI_COACH_MODEL") or DEFAULT_MODEL
+    fallbacks = os.environ.get("AI_COACH_FALLBACK_MODELS", DEFAULT_FALLBACKS)
+    models = [model, *(m.strip() for m in fallbacks.split(",") if m.strip())]
     user = json.dumps(
         {"development_goal": goal_title, "features": features.model_dump()}
     )
     data = _post(
         key,
         {
-            "model": model,
+            "models": list(dict.fromkeys(models)),
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user},
@@ -128,4 +132,7 @@ def generate_feedback(
     if not isinstance(content, str):
         raise AiCoachError("upstream shape")
     output = check_output(content)
-    return AiCoachResult(body=output.body, drills=output.drills, model=model)
+    # Record the model that actually answered, if it is one we asked for.
+    used = data.get("model") if isinstance(data, dict) else None
+    used = used if used in models else model
+    return AiCoachResult(body=output.body, drills=output.drills, model=used)
