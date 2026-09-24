@@ -47,6 +47,7 @@ class AiCoachTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop("AI_COACH_MODEL", None)
+        os.environ.pop("AI_COACH_FALLBACK_MODELS", None)
 
     def call(self, response: Any) -> Any:
         with patch.object(ai_coach, "urlopen") as urlopen:
@@ -61,6 +62,9 @@ class AiCoachTests(unittest.TestCase):
 
     def test_happy_path(self) -> None:
         result = self.call(completion(json.dumps(GOOD)))
+        self.assertEqual(
+            json.loads(self.request.data)["models"][0], "deepseek/deepseek-chat"
+        )
         self.assertEqual(result.body, GOOD["body"])
         self.assertEqual(result.drills[0].title, "Shoulder check pass")
         self.assertEqual(result.model, "deepseek/deepseek-chat")
@@ -75,6 +79,26 @@ class AiCoachTests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_COACH_MODEL": "x/y"}):
             result = self.call(completion(json.dumps(GOOD)))
         self.assertEqual(result.model, "x/y")
+
+    def test_fallback_models_and_the_one_that_answered(self) -> None:
+        body = json.loads(completion(json.dumps(GOOD)).getvalue())
+        body["model"] = "google/gemini-2.5-flash"
+        with patch.dict(
+            os.environ, {"AI_COACH_FALLBACK_MODELS": "a/b, google/gemini-2.5-flash"}
+        ):
+            result = self.call(io.BytesIO(json.dumps(body).encode()))
+        sent = json.loads(self.request.data)
+        self.assertEqual(
+            sent["models"], ["deepseek/deepseek-chat", "a/b", "google/gemini-2.5-flash"]
+        )
+        self.assertNotIn("model", sent)
+        self.assertEqual(result.model, "google/gemini-2.5-flash")
+
+    def test_unrequested_model_name_is_not_recorded(self) -> None:
+        body = json.loads(completion(json.dumps(GOOD)).getvalue())
+        body["model"] = "someone/else"
+        result = self.call(io.BytesIO(json.dumps(body).encode()))
+        self.assertEqual(result.model, "deepseek/deepseek-chat")
 
     def assert_rejected(self, response: Any) -> AiCoachError:
         with self.assertRaises(AiCoachError) as caught:
