@@ -129,24 +129,22 @@ test("local start removes only a conflicting linked Postgres version override", 
   }
 });
 
-test("font manifest pin and distributed license match the installed package", () => {
+test("font manifest pins and distributed licenses match the installed packages", () => {
   const manifest = JSON.parse(readFileSync("apps/web/package.json", "utf8"));
-  const installed = JSON.parse(
-    readFileSync(
-      "apps/web/node_modules/@fontsource-variable/inter-tight/package.json",
-      "utf8",
-    ),
-  );
-  assert.equal(
-    manifest.dependencies["@fontsource-variable/inter-tight"],
-    installed.version,
-  );
-  assert.match(installed.version, /^\d+\.\d+\.\d+$/);
-  assert.equal(
-    readFileSync("apps/web/public/licenses/inter-tight-OFL.txt", "utf8"),
-    readFileSync(
-      "apps/web/node_modules/@fontsource-variable/inter-tight/LICENSE",
-      "utf8",
-    ),
-  );
+  for (const [name, license] of [
+    ["inter-tight", "inter-tight-OFL.txt"],
+    ["archivo", "archivo-OFL.txt"],
+  ]) {
+    const root = `apps/web/node_modules/@fontsource-variable/${name}`;
+    const installed = JSON.parse(readFileSync(`${root}/package.json`, "utf8"));
+    assert.equal(
+      manifest.dependencies[`@fontsource-variable/${name}`],
+      installed.version,
+    );
+    assert.match(installed.version, /^\d+\.\d+\.\d+$/);
+    assert.equal(
+      readFileSync(`apps/web/public/licenses/${license}`, "utf8"),
+      readFileSync(`${root}/LICENSE`, "utf8"),
+    );
+  }
 });
