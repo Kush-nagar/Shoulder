@@ -11,6 +11,10 @@ param(
     [string]$DemoTeamId
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell prefixes piped native stdin with a UTF-8 BOM otherwise,
+# which corrupts the first secret name.
+$global:OutputEncoding = New-Object System.Text.UTF8Encoding $false
+[Console]::OutputEncoding = $global:OutputEncoding
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
 function Read-EnvFile([string]$Path) {
@@ -18,7 +22,7 @@ function Read-EnvFile([string]$Path) {
     foreach ($line in Get-Content $Path) {
         if ($line -match '^\s*#' -or !$line.Trim()) { continue }
         $pair = $line -split '=', 2
-        $values[$pair[0].Trim()] = $pair[1]
+        $values[$pair[0].Trim().TrimStart([char]0xFEFF)] = $pair[1]
     }
     return $values
 }
@@ -49,9 +53,15 @@ switch ($Step) {
             & fly apps create $FlyApp
             if ($LASTEXITCODE) { throw 'fly apps create failed' }
         }
-        ($secrets.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) |
-            & fly secrets import --app $FlyApp --stage
-        if ($LASTEXITCODE) { throw 'fly secrets import failed' }
+        # A BOM-free temp file redirected by cmd: Windows PowerShell's own pipe
+        # to a native program prefixes a BOM that corrupts the first name.
+        $file = [System.IO.Path]::GetTempFileName()
+        try {
+            $lines = $secrets.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }
+            [System.IO.File]::WriteAllLines($file, [string[]]$lines, (New-Object System.Text.UTF8Encoding $false))
+            & cmd /c "fly secrets import --app $FlyApp --stage < `"$file`""
+            if ($LASTEXITCODE) { throw 'fly secrets import failed' }
+        } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
         & fly deploy --app $FlyApp --remote-only
         if ($LASTEXITCODE) { throw 'fly deploy failed' }
         Write-Host "API: https://$FlyApp.fly.dev/health"
@@ -65,10 +75,15 @@ switch ($Step) {
             SUPABASE_PUBLISHABLE_KEY = $api['SUPABASE_PUBLISHABLE_KEY']
             API_BASE_URL = "https://$FlyApp.fly.dev"
         }
-        foreach ($name in $values.Keys) {
-            $values[$name] | & vercel env add $name production --force
-            if ($LASTEXITCODE) { throw "vercel env add $name failed" }
-        }
+        # Same BOM hazard as the Fly step: redirect a BOM-free file via cmd.
+        $file = [System.IO.Path]::GetTempFileName()
+        try {
+            foreach ($name in $values.Keys) {
+                [System.IO.File]::WriteAllText($file, $values[$name], (New-Object System.Text.UTF8Encoding $false))
+                & cmd /c "vercel env add $name production --force < `"$file`""
+                if ($LASTEXITCODE) { throw "vercel env add $name failed" }
+            }
+        } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
         & vercel deploy --prod --yes
         if ($LASTEXITCODE) { throw 'vercel deploy failed' }
     }

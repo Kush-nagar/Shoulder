@@ -1,0 +1,11 @@
+# Upload only what the web build needs (Root Directory is apps/web).
+/*
+!/apps
+!/packages
+!/package.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+/apps/web/node_modules
+/apps/web/.next
+/apps/web/public/mediapipe
+/apps/web/.env*
