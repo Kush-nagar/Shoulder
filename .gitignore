@@ -33,3 +33,6 @@ graphify-out/
 
 # Copied from @mediapipe/tasks-vision by apps/web/scripts/copy-mediapipe.mjs.
 apps/web/public/mediapipe/
+
+# Vercel CLI project link.
+.vercel
