@@ -18,6 +18,11 @@ export const playerSession = cache(async () => {
   }
   if (!token) return null;
   let me = await fetchMe(token);
+  // A waking API can miss the first call; retry before treating it as no access.
+  for (let attempt = 0; !me && attempt < 2; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    me = await fetchMe(token);
+  }
   if (me && !me.roles.length && !me.player && (await joinDemo(token))) {
     me = await fetchMe(token);
   }
