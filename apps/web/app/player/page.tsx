@@ -590,7 +590,7 @@ export default async function PlayerHome() {
     <div className="mx-auto max-w-[680px] lg:max-w-none">
       <header className="sh-rise">
         <h1 className="font-display text-[32px] leading-[1.05] md:text-[44px]">
-          {name ? `Hi, ${name}.` : "Your clips."}
+          {name ? `Hi, ${name}.` : "Welcome to Shoulder."}
         </h1>
         <p className="mt-1 text-[14px] text-muted">{greetingDate()}</p>
       </header>

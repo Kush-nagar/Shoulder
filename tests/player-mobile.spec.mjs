@@ -381,9 +381,9 @@ test("linked player sees only current clips across phone viewports", async ({
       await page.setViewportSize({ width, height });
       await page.goto("/");
       await expect(page).toHaveURL(`${origin}/player`);
-      // ADR 0022: a plain first name greets the player, else "Your clips."
+      // ADR 0022: a plain first name greets the player, else "Welcome to Shoulder."
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-        /^(Hi, \p{L}[\p{L}'’-]*|Your clips)\.$/u,
+        /^(Hi, \p{L}[\p{L}'’-]*|Welcome to Shoulder)\.$/u,
       );
       await expect(page.getByText("Scan before receiving")).toBeVisible();
       expect(
