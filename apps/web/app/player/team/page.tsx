@@ -1,8 +1,9 @@
 import type { components } from "@shoulder/contracts";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { requirePlayerSession } from "../session";
 import { km, kmh } from "../sessions/format";
 import { read } from "../sessions/server";
-import { requirePlayerSession } from "../session";
 import {
   backLink,
   errorBox,
@@ -69,12 +70,12 @@ export default async function TeamPage({
   return (
     <div className="max-w-[760px]">
       <Link href="/player/sessions" className={backLink}>
-        ← Sessions
+        <ArrowLeft size={18} strokeWidth={2} aria-hidden="true" />
+        Sessions
       </Link>
       <h1 className={`${pageTitle} mt-2`}>Team board</h1>
       <p className="mt-3 max-w-[60ch] text-[16px] leading-6 text-ink-2">
-        See your teammates&apos; tracking totals side by side. It&apos;s only
-        for players who choose to join.
+        Tracking totals side by side, only for players who join.
       </p>
 
       {membership.data === null ? (

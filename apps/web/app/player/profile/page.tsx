@@ -1,27 +1,44 @@
+import {
+  CircleUser,
+  LifeBuoy,
+  type LucideIcon,
+  Palette,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { initial } from "../identity";
+import type { CSSProperties, ReactNode } from "react";
 import { marketplaceEnabled } from "../../../lib/marketplace";
 import { savedTheme } from "../../../lib/theme";
+import { SectionHeading } from "../heading";
+import { initial } from "../identity";
 import { requirePlayerSession } from "../session";
 import { PlayerSignOutForm } from "../sign-out-form";
-import { pageTitle, sectionTitle, textLink } from "../ui";
+import { pageTitle, textLink } from "../ui";
 import { ShowGuideButton, ThemePicker } from "./profile-controls";
 
 function Section({
   id,
   title,
+  Icon,
+  index,
   children,
 }: {
   id: string;
   title: string;
+  Icon: LucideIcon;
+  index: number;
   children: ReactNode;
 }) {
   return (
-    <section aria-labelledby={id} className="border-t border-line py-8">
-      <h2 id={id} className={sectionTitle}>
+    <section
+      aria-labelledby={id}
+      style={{ "--i": index } as CSSProperties}
+      className="sh-rise border-t border-line py-8"
+    >
+      <SectionHeading id={id} Icon={Icon}>
         {title}
-      </h2>
+      </SectionHeading>
       <div className="mt-4">{children}</div>
     </section>
   );
@@ -44,7 +61,7 @@ export default async function ProfilePage() {
     <div className="max-w-[680px]">
       <h1 className={`${pageTitle} mb-6`}>Profile</h1>
 
-      <Section id="account-title" title="Account">
+      <Section id="account-title" title="Account" Icon={CircleUser} index={0}>
         <div className="flex items-center gap-4">
           <span
             aria-hidden="true"
@@ -66,19 +83,29 @@ export default async function ProfilePage() {
         </div>
       </Section>
 
-      <Section id="appearance-title" title="Appearance">
+      <Section
+        id="appearance-title"
+        title="Appearance"
+        Icon={Palette}
+        index={1}
+      >
         <ThemePicker initial={theme} />
         <p className="mt-3 text-[14px] leading-5 text-muted">
-          System follows your phone or computer setting.
+          System follows your device.
         </p>
       </Section>
 
-      <Section id="data-title" title="How your data is used">
+      <Section
+        id="data-title"
+        title="How your data is used"
+        Icon={ShieldCheck}
+        index={2}
+      >
         <ul className="space-y-3">
           {dataUse.map((line) => (
             <li
               key={line}
-              className="border-l-2 border-line-strong pl-4 text-[16px] leading-6 text-ink-2"
+              className="border-l-2 border-line-strong pl-4 text-[16px] leading-6 text-ink-2 transition-colors duration-150 hover:border-brand"
             >
               {line}
             </li>
@@ -86,7 +113,12 @@ export default async function ProfilePage() {
         </ul>
       </Section>
 
-      <Section id="delete-title" title="Delete something">
+      <Section
+        id="delete-title"
+        title="Delete something"
+        Icon={Trash2}
+        index={3}
+      >
         <dl className="space-y-4 text-[16px] leading-6">
           <div>
             <dt className="font-semibold">A practice video</dt>
@@ -119,7 +151,7 @@ export default async function ProfilePage() {
         </dl>
       </Section>
 
-      <Section id="help-title" title="Help">
+      <Section id="help-title" title="Help" Icon={LifeBuoy} index={4}>
         <ul className="space-y-1">
           {marketplaceEnabled() ? (
             <li>

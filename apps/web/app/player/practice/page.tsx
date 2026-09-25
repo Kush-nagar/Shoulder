@@ -1,4 +1,4 @@
-import { Footprints, Play } from "lucide-react";
+import { Lock, Play, Video } from "lucide-react";
 import Link from "next/link";
 import { requirePlayerSession } from "../session";
 import { errorBox, pageTitle, sectionTitle, textLink } from "../ui";
@@ -36,12 +36,18 @@ export default async function PracticePage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1 className={pageTitle}>Practice</h1>
         <Link href="/player/practice/new" className={primaryButton}>
-          <Footprints size={20} strokeWidth={2} aria-hidden="true" />
+          <Video size={20} strokeWidth={2} aria-hidden="true" />
           Film practice
         </Link>
       </div>
-      <p className="mt-3 max-w-[56ch] text-[16px] leading-6 text-ink-2">
-        Only you can see these videos. Each one is removed 90 days after upload.
+      <p className="mt-3 flex max-w-[56ch] items-center gap-2 text-[15px] leading-6 text-muted">
+        <Lock
+          size={16}
+          strokeWidth={2}
+          aria-hidden="true"
+          className="shrink-0"
+        />
+        Only you can see these. Each is removed 90 days after upload.
       </p>
 
       {videos === null ? (
@@ -51,21 +57,27 @@ export default async function PracticePage() {
       ) : videos.length === 0 ? (
         <section
           aria-labelledby="practice-empty-title"
-          className="mt-8 max-w-[680px] rounded-xl border border-dashed border-control-border px-5 py-8 md:px-8"
+          className="sh-rise mt-8 max-w-[680px] rounded-xl bg-surface-subtle px-5 py-8 md:px-8"
         >
+          <span
+            aria-hidden="true"
+            className="mb-4 flex size-12 items-center justify-center rounded-full bg-surface text-brand"
+          >
+            <Video size={22} strokeWidth={2} />
+          </span>
           <h2 id="practice-empty-title" className={sectionTitle}>
             No practice videos yet
           </h2>
           <p className="mt-2 text-[16px] leading-6 text-ink-2">
-            Film a drill, see how you moved, and get training ideas.
+            Film a drill and see how you moved.
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
             <Link href="/player/practice/new" className={primaryButton}>
-              <Footprints size={20} strokeWidth={2} aria-hidden="true" />
+              <Video size={20} strokeWidth={2} aria-hidden="true" />
               Film practice
             </Link>
             <Link href="/player/drills" className={textLink}>
-              Need an idea? Browse drills
+              Browse drills
             </Link>
           </div>
         </section>
@@ -75,7 +87,7 @@ export default async function PracticePage() {
             <h2 className="text-[17px] font-semibold leading-[1.35] text-ink-2">
               {month}
             </h2>
-            <ul className="mt-3 divide-y divide-line border-t border-line md:grid md:grid-cols-2 md:gap-x-4 md:gap-y-6 md:divide-y-0 md:border-t-0 lg:grid-cols-3">
+            <ul className="sh-stagger mt-3 divide-y divide-line border-t border-line md:grid md:grid-cols-2 md:gap-x-4 md:gap-y-6 md:divide-y-0 md:border-t-0 lg:grid-cols-3">
               {items.map((video) => {
                 const length = clock(video.duration_ms);
                 return (
@@ -84,8 +96,8 @@ export default async function PracticePage() {
                       href={`/player/practice/${video.id}`}
                       className={`group flex items-center gap-3 rounded-lg py-3 md:block md:py-0 ${focus}`}
                     >
-                      <span className="relative flex aspect-video w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-night text-on-night md:w-full">
-                        <span className="flex size-8 items-center justify-center rounded-full border border-night-line md:size-11">
+                      <span className="relative flex aspect-video w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-night text-on-night transition-transform duration-200 ease-out group-hover:-translate-y-0.5 group-active:scale-[0.98] md:w-full">
+                        <span className="flex size-8 items-center justify-center rounded-full border border-night-line transition-[background-color,transform] duration-200 ease-out group-hover:scale-110 group-hover:bg-on-night/10 md:size-11">
                           <Play
                             size={14}
                             strokeWidth={2}

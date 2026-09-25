@@ -128,22 +128,287 @@ body {
   color: var(--sh-ink);
 }
 
-/* One entrance for dashboard sections; `--i` staggers them 40 ms apart. */
+/* ---- Motion (ADR 0024). Every rule below sits behind no-preference. ---- */
+:root {
+  --sh-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sh-ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  /* One entrance per section; `--i` staggers them 45 ms apart. */
   .sh-rise {
-    animation: sh-rise 200ms ease-out both;
-    animation-delay: calc(var(--i, 0) * 40ms);
+    animation: sh-rise 320ms var(--sh-ease) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  /* Card lists: children rise in sequence, capped at the eighth. */
+  .sh-stagger > * {
+    animation: sh-rise 320ms var(--sh-ease) both;
+  }
+  .sh-stagger > :nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .sh-stagger > :nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .sh-stagger > :nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .sh-stagger > :nth-child(5) {
+    animation-delay: 160ms;
+  }
+  .sh-stagger > :nth-child(6) {
+    animation-delay: 200ms;
+  }
+  .sh-stagger > :nth-child(7) {
+    animation-delay: 240ms;
+  }
+  .sh-stagger > :nth-child(n + 8) {
+    animation-delay: 280ms;
+  }
+
+  /* Skeleton shimmer: one slow, steady sweep; static under reduced motion. */
+  .sh-skel {
+    background-image: linear-gradient(
+      100deg,
+      transparent 30%,
+      color-mix(in oklab, var(--sh-paper) 55%, transparent) 50%,
+      transparent 70%
+    );
+    background-size: 220% 100%;
+    background-repeat: no-repeat;
+    animation: sh-shimmer 1.6s linear infinite;
+  }
+
+  /* Route change: the content region cross-fades up; the shell holds still. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+  ::view-transition-old(.sh-page) {
+    animation: sh-page-out 120ms var(--sh-ease-in) both;
+  }
+  ::view-transition-new(.sh-page) {
+    animation: sh-page-in 260ms var(--sh-ease) both;
+  }
+  ::view-transition-group(.sh-page) {
+    animation-duration: 260ms;
+  }
+  /* Active nav marker glides to the new tab during a navigation. */
+  ::view-transition-group(sh-nav-marker),
+  ::view-transition-group(sh-tab-marker),
+  ::view-transition-group(sh-section-marker) {
+    animation-duration: 280ms;
+    animation-timing-function: var(--sh-ease);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
   }
 }
 
 @keyframes sh-rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes sh-shimmer {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+
+@keyframes sh-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes sh-page-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.sh-skel {
+  background-color: var(--sh-surface-subtle);
+}
+
+/* ---- App shell sidebar (player and coach) ------------------------------ */
+/*
+ * `--rail` is the sidebar column. Rail (icon only) from 768 px; full
+ * sidebar from 1024 px unless the `sh-sidebar` cookie collapsed it. The
+ * tablet rail expands as an overlay (`data-rail="open"`) without moving the
+ * page, like Material 3's modal navigation rail.
+ */
+.sh-shell {
+  --rail: 76px;
+}
+@media (min-width: 1024px) {
+  .sh-shell:not([data-sidebar="collapsed"]) {
+    --rail: 248px;
+  }
+}
+@media (min-width: 768px) {
+  .sh-shell {
+    display: grid;
+    grid-template-columns: var(--rail) minmax(0, 1fr);
+  }
+  .sh-side-panel {
+    width: var(--rail);
+  }
+  .sh-shell[data-rail="open"] .sh-side-panel {
+    overflow-x: clip;
+    width: 248px;
+    box-shadow: 0 16px 48px rgba(23, 21, 18, 0.14);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sh-shell.sh-animate {
+    transition: grid-template-columns 260ms var(--sh-ease);
+  }
+  .sh-shell.sh-animate .sh-side-panel {
+    transition:
+      width 260ms var(--sh-ease),
+      box-shadow 260ms var(--sh-ease);
+  }
+  /* Replays each time the sidebar opens (display none to block). */
+  .sh-sb-wide {
+    animation: sh-fade-in 220ms var(--sh-ease) 90ms both;
+  }
+}
+
+/* Open = full sidebar at 1024+, or the tablet overlay. */
+.sh-sb-wide {
+  display: none;
+}
+.sh-sb-tip {
+  display: none;
+}
+@media (min-width: 768px) {
+  .sh-sb-narrow {
+    display: flex;
+  }
+  .sh-sb-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .sh-shell[data-rail="open"] .sh-sb-wide {
+    display: block;
+  }
+  .sh-shell[data-rail="open"] .sh-sb-narrow {
+    display: none;
+  }
+  .sh-shell[data-rail="open"] .sh-sb-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+  .sh-shell[data-rail="open"] .sh-sb-row {
+    justify-content: flex-start;
+    padding-inline: 12px;
+  }
+  /* Tooltips name icon-only rail controls on hover and keyboard focus. */
+  .sh-shell:not([data-rail="open"]) .sh-sb-tip {
+    display: block;
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    z-index: 40;
+    translate: 0 -50%;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    scale: 0.96;
+    transition:
+      opacity 120ms ease-out,
+      scale 120ms ease-out;
+  }
+  .sh-shell:not([data-rail="open"])
+    :is(a, button):is(:hover, :focus-visible)
+    > .sh-sb-tip {
+    opacity: 1;
+    scale: 1;
+    transition-delay: 250ms;
+  }
+}
+@media (min-width: 1024px) {
+  .sh-shell:not([data-sidebar="collapsed"]) .sh-side-panel {
+    overflow-x: clip;
+  }
+  .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-wide {
+    display: block;
+  }
+  .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-narrow {
+    display: none;
+  }
+  .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+  .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-row {
+    justify-content: flex-start;
+    padding-inline: 12px;
+  }
+  .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-tip {
+    display: none;
+  }
+}
+
+/* ---- Phone account sheet ------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  details[open] > .sh-sheet .sh-sheet-panel {
+    animation: sh-sheet-in 220ms var(--sh-ease) both;
+  }
+  details[open] > .sh-sheet .sh-sheet-scrim {
+    animation: sh-fade-in 220ms ease-out both;
+  }
+  details[data-closing] > .sh-sheet .sh-sheet-panel {
+    animation: sh-sheet-out 160ms var(--sh-ease-in) both;
+  }
+  details[data-closing] > .sh-sheet .sh-sheet-scrim {
+    animation: sh-fade-out 160ms ease-in both;
+  }
+}
+
+@keyframes sh-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sh-sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes sh-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sh-fade-out {
+  to {
+    opacity: 0;
   }
 }
 

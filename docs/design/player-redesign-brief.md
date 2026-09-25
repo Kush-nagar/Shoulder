@@ -478,3 +478,28 @@ Product rules
 - **D3 Icons:** approve `lucide-react` as the one icon dependency (recommended) or Phosphor.
 - **D4 Shell change:** approve replacing the 560 px player column and two-tab bar in `09-frontend-design-system.md` with the responsive shell in section 4 (record as a short ADR).
 - **D5 Practice posters:** accept 3 extra detail calls (3 short-lived signed URLs) per Home load for poster frames, or show typographic tiles until a server-side poster frame exists.
+
+---
+
+## Motion & loading, 2026-09-25
+
+Owner follow-up to the shipped redesign, recorded in
+[ADR 0024](../decisions/0024-app-shell-motion-and-streaming.md). Applies to the
+player, coaching and coach shells. Patterns adopted:
+
+| # | Pattern | Where it lands | Source |
+|---|---|---|---|
+| 1 | Collapsible sidebar with a one-key toggle (`[`), state remembered | `sh-sidebar` cookie, server-rendered, no flash; `[` outside text fields | https://linear.app/changelog/unpublished-collapsible-sidebar , https://x.com/linear/status/1613682657719877632 |
+| 2 | Dimmer, quieter navigation chrome so content leads; icon + label rows aligned on one grid | 44 px sidebar rows, icon-only rail with tooltips, brand icon on section heads | https://linear.app/now/how-we-redesigned-the-linear-ui |
+| 3 | Sidebar that can be hidden on desktop; one-handed bottom bar on phones with the same destinations | Collapse to a 76 px rail; phone tabs unchanged | https://vercel.com/changelog/dashboard-navigation-redesign-rollout |
+| 4 | Modal expanded navigation rail: opens over content with a scrim and does not move the layout grid | 768 to 1023 px rail expands as an overlay; Escape or scrim closes | https://m3.material.io/components/navigation-rail/guidelines |
+| 5 | Adaptable sidebar that collapses and expands in place, as on iPadOS | One toggle, width animates via `grid-template-columns` | https://developer.apple.com/videos/play/wwdc2024/10147/ |
+| 6 | Skeletons that match the final layout and reserve its space; a slow, steady wave reads as shorter than a pulse; no spinners | `loading.tsx` per segment and `<Suspense>` fallbacks on Home, one 1.6 s shimmer, static under reduced motion | https://blog.logrocket.com/ux-design/skeleton-loading-screen-design/ |
+| 7 | Same-document View Transitions: snapshot old and new state, animate with CSS; progressive enhancement | Content region fades up on navigation; shell and root do not animate | https://developer.chrome.com/docs/web-platform/view-transitions/same-document |
+| 8 | React `<ViewTransition>` in the App Router, `default="none"` so Suspense reveals and refreshes do not animate | `PageTransition` keyed by pathname in both shells | https://github.com/vercel/next.js/blob/canary/docs/01-app/02-guides/view-transitions.mdx |
+| 9 | Shared-element morph for the active tab marker (named view transition) | `sh-nav-marker`, `sh-tab-marker`, `sh-section-marker` glide between tabs | https://developer.chrome.com/blog/view-transitions-in-2025 |
+
+Rules kept: one accent, no gradients for decoration, no emoji, no badges,
+streaks, nudges or scores. Changed from section 3.5: skeleton shimmer is the
+single allowed loop (loading placeholders only), and rail items may be
+icon-only when they carry an accessible name and a tooltip.

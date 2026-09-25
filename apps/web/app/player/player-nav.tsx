@@ -69,7 +69,7 @@ export function BottomTabs() {
   return (
     <nav
       aria-label="Player navigation"
-      className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] md:hidden"
+      className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
     >
       <ul className="grid h-16 grid-cols-5 px-0.5">
         {tabs.map(({ href, label, Icon, match }) => {
@@ -79,19 +79,25 @@ export function BottomTabs() {
               <Link
                 href={href}
                 aria-current={current ? "page" : undefined}
-                className={`relative flex h-full flex-col items-center justify-center gap-1 rounded-lg text-[13px] leading-none transition-colors duration-150 ease-out ${ring} ${
+                className={`group relative flex h-full flex-col items-center justify-center gap-1 rounded-lg text-[12px] leading-none transition-colors duration-150 ease-out ${ring} ${
                   current
                     ? "font-semibold text-ink"
                     : "font-medium text-muted hover:text-ink"
                 }`}
               >
-                <span
+                {current ? (
+                  <span
+                    aria-hidden="true"
+                    style={{ viewTransitionName: "sh-tab-marker" }}
+                    className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-action"
+                  />
+                ) : null}
+                <Icon
+                  size={22}
+                  strokeWidth={current ? 2.25 : 2}
                   aria-hidden="true"
-                  className={`absolute inset-x-3 top-0 h-0.5 rounded-full bg-action transition-transform duration-180 ease-out ${
-                    current ? "scale-x-100" : "scale-x-0"
-                  }`}
+                  className="transition-transform duration-150 ease-out group-active:scale-90"
                 />
-                <Icon size={22} strokeWidth={2} aria-hidden="true" />
                 {label}
               </Link>
             </li>
@@ -102,12 +108,15 @@ export function BottomTabs() {
   );
 }
 
-/** Tablet rail (icon over label) that becomes the desktop sidebar (rows). */
+const tip =
+  "sh-sb-tip rounded-md bg-ink px-2.5 py-1.5 text-[13px] font-medium leading-none text-paper shadow-[0_4px_16px_rgba(23,21,18,.18)]";
+
+/** Icon rail with tooltips that opens into the labelled desktop sidebar. */
 export function SideNav() {
   const path = usePathname();
   return (
     <nav aria-label="Player navigation">
-      <ul className="space-y-1 px-2 lg:px-3">
+      <ul className="space-y-1 px-3">
         {sideTabs.map(({ href, label, Icon, match }) => {
           const current = match(path);
           return (
@@ -115,20 +124,29 @@ export function SideNav() {
               <Link
                 href={href}
                 aria-current={current ? "page" : undefined}
-                className={`relative flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg text-[13px] leading-none transition-colors duration-150 ease-out lg:min-h-11 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-[15px] ${ring} ${
+                className={`sh-sb-row group relative flex h-11 items-center justify-center gap-3 rounded-lg text-[15px] transition-colors duration-150 ease-out ${ring} ${
                   current
                     ? "bg-surface-subtle font-semibold text-ink"
                     : "font-medium text-ink-2 hover:bg-surface-subtle hover:text-ink"
                 }`}
               >
-                <span
+                {current ? (
+                  <span
+                    aria-hidden="true"
+                    style={{ viewTransitionName: "sh-nav-marker" }}
+                    className="absolute inset-y-2.5 -left-3 w-[3px] rounded-r-full bg-action"
+                  />
+                ) : null}
+                <Icon
+                  size={21}
+                  strokeWidth={current ? 2.25 : 2}
                   aria-hidden="true"
-                  className={`absolute inset-y-2 -left-2 w-0.5 rounded-full bg-action transition-transform duration-180 ease-out lg:-left-3 ${
-                    current ? "scale-y-100" : "scale-y-0"
-                  }`}
+                  className="shrink-0 transition-transform duration-150 ease-out group-hover:scale-105 group-active:scale-95"
                 />
-                <Icon size={22} strokeWidth={2} aria-hidden="true" />
-                {label}
+                <span className="sh-sb-label">{label}</span>
+                <span aria-hidden="true" className={tip}>
+                  {label}
+                </span>
               </Link>
             </li>
           );

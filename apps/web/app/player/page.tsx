@@ -1,12 +1,22 @@
 import {
   ArrowRight,
   ChevronRight,
+  Clock,
   Footprints,
   Handshake,
+  Lightbulb,
+  type LucideIcon,
+  MapPin,
+  MessageSquareQuote,
+  NotebookPen,
+  Play,
+  Target,
   Timer,
+  Video,
 } from "lucide-react";
 import Link from "next/link";
 import { type CSSProperties, type ReactNode, Suspense } from "react";
+import { Bone } from "../../components/skeleton";
 import { drillOfTheDay, drillsForGoal } from "../../content/drills";
 import {
   type EvidenceSet,
@@ -16,6 +26,7 @@ import {
   fetchReflections,
   type Goal,
   type PlayerReflection,
+  type TrainingPlan,
 } from "../../lib/api";
 import { marketplaceEnabled } from "../../lib/marketplace";
 import { mondayOf } from "../../lib/plans";
@@ -35,9 +46,10 @@ import {
   fetchPracticeVideos,
 } from "./practice/server";
 import type { PracticeVideo } from "./practice/types";
+import { requirePlayerSession } from "./session";
 import { km, minutes } from "./sessions/format";
 import { fetchSessionSummary, type SessionSummary } from "./sessions/server";
-import { requirePlayerSession } from "./session";
+import { FeedSkeleton, HeroSkeleton, WeekSkeleton } from "./skeletons";
 import {
   chip,
   focus,
@@ -77,6 +89,7 @@ function SectionError() {
 function Section({
   id,
   title,
+  Icon,
   action,
   index,
   className = "",
@@ -84,6 +97,7 @@ function Section({
 }: {
   id: string;
   title: string;
+  Icon?: LucideIcon;
   action?: ReactNode;
   index: number;
   className?: string;
@@ -96,7 +110,15 @@ function Section({
       className={`sh-rise min-w-0 ${className}`}
     >
       <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <h2 id={id} className={sectionTitle}>
+        <h2 id={id} className={`${sectionTitle} flex items-center gap-2.5`}>
+          {Icon ? (
+            <Icon
+              size={20}
+              strokeWidth={2}
+              aria-hidden="true"
+              className="shrink-0 text-brand"
+            />
+          ) : null}
           {title}
         </h2>
         {action}
@@ -130,21 +152,22 @@ function GoalHero({
     <section
       aria-labelledby="working-on-title"
       style={{ "--i": 1 } as CSSProperties}
-      className="sh-rise relative overflow-hidden rounded-[14px] border border-night-line bg-night px-5 py-6 text-on-night md:px-8 md:py-8 lg:col-span-8"
+      className="sh-rise relative overflow-hidden rounded-[14px] bg-night px-5 py-6 text-on-night md:px-8 md:py-8 lg:col-span-8"
     >
       <span
         aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-0.5 bg-brand"
+        className="absolute inset-y-0 left-0 w-1 bg-brand"
       />
       <h2
         id="working-on-title"
-        className="text-[14px] font-semibold leading-[1.35] text-night-muted"
+        className="flex items-center gap-2 text-[14px] font-semibold leading-[1.35] text-night-muted"
       >
+        <Target size={16} strokeWidth={2} aria-hidden="true" />
         What you’re working on
       </h2>
       {goal ? (
         <>
-          <p className="mt-3 font-display text-[32px] leading-[1.02] uppercase text-balance md:text-[44px]">
+          <p className="mt-3 font-display text-[32px] leading-[1.02] uppercase text-balance md:text-[46px]">
             {goal.title}
           </p>
           {goal.description ? (
@@ -159,17 +182,28 @@ function GoalHero({
             {hasClips ? (
               <Link
                 href={`/player/goals/${goal.id}`}
-                className={`inline-flex min-h-11 items-center gap-2 rounded-lg bg-on-night px-5 text-[16px] font-semibold text-night transition-transform duration-150 ease-out active:scale-[0.98] ${focus}`}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-lg bg-on-night px-5 text-[16px] font-semibold text-night transition-transform duration-150 ease-out hover:-translate-y-px active:scale-[0.98] ${focus}`}
               >
+                <Play
+                  size={16}
+                  strokeWidth={2}
+                  fill="currentColor"
+                  aria-hidden="true"
+                />
                 Watch your clips
               </Link>
             ) : null}
             <Link
               href="/player/drills"
-              className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg text-[16px] font-semibold text-action-on-night underline-offset-4 hover:underline ${focus}`}
+              className={`group inline-flex min-h-11 items-center gap-1.5 rounded-lg text-[16px] font-semibold text-action-on-night underline-offset-4 hover:underline ${focus}`}
             >
               Drills for this goal
-              <ChevronRight size={18} strokeWidth={2} aria-hidden="true" />
+              <ChevronRight
+                size={18}
+                strokeWidth={2}
+                aria-hidden="true"
+                className="transition-transform duration-150 ease-out group-hover:translate-x-0.5"
+              />
             </Link>
           </div>
         </>
@@ -198,6 +232,7 @@ function LatestFromCoach({
     <Section
       id="latest-clips-title"
       title="Latest from your coach"
+      Icon={MessageSquareQuote}
       index={index}
       className={className}
     >
@@ -205,10 +240,10 @@ function LatestFromCoach({
         <SectionError />
       ) : !latest ? (
         <p className="mt-2 max-w-[52ch] text-[16px] leading-6 text-ink-2">
-          Your coach adds 3 to 6 clips after a game. They&apos;ll show up here.
+          Your coach&apos;s clips from your next game land here.
         </p>
       ) : (
-        <div className="mt-3 rounded-xl border border-line bg-surface">
+        <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
           <div className="px-4 pt-4 md:px-5">
             <p className="text-[17px] font-semibold leading-[1.35]">
               {latest.game_label}
@@ -223,7 +258,7 @@ function LatestFromCoach({
               <li key={item.judgment_id}>
                 <Link
                   href={`/player/goals/${goal.id}?publication=${latest.publication_id}&judgment=${item.judgment_id}`}
-                  className={`group flex gap-3 px-4 py-3.5 hover:bg-surface-subtle md:px-5 ${focus}`}
+                  className={`group flex gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-surface-subtle md:px-5 ${focus}`}
                 >
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 text-[14px] font-semibold text-action">
@@ -235,7 +270,8 @@ function LatestFromCoach({
                       {item.comment}
                     </span>
                   </span>
-                  <span className="shrink-0 pt-0.5 text-[13px] text-muted tabular-nums">
+                  <span className="flex shrink-0 items-center gap-1 self-start pt-0.5 text-[13px] text-muted tabular-nums">
+                    <Play size={12} strokeWidth={2} aria-hidden="true" />
                     {clock(item.clip_duration_ms)}
                   </span>
                 </Link>
@@ -298,7 +334,7 @@ async function PracticeTiles({
     ),
   );
   return (
-    <ul className="-mx-4 mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 min-[375px]:-mx-5 min-[375px]:px-5 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 md:pb-0">
+    <ul className="sh-stagger -mx-4 mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 min-[375px]:-mx-5 min-[375px]:px-5 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 md:pb-0">
       {recent.map((video, index) => {
         const title = practiceTitle(video.title);
         const length = clock(video.duration_ms);
@@ -341,9 +377,9 @@ function TilesSkeleton() {
           key={key}
           className="w-[72%] shrink-0 min-[480px]:w-[45%] md:w-auto"
         >
-          <div className="aspect-video rounded-lg bg-surface-subtle" />
-          <div className="mt-2 h-5 w-3/4 rounded bg-surface-subtle" />
-          <div className="mt-1 h-4 w-1/2 rounded bg-surface-subtle" />
+          <Bone className="aspect-video" />
+          <Bone className="mt-2 h-5 w-3/4" />
+          <Bone className="mt-1 h-4 w-1/2" />
         </div>
       ))}
     </div>
@@ -375,11 +411,11 @@ async function TrainingIdeas({
     );
   }
   return (
-    <div className="mt-3 rounded-xl border border-line bg-surface p-4 md:p-5">
+    <div className="sh-rise mt-3 rounded-xl border border-line bg-surface p-4 md:p-5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className={chip}>AI suggestion</span>
         <span className="text-[13px] text-muted tabular-nums">
-          Suggested {shortDate(latest.created_at)}
+          {shortDate(latest.created_at)}
         </span>
       </div>
       <ul className="mt-4 space-y-4">
@@ -396,10 +432,15 @@ async function TrainingIdeas({
       </ul>
       <Link
         href={`/player/practice/${latest.practice_video_id}`}
-        className={`${textLink} mt-2`}
+        className={`${textLink} group mt-2`}
       >
         Open the video
-        <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+        <ArrowRight
+          size={18}
+          strokeWidth={2}
+          aria-hidden="true"
+          className="transition-transform duration-150 ease-out group-hover:translate-x-0.5"
+        />
       </Link>
       <p className="mt-3 border-t border-line pt-3 text-[13px] leading-[1.4] text-muted">
         Suggestions from software. Your coach&apos;s notes come from your coach.
@@ -431,12 +472,13 @@ function YourNotes({
     <Section
       id="notes-title"
       title="Your notes"
+      Icon={NotebookPen}
       index={index}
       className={className}
       action={
         latest ? (
           <Link href="/player/progress#notes" className={textLink}>
-            All your notes
+            All notes
           </Link>
         ) : null
       }
@@ -458,26 +500,21 @@ function YourNotes({
         </figure>
       ) : (
         <p className="mt-2 text-[16px] leading-6 text-ink-2">
-          Notes you write on a clip show up here. They&apos;re optional.
+          Optional notes you write on a clip land here.
         </p>
       )}
     </Section>
   );
 }
 
-function ThisWeek({
-  summary,
-  index,
-}: {
-  summary: SessionSummary | null;
-  index: number;
-}) {
+function ThisWeek({ summary }: { summary: SessionSummary | null }) {
   const week = summary?.weeks.at(-1);
   return (
     <Section
       id="this-week-title"
       title="This week"
-      index={index}
+      Icon={Timer}
+      index={3}
       className="lg:col-span-12"
       action={
         <Link href="/player/sessions" className={textLink}>
@@ -488,30 +525,34 @@ function ThisWeek({
       {summary === null ? (
         <SectionError />
       ) : week?.sessions ? (
-        <dl className="mt-3 grid grid-cols-3 gap-3 rounded-xl border border-line bg-surface p-4 md:p-5">
+        <dl className="mt-3 grid grid-cols-3 gap-4 border-y border-line py-4 md:py-5">
           {(
             [
               [
                 week.sessions === 1 ? "Session" : "Sessions",
                 String(week.sessions),
+                Timer,
               ],
-              ["Distance", km(week.distance_m)],
-              ["Time", minutes(week.duration_s)],
+              ["Distance", km(week.distance_m), MapPin],
+              ["Time", minutes(week.duration_s), Clock],
             ] as const
-          ).map(([label, value]) => (
+          ).map(([label, value, StatIcon]) => (
             <div key={label} className="min-w-0">
-              <dt className="text-[13px] text-muted">{label}</dt>
-              <dd className="mt-0.5 truncate text-[20px] font-semibold tabular-nums md:text-[22px]">
+              <dt className="flex items-center gap-1.5 text-[13px] text-muted">
+                <StatIcon size={14} strokeWidth={2} aria-hidden="true" />
+                {label}
+              </dt>
+              <dd className="mt-1 truncate font-display text-[28px] leading-none tabular-nums md:text-[34px]">
                 {value}
               </dd>
             </div>
           ))}
         </dl>
       ) : (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl border border-dashed border-control-border p-4 md:p-5">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl bg-surface-subtle p-4 md:p-5">
           <p className="max-w-[46ch] text-[16px] leading-6 text-ink-2">
-            Record training or a match with your phone to see distance, speed
-            and where you played.
+            Record training with your phone to see distance, speed and where you
+            played.
           </p>
           <Link href="/player/sessions/new" className={secondaryButton}>
             <Timer size={20} strokeWidth={2} aria-hidden="true" />
@@ -523,20 +564,56 @@ function ThisWeek({
   );
 }
 
+function FromCoach({ plans }: { plans: TrainingPlan[] | null }) {
+  // This week's plan, else the next one ahead. No plan, no card.
+  const thisWeek = mondayOf(new Date());
+  const weekPlans = plans?.filter((plan) => plan.week_of === thisWeek) ?? [];
+  const nextPlan = [...(plans ?? [])]
+    .reverse()
+    .find((plan) => plan.week_of > thisWeek);
+  const shownPlans = weekPlans.length ? weekPlans : nextPlan ? [nextPlan] : [];
+  if (plans !== null && !shownPlans.length) return null;
+  return (
+    <Section
+      id="plan-title"
+      title="From your coach"
+      Icon={NotebookPen}
+      index={2}
+      className="lg:col-span-12"
+      action={
+        plans ? (
+          <Link href="/player/plans" className={textLink}>
+            All plans
+          </Link>
+        ) : null
+      }
+    >
+      {plans === null ? (
+        <SectionError />
+      ) : (
+        <div className="sh-stagger mt-3 grid gap-4 lg:grid-cols-2">
+          {shownPlans.slice(0, 2).map((plan) => (
+            <PlayerPlanCard key={plan.id} plan={plan} />
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 /** Block 10M pilot entry, shown only while the marketplace flag is on. */
-function TrainWithCoach({ index }: { index: number }) {
+function TrainWithCoach() {
   return (
     <Section
       id="coaching-title"
       title="Train with a coach"
-      index={index}
+      Icon={Handshake}
+      index={6}
       className="lg:col-span-12"
     >
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl border border-line bg-surface p-4 md:p-5">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl bg-surface-subtle p-4 md:p-5">
         <p className="max-w-[60ch] text-[16px] leading-6 text-ink-2">
-          Book a 1:1 session with an independent coach whose background check
-          Shoulder has verified. An 18+ pilot: payments run in test mode, so no
-          real money moves.
+          Book 1:1 time with a verified coach. 18+ pilot, test payments only.
         </p>
         <Link href="/coaching" className={secondaryButton}>
           <Handshake size={20} strokeWidth={2} aria-hidden="true" />
@@ -555,97 +632,102 @@ function greetingDate() {
   }).format(new Date());
 }
 
-export default async function PlayerHome() {
-  const { token, player, me } = await requirePlayerSession();
-  const [goals, practiceReply, reflections, weekReply, plans] =
-    await Promise.all([
-      fetchGoals(token, player.id),
-      fetchPracticeVideos(token),
-      fetchReflections(token),
-      fetchSessionSummary(token, 1),
-      fetchPlayerPlans(token),
-    ]);
-  // This week's plan, else the next one ahead. No plan, no card.
-  const thisWeek = mondayOf(new Date());
-  const weekPlans = plans?.filter((plan) => plan.week_of === thisWeek) ?? [];
-  const nextPlan = [...(plans ?? [])]
-    .reverse()
-    .find((plan) => plan.week_of > thisWeek);
-  const shownPlans = weekPlans.length ? weekPlans : nextPlan ? [nextPlan] : [];
+type GoalData = {
+  goals: Goal[] | null;
+  goal: Goal | undefined;
+  evidence: EvidenceSet[] | null;
+};
+
+async function loadGoal(token: string, playerId: string): Promise<GoalData> {
+  const goals = await fetchGoals(token, playerId);
   const goal = goals?.find((item) => item.status === "active");
   const evidence = goal ? await fetchEvidence(token, goal.id) : [];
-  const videos = practiceReply.data
+  return { goals, goal, evidence };
+}
+
+async function loadVideos(token: string) {
+  const reply = await fetchPracticeVideos(token);
+  return reply.data
     ?.filter((video) => video.status !== "deleted")
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const name = firstName(me.display_name);
+}
+
+/** First streamed row: the goal hero and today's drill. */
+async function GoalRow({ data }: { data: Promise<GoalData> }) {
+  const { goals, goal, evidence } = await data;
   const coachName = evidence?.[0]?.items[0]?.coach_display_name ?? null;
-  const today = drillOfTheDay(goal);
-  const firstRun = !evidence?.length && !videos?.length && !reflections?.length;
-
-  const hero =
-    goals === null ? (
-      <div className="lg:col-span-8">
-        <SectionError />
-      </div>
-    ) : (
-      <GoalHero
-        goal={goal}
-        coachName={coachName}
-        hasClips={Boolean(evidence?.length)}
-      />
-    );
-
-  const tryToday = (
-    <Section
-      id="today-title"
-      title="Try this today"
-      index={2}
-      className="lg:col-span-4"
-    >
-      <div className="mt-3 lg:h-[calc(100%-3.5rem)]">
-        <DrillTile
-          drill={today}
-          forGoal={drillsForGoal(goal).length > 0}
-          showWhy
+  return (
+    <>
+      {goals === null ? (
+        <div className="lg:col-span-8">
+          <SectionError />
+        </div>
+      ) : (
+        <GoalHero
+          goal={goal}
+          coachName={coachName}
+          hasClips={Boolean(evidence?.length)}
         />
-      </div>
-    </Section>
-  );
-
-  const fromCoach =
-    plans === null ? (
+      )}
       <Section
-        id="plan-title"
-        title="From your coach"
+        id="today-title"
+        title="Try this today"
+        Icon={Footprints}
         index={2}
-        className="lg:col-span-12"
+        className="lg:col-span-4"
       >
-        <SectionError />
-      </Section>
-    ) : shownPlans.length ? (
-      <Section
-        id="plan-title"
-        title="From your coach"
-        index={2}
-        className="lg:col-span-12"
-        action={
-          <Link href="/player/plans" className={textLink}>
-            All plans
-          </Link>
-        }
-      >
-        <div className="mt-3 grid gap-4 lg:grid-cols-2">
-          {shownPlans.slice(0, 2).map((plan) => (
-            <PlayerPlanCard key={plan.id} plan={plan} />
-          ))}
+        <div className="mt-3 lg:h-[calc(100%-3.5rem)]">
+          <DrillTile
+            drill={drillOfTheDay(goal)}
+            forGoal={drillsForGoal(goal).length > 0}
+            showWhy
+          />
         </div>
       </Section>
-    ) : null;
+    </>
+  );
+}
+
+async function WeekRow({
+  week,
+  plans,
+}: {
+  week: Promise<{ data: SessionSummary | null }>;
+  plans: Promise<TrainingPlan[] | null>;
+}) {
+  const [weekReply, planList] = await Promise.all([week, plans]);
+  return (
+    <>
+      <ThisWeek summary={weekReply.data} />
+      <FromCoach plans={planList} />
+    </>
+  );
+}
+
+/** Clips, notes, practice and ideas: the order depends on a first run. */
+async function Feed({
+  token,
+  goalData,
+  videoList,
+  reflectionList,
+}: {
+  token: string;
+  goalData: Promise<GoalData>;
+  videoList: Promise<PracticeVideo[] | undefined>;
+  reflectionList: Promise<PlayerReflection[] | null>;
+}) {
+  const [{ goal, evidence }, videos, reflections] = await Promise.all([
+    goalData,
+    videoList,
+    reflectionList,
+  ]);
+  const firstRun = !evidence?.length && !videos?.length && !reflections?.length;
 
   const practice = (
     <Section
       id="practice-title"
       title="Your practice"
+      Icon={Video}
       index={4}
       className="lg:col-span-8"
       action={
@@ -667,23 +749,28 @@ export default async function PlayerHome() {
             href="/player/practice/new"
             className={`${secondaryButton} mt-4`}
           >
-            <Footprints size={20} strokeWidth={2} aria-hidden="true" />
+            <Video size={20} strokeWidth={2} aria-hidden="true" />
             Film practice
           </Link>
         </>
       ) : (
-        <div className="mt-3 rounded-xl border border-dashed border-control-border p-5 md:p-6">
-          <p className="max-w-[46ch] text-[16px] leading-6 text-ink-2">
-            Film a drill, see how you moved, and get training ideas. Only you
-            can see these videos.
+        <div className="mt-3 flex flex-col items-start gap-4 rounded-xl bg-surface-subtle p-5 md:flex-row md:items-center md:p-6">
+          <span
+            aria-hidden="true"
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-surface text-brand"
+          >
+            <Video size={22} strokeWidth={2} />
+          </span>
+          <p className="max-w-[46ch] flex-1 text-[16px] leading-6 text-ink-2">
+            Film a drill and see how you moved. Only you can see it.
           </p>
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <Link href="/player/practice/new" className={primaryButton}>
-              <Footprints size={20} strokeWidth={2} aria-hidden="true" />
+              <Video size={20} strokeWidth={2} aria-hidden="true" />
               Film practice
             </Link>
             <Link href="/player/drills" className={textLink}>
-              Need an idea? Browse drills
+              Browse drills
             </Link>
           </div>
         </div>
@@ -695,17 +782,11 @@ export default async function PlayerHome() {
     <Section
       id="ideas-title"
       title="Training ideas"
+      Icon={Lightbulb}
       index={5}
       className="lg:col-span-4"
     >
-      <Suspense
-        fallback={
-          <div
-            aria-hidden="true"
-            className="mt-3 h-56 rounded-xl bg-surface-subtle"
-          />
-        }
-      >
+      <Suspense fallback={<Bone className="mt-3 h-56 rounded-xl" />}>
         <TrainingIdeas token={token} videos={videos} />
       </Suspense>
     </Section>
@@ -720,41 +801,66 @@ export default async function PlayerHome() {
     />
   ) : null;
 
+  return firstRun ? (
+    <>
+      <HowItWorks className="lg:col-span-12" />
+      {practice}
+      {coach}
+    </>
+  ) : (
+    <>
+      {coach}
+      <YourNotes
+        reflections={reflections}
+        evidence={evidence}
+        index={4}
+        className={goal ? "lg:col-span-4" : "lg:col-span-12"}
+      />
+      {practice}
+      {ideas ?? <div className="hidden lg:col-span-4 lg:block" />}
+      <HowItWorks className="lg:col-span-12" />
+    </>
+  );
+}
+
+/**
+ * Home streams (ADR 0024): the greeting paints with the shell, then each row
+ * arrives on its own. Every fetch starts at once; nothing waits on a sibling.
+ */
+export default async function PlayerHome() {
+  const { token, player, me } = await requirePlayerSession();
+  const goalData = loadGoal(token, player.id);
+  const videoList = loadVideos(token);
+  const reflectionList = fetchReflections(token);
+  const week = fetchSessionSummary(token, 1);
+  const plans = fetchPlayerPlans(token);
+  const name = firstName(me.display_name);
+
   return (
     <div className="mx-auto max-w-[680px] lg:max-w-none">
       <header className="sh-rise">
-        <h1 className="font-display text-[32px] leading-[1.05] md:text-[44px]">
+        <h1 className="font-display text-[34px] leading-[1.05] md:text-[46px]">
           {name ? `Hi, ${name}.` : "Welcome to Shoulder."}
         </h1>
         <p className="mt-1 text-[14px] text-muted">{greetingDate()}</p>
       </header>
 
-      <div className="mt-6 grid gap-8 md:mt-8 lg:grid-cols-12 lg:gap-x-6 lg:gap-y-10">
-        {hero}
-        {tryToday}
-        <ThisWeek summary={weekReply.data} index={3} />
-        {fromCoach}
-        {firstRun ? (
-          <>
-            <HowItWorks className="lg:col-span-12" />
-            {practice}
-            {coach}
-          </>
-        ) : (
-          <>
-            {coach}
-            <YourNotes
-              reflections={reflections}
-              evidence={evidence}
-              index={4}
-              className={goal ? "lg:col-span-4" : "lg:col-span-12"}
-            />
-            {practice}
-            {ideas ?? <div className="hidden lg:col-span-4 lg:block" />}
-            <HowItWorks className="lg:col-span-12" />
-          </>
-        )}
-        {marketplaceEnabled() ? <TrainWithCoach index={6} /> : null}
+      <div className="mt-6 grid gap-8 md:mt-8 lg:grid-cols-12 lg:gap-x-8 lg:gap-y-12">
+        <Suspense fallback={<HeroSkeleton />}>
+          <GoalRow data={goalData} />
+        </Suspense>
+        <Suspense fallback={<WeekSkeleton />}>
+          <WeekRow week={week} plans={plans} />
+        </Suspense>
+        <Suspense fallback={<FeedSkeleton />}>
+          <Feed
+            token={token}
+            goalData={goalData}
+            videoList={videoList}
+            reflectionList={reflectionList}
+          />
+        </Suspense>
+        {marketplaceEnabled() ? <TrainWithCoach /> : null}
       </div>
     </div>
   );
