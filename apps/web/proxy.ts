@@ -8,7 +8,14 @@ export async function proxy(request: NextRequest) {
     const token = await verifiedToken(auth.client);
     if (!token) auth.clear();
     // Forward refreshed cookies to this request's render/handler AND the browser.
-    return auth.finish(NextResponse.next({ request }));
+    // Layouts get the requested path so a shell-level sign-in redirect can
+    // return here (ADR 0024); always overwritten, and sanitised where read.
+    const headers = new Headers(request.headers);
+    headers.set(
+      "x-shoulder-path",
+      `${request.nextUrl.pathname}${request.nextUrl.search}`,
+    );
+    return auth.finish(NextResponse.next({ request: { headers } }));
   } catch {
     auth.clear();
     return auth.finish(authError(503));

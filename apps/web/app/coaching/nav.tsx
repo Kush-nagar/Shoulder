@@ -63,13 +63,25 @@ export function SectionNav({ set }: { set: keyof typeof sets }) {
               <Link
                 href={href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-12 items-center gap-2 whitespace-nowrap rounded-lg px-3 text-[15px] transition-colors duration-150 ease-out after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:origin-center after:bg-action after:transition-transform after:duration-200 motion-reduce:after:transition-none ${
+                className={`group relative flex min-h-12 items-center gap-2 whitespace-nowrap rounded-lg px-3 text-[15px] transition-colors duration-150 ease-out ${
                   active
-                    ? "font-semibold text-ink after:scale-x-100"
-                    : "text-ink-2 after:scale-x-0 hover:text-ink"
+                    ? "font-semibold text-ink"
+                    : "text-ink-2 hover:text-ink"
                 } ${focus}`}
               >
-                <Icon size={18} strokeWidth={2} aria-hidden="true" />
+                {active ? (
+                  <span
+                    aria-hidden="true"
+                    style={{ viewTransitionName: "sh-section-marker" }}
+                    className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-action"
+                  />
+                ) : null}
+                <Icon
+                  size={18}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                  className="transition-transform duration-150 ease-out group-hover:scale-110"
+                />
                 {label}
               </Link>
             </li>

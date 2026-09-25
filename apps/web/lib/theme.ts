@@ -16,3 +16,8 @@ export async function savedTheme(): Promise<ThemeChoice> {
 export function themeAttribute(theme: ThemeChoice) {
   return theme === "system" ? undefined : theme;
 }
+
+/** Desktop sidebar state (ADR 0024), read on the server so SSR never flashes. */
+export async function sidebarCollapsed(): Promise<boolean> {
+  return (await cookies()).get("sh-sidebar")?.value === "collapsed";
+}
