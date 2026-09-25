@@ -26,5 +26,9 @@ export const config = {
     "/api/auth/identity",
     "/api/me",
     "/api/player/:path*",
+    "/coaching/:path*",
+    "/admin/:path*",
+    "/api/coaching/:path*",
+    "/api/admin/:path*",
   ],
 };

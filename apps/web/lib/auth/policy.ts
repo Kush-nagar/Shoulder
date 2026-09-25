@@ -39,6 +39,17 @@ const PLAYER_GOAL = new RegExp(`^/player/goals/(${UUID})$`, "i");
 const COACH_GAME = new RegExp(`^/coach/games/${UUID}$`, "i");
 const COACH_PLAYER = new RegExp(`^/coach/players/${UUID}$`, "i");
 const PUBLICATION = new RegExp(`^${UUID}$`, "i");
+// Block 10M marketplace pages (flagged off by default).
+const MARKETPLACE = new Set([
+  "/coaching",
+  "/coaching/bookings",
+  "/coaching/coach",
+  "/admin/coaches",
+]);
+const MARKETPLACE_ITEM = new RegExp(
+  `^/(coaching/coaches|admin/coaches)/${UUID}$`,
+  "i",
+);
 
 /**
  * Allow only notification destinations owned by Shoulder. Callers receive a
@@ -61,7 +72,12 @@ export function verifiedRedirectPath(value: unknown): string | null {
     return null;
   }
   if (parsed.origin !== "https://shoulder.invalid" || parsed.hash) return null;
-  if (COACH_GAME.test(parsed.pathname) || COACH_PLAYER.test(parsed.pathname)) {
+  if (
+    COACH_GAME.test(parsed.pathname) ||
+    COACH_PLAYER.test(parsed.pathname) ||
+    MARKETPLACE.has(parsed.pathname) ||
+    MARKETPLACE_ITEM.test(parsed.pathname)
+  ) {
     return parsed.search ? null : parsed.pathname;
   }
   if (!PLAYER_GOAL.test(parsed.pathname)) return null;
