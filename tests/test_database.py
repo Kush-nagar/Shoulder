@@ -70,6 +70,8 @@ TABLES = (
     "practice_video",
     "ai_coach_feedback",
     "ai_coach_usage",
+    # 0018 - Block 09B W3 coach training plans.
+    "training_plan",
 )
 
 

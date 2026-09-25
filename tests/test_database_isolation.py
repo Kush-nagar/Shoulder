@@ -307,6 +307,18 @@ EXPECTED_POLICIES = {
             ("player_update", "UPDATE", "{shoulder_api}"),
         )
     ),
+    # 0018 (Block 09B W3): coach training plans. Players read only.
+    *(
+        ("training_plan", f"training_plan_{suffix}", verb, role)
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("coach_select", "SELECT", "{shoulder_api}"),
+            ("coach_insert", "INSERT", "{shoulder_api}"),
+            ("coach_update", "UPDATE", "{shoulder_api}"),
+            ("coach_delete", "DELETE", "{shoulder_api}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+        )
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -543,6 +555,9 @@ class PolicySurfaceTests(DatabaseTestCase):
                 ("shoulder_api", "ai_coach_feedback", "INSERT"),
                 ("shoulder_api", "ai_coach_feedback", "DELETE"),
                 ("shoulder_api", "ai_coach_usage", "INSERT"),
+                # 0018: plan UPDATE is column-level (title, week_of, items).
+                ("shoulder_api", "training_plan", "INSERT"),
+                ("shoulder_api", "training_plan", "DELETE"),
                 # ADR 0018: the worker reads every job and every video, and
                 # holds no INSERT or DELETE anywhere. Its UPDATE surface is
                 # column-level and snapshotted in `test_database_video.py`.

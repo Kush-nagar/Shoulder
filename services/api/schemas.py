@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
@@ -840,3 +840,56 @@ class AiCoachFeedback(BaseModel):
     body: str
     drills: list[Drill]
     created_at: datetime
+
+
+# Block 09B W3: coach-authored weekly training plans. Slugs name static drills
+# in `apps/web/content/drills.ts`; only their shape is checked here.
+DRILL_SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+
+
+class TrainingPlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    drill_slug: str = Field(min_length=1, max_length=60, pattern=DRILL_SLUG_PATTERN)
+    note: str = Field(default="", max_length=200)
+
+
+class TrainingPlanCreate(BaseModel):
+    """`player_id` null means the whole team. `week_of` snaps to its Monday."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=80)
+    week_of: date
+    player_id: UUID | None = None
+    items: list[TrainingPlanItem] = Field(min_length=1, max_length=8)
+
+
+class TrainingPlanPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=80)
+    week_of: date | None = None
+    items: list[TrainingPlanItem] | None = Field(
+        default=None, min_length=1, max_length=8
+    )
+
+    @model_validator(mode="after")
+    def at_least_one_change(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("At least one field is required")
+        for name in self.model_fields_set:
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be cleared")
+        return self
+
+
+class TrainingPlan(BaseModel):
+    id: UUID
+    team_id: UUID
+    player_id: UUID | None
+    title: str
+    week_of: date
+    items: list[TrainingPlanItem]
+    created_at: datetime
+    updated_at: datetime
