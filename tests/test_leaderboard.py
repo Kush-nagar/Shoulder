@@ -20,7 +20,11 @@ from sqlalchemy.exc import DBAPIError
 from services.api.auth import authenticated_identity
 from services.api.leaderboard_service import period_start
 from services.api.main import app
-from services.api.schemas import LeaderboardMembershipUpdate
+from services.api.schemas import (
+    COORDINATE_PATTERN,
+    LeaderboardMembershipUpdate,
+    screen_nickname,
+)
 
 sys.path.append(str(Path(__file__).resolve().parent))
 
@@ -69,6 +73,17 @@ class NicknameTests(unittest.TestCase):
             LeaderboardMembershipUpdate.model_validate(
                 {"nickname": "Speedy", "display_name": "x"}
             )
+
+    def test_session_notes_refuse_coordinates(self) -> None:
+        for note in ("51.50735, -0.12776", "51°30'N 0°7'W", "51.50735N 0.12776W"):
+            self.assertIsNotNone(COORDINATE_PATTERN.search(note), note)
+        for note in ("Ran 5.2 km", "12.3456 seconds", "Left wing, 2nd half"):
+            self.assertIsNone(COORDINATE_PATTERN.search(note), note)
+
+    def test_contact_handles_are_refused(self) -> None:
+        for nickname in ("ig jdoe", "Discord x", "insta sam", "kik me"):
+            with self.assertRaises(ValueError, msg=nickname):
+                screen_nickname(nickname)
 
     def test_week_starts_monday_utc_and_season_is_a_year(self) -> None:
         now = datetime(2026, 9, 24, 15, 30, tzinfo=UTC)  # a Thursday
@@ -313,6 +328,27 @@ class LeaderboardTests(DatabaseTestCase):
         self.assertEqual(client.delete(MEMBERSHIP).status_code, 204)
         self.assertEqual(client.delete(MEMBERSHIP).status_code, 204)
         self.assertIsNone(client.get(MEMBERSHIP).json()["nickname"])
+
+    def test_api_refuses_real_names_and_teammates_nicknames(self) -> None:
+        client = self.client_for(self.user_c)
+        # ADR 0023 guardrail 3: the account name and email never become labels.
+        self.assertEqual(
+            client.put(MEMBERSHIP, json={"nickname": "Cara Nine"}).status_code, 422
+        )
+        self.assertEqual(
+            client.put(MEMBERSHIP, json={"nickname": "Board C"}).status_code, 422
+        )
+        # A teammate's nickname, in any case, is taken; another team's is not.
+        self.assertEqual(
+            client.put(MEMBERSHIP, json={"nickname": "rocket"}).status_code, 409
+        )
+        self.assertEqual(
+            client.put(MEMBERSHIP, json={"nickname": "Far Away"}).status_code, 200
+        )
+        # Renaming yourself to your own nickname is not a collision.
+        self.assertEqual(
+            client.put(MEMBERSHIP, json={"nickname": "Far Away"}).status_code, 200
+        )
 
     def test_api_board_is_nickname_only_and_team_scoped(self) -> None:
         board = self.client_for(self.user_a).get(

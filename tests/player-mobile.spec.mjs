@@ -451,7 +451,8 @@ test("linked player sees only current clips across phone viewports", async ({
 
     await page.setViewportSize({ width: 375, height: 812 });
     await page.locator(`a[href="/player/goals/${goalId}"]`).click();
-    await expect(page.getByText("You did this.")).toBeVisible();
+    // The redesigned goal page labels every clip card; the current verdict is first.
+    await expect(page.getByText("You did this.").first()).toBeVisible();
     await expect(page.getByText("Coach sentence 1.")).toBeVisible();
     await expect(page.getByText("not_relevant")).toHaveCount(0);
     const currentVideo = page.locator("video:not([aria-hidden='true'])");

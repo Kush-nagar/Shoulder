@@ -7,14 +7,11 @@ const config: CapacitorConfig = {
   webDir: "www",
   server: {
     url: "https://shoulder-demo.vercel.app",
-    // Only these hosts may be navigated to from inside the WebView:
-    // the app itself, Supabase (auth callbacks/API), and Google's
-    // accounts domain for OAuth redirects that aren't blocked outright
-    // (see docs/mobile.md for the "disallowed_useragent" issue).
+    // Only the app and Supabase load inside the WebView. Google sign-in runs
+    // in the system browser (apps/web/app/native-bridge.tsx), never here.
     allowNavigation: [
       "shoulder-demo.vercel.app",
       "gzbwlancwxhtausyokxt.supabase.co",
-      "accounts.google.com",
     ],
   },
   android: {

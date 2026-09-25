@@ -286,8 +286,15 @@ export function SessionTracker() {
               onChange={(event) => setNote(event.target.value)}
               maxLength={280}
               rows={3}
+              aria-describedby="session-note-help"
               className={`mt-2 block w-full rounded-lg border border-control-border bg-surface p-3 text-[16px] leading-6 ${focus}`}
             />
+            <p
+              id="session-note-help"
+              className="mt-2 text-[14px] leading-5 text-muted"
+            >
+              Your coach can see your saved sessions and notes.
+            </p>
           </div>
           {error ? (
             <p role="alert" className={errorBox}>

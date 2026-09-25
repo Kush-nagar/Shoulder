@@ -58,6 +58,39 @@ def membership(connection: Connection) -> LeaderboardMembership:
 
 def join(connection: Connection, nickname: str) -> LeaderboardMembership:
     player = own_player(connection)
+    lowered = nickname.lower()
+    # ADR 0023 guardrail 3: never the player's real name.
+    names = connection.execute(
+        text("""
+            SELECT a.display_name, a.email, p.display_name AS roster_name
+            FROM app.user_account a, app.player p
+            WHERE a.id = private.current_user_id() AND p.id = :id
+        """),
+        {"id": str(player.id)},
+    ).one_or_none()
+    tokens = {
+        token
+        for value in (names or ())
+        if value
+        for token in value.lower().replace("@", " ").replace(".", " ").split()
+        if len(token) >= 3 and token not in {"demo", "player"}
+    }
+    if any(token in lowered for token in tokens):
+        raise Problem(422, "Pick a nickname that isn't your name.")
+    # A teammate's nickname would let one player pose as another on the board.
+    # ponytail: checked here, not by a constraint; two joins in the same
+    # instant can still collide, which only duplicates a label.
+    taken = connection.execute(
+        text("""
+            SELECT 1 FROM private.team_leaderboard(
+                :team_id, 'sessions', '-infinity'::timestamptz
+            ) AS board
+            WHERE NOT board.is_me AND lower(board.nickname) = :nickname
+        """),
+        {"team_id": str(player.team_id), "nickname": lowered},
+    ).first()
+    if taken is not None:
+        raise Problem(409, "A teammate already uses that nickname.")
     connection.execute(
         text("""
             INSERT INTO app.leaderboard_member (player_id, nickname)

@@ -99,7 +99,10 @@ export default async function PlayerProgressPage() {
       </p>
 
       <div className="mt-8 grid gap-10 lg:mt-10 lg:grid-cols-12 lg:gap-8">
-        <aside className="space-y-6 lg:sticky lg:top-6 lg:order-2 lg:col-span-4 lg:self-start">
+        <aside
+          aria-label="Goal summary"
+          className="space-y-6 lg:sticky lg:top-6 lg:order-2 lg:col-span-4 lg:self-start"
+        >
           {active ? (
             <section
               aria-labelledby="active-goal-title"

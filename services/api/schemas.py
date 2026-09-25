@@ -851,7 +851,11 @@ GpsQuality = Literal["good", "fair", "poor"]
 HeatmapCell = Annotated[int, Field(ge=0, le=1000)]
 Heatmap = Annotated[list[HeatmapCell], Field(min_length=96, max_length=96)]
 # A decimal-degree pair ("51.50735, -0.12776") in free text is a location.
-COORDINATE_PATTERN = re.compile(r"-?\d{1,3}\.\d{4,}\s*[,;/ ]\s*-?\d{1,3}\.\d{4,}")
+COORDINATE_PATTERN = re.compile(
+    r"-?\d{1,3}\.\d{4,}\s*[,;/ ]\s*-?\d{1,3}\.\d{4,}"  # 51.50735, -0.12776
+    r"|\d{1,3}\s*°"  # 51°30'N
+    r"|\d{1,3}\.\d{4,}\s*[NSEWnsew](?![A-Za-z])"  # 51.50735N
+)
 SESSION_CLOCK_SKEW = timedelta(minutes=10)
 
 
@@ -1009,6 +1013,7 @@ NICKNAME_BLOCKED_WORDS = frozenset(
         # Contact details spelled out with spaces instead of "@" or ".".
         "www", "http", "https", "com", "net", "org", "gmail", "hotmail",
         "yahoo", "outlook", "icloud", "insta", "snap", "tiktok", "whatsapp",
+        "instagram", "ig", "discord", "telegram", "kik", "snapchat", "twitter",
     }
 )  # fmt: skip
 LEET = str.maketrans("013457", "oieast")
