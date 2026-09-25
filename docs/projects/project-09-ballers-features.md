@@ -23,7 +23,7 @@ wrapper. A coach marketplace is designed, not built.
 | W4 Mobile | `apps/mobile/**` (Capacitor), `docs/mobile.md` | W0 | all |
 | W5 Marketplace design | `docs/design/coach-marketplace.md` only | W0 | all |
 
-Migration numbers are fixed: 0016 = W1, 0017 = W2, 0018 = W3. W3 writes 0018
+Migration numbers: 0016 = W1, 0018 = W3 (down_revision 0016), 0019 = W2 (down_revision 0018; renumbered from 0017 at integration). W3 writes 0018
 with `down_revision = "0016_training_sessions"` only after W1 merges; until then
 it develops against its own branch and is rebased by the coordinator.
 
@@ -63,7 +63,7 @@ successive fixes with a 3-sample median; heatmap by projecting points onto the
 track's principal axes (PCA) into a 12×8 grid. Raw points stay in memory only.
 Pure math in `sessions/tracking/metrics.ts` with a Node test.
 
-### 0017_team_leaderboard (W2)
+### 0019_team_leaderboard (W2)
 
 ```
 app.leaderboard_member
