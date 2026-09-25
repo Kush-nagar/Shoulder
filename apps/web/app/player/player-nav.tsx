@@ -22,7 +22,8 @@ const tabs = [
     href: "/player/sessions",
     label: "Sessions",
     Icon: Timer,
-    match: (path: string) => path.startsWith("/player/sessions"),
+    match: (path: string) =>
+      path.startsWith("/player/sessions") || path.startsWith("/player/team"),
   },
   {
     href: "/player/drills",
@@ -121,6 +122,7 @@ const titles: [string, string][] = [
   ["/player/practice", "Practice"],
   ["/player/sessions/new", "Record a session"],
   ["/player/sessions", "Sessions"],
+  ["/player/team", "Team board"],
   ["/player/drills", "Drills"],
   ["/player/progress", "Progress"],
   ["/player/profile", "Profile"],

@@ -32,6 +32,7 @@ const dataUse = [
   "Body position is worked out on this device. Only a short summary of angles and head turns is sent when you ask for training ideas.",
   "Training ideas are AI suggestions, stored with the video. They are never shown to your coach or added to your coach's clips.",
   "Notes you write on clips are read by your coach. Only you can change or delete them.",
+  "The team board is off unless you join. It shows your session totals under a nickname, to your teammates and coach only.",
 ];
 
 export default async function ProfilePage() {
@@ -121,6 +122,11 @@ export default async function ProfilePage() {
         <ul className="space-y-1">
           <li>
             <ShowGuideButton />
+          </li>
+          <li>
+            <Link href="/player/team" className={textLink}>
+              Team board: join, change nickname or leave
+            </Link>
           </li>
           <li>
             <Link href="/player/practice/new#filming-tips" className={textLink}>

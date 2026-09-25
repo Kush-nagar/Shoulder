@@ -1,7 +1,14 @@
-import { ChevronRight, Timer } from "lucide-react";
+import { ChevronRight, Timer, Users } from "lucide-react";
 import Link from "next/link";
 import { requirePlayerSession } from "../session";
-import { errorBox, focus, pageTitle, primaryButton, sectionTitle } from "../ui";
+import {
+  errorBox,
+  focus,
+  pageTitle,
+  primaryButton,
+  sectionTitle,
+  textLink,
+} from "../ui";
 import { WeeklyChart } from "./charts";
 import { km, kmh, kindLabel, minutes, sessionDate, stopwatch } from "./format";
 import {
@@ -73,6 +80,10 @@ export default async function SessionsPage() {
         location stays on your phone; only the totals and a grid of where you
         spent time are saved, for one year.
       </p>
+      <Link href="/player/team" className={`${textLink} mt-2`}>
+        <Users size={18} strokeWidth={2} aria-hidden="true" />
+        Team board
+      </Link>
 
       {sessions === null || summary.data === null ? (
         <p role="alert" className={`${errorBox} mt-8`}>

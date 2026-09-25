@@ -8,7 +8,7 @@ export type SessionSummary = Schema["SessionSummary"];
 
 type Read<T> = { status: number; data: T | null };
 
-async function read<T>(token: string, path: string): Promise<Read<T>> {
+export async function read<T>(token: string, path: string): Promise<Read<T>> {
   try {
     const response = await fetch(`${authConfig(process.env).apiUrl}${path}`, {
       headers: { Authorization: `Bearer ${token}` },

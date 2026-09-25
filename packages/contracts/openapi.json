@@ -1316,6 +1316,127 @@
         "title": "JudgmentRevision",
         "type": "object"
       },
+      "Leaderboard": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "metric": {
+            "enum": [
+              "distance",
+              "sprints",
+              "top_speed",
+              "sessions"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "period": {
+            "enum": [
+              "week",
+              "season"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric",
+          "period",
+          "since",
+          "entries"
+        ],
+        "title": "Leaderboard",
+        "type": "object"
+      },
+      "LeaderboardEntry": {
+        "description": "Nickname and a whole-number total only; never a player id or name.",
+        "properties": {
+          "is_me": {
+            "title": "Is Me",
+            "type": "boolean"
+          },
+          "nickname": {
+            "title": "Nickname",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nickname",
+          "value",
+          "is_me"
+        ],
+        "title": "LeaderboardEntry",
+        "type": "object"
+      },
+      "LeaderboardMembership": {
+        "description": "The caller's own opt-in state; `nickname` is null when not joined.",
+        "properties": {
+          "joined_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Joined At"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "nickname",
+          "joined_at"
+        ],
+        "title": "LeaderboardMembership",
+        "type": "object"
+      },
+      "LeaderboardMembershipUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "nickname": {
+            "maxLength": 60,
+            "title": "Nickname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nickname"
+        ],
+        "title": "LeaderboardMembershipUpdate",
+        "type": "object"
+      },
       "LinkedPlayer": {
         "properties": {
           "id": {
@@ -4910,6 +5031,84 @@
         "summary": "Patch Plan"
       }
     },
+    "/v1/player/leaderboard-membership": {
+      "delete": {
+        "operationId": "leave_board_v1_player_leaderboard_membership_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Leave Board"
+      },
+      "get": {
+        "operationId": "read_membership_v1_player_leaderboard_membership_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardMembership"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Membership"
+      },
+      "put": {
+        "operationId": "join_board_v1_player_leaderboard_membership_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaderboardMembershipUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardMembership"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Join Board"
+      }
+    },
     "/v1/player/plans": {
       "get": {
         "operationId": "list_own_plans_v1_player_plans_get",
@@ -6378,6 +6577,81 @@
           }
         ],
         "summary": "List Games"
+      }
+    },
+    "/v1/teams/{team_id}/leaderboard": {
+      "get": {
+        "operationId": "team_board_v1_teams__team_id__leaderboard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "default": "distance",
+              "enum": [
+                "distance",
+                "sprints",
+                "top_speed",
+                "sessions"
+              ],
+              "title": "Metric",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "week",
+              "enum": [
+                "week",
+                "season"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Leaderboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Team Board"
       }
     },
     "/v1/teams/{team_id}/plans": {
