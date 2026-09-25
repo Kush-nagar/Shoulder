@@ -248,8 +248,9 @@ class PlanIsolationTests(DatabaseTestCase):
             },
         )
         self.assertEqual(refused.status_code, 422)
+        # RLS hides another team entirely: 404, not 403 (no existence leak).
         self.assertEqual(
-            client.get(f"/v1/teams/{self.other_team}/plans").status_code, 403
+            client.get(f"/v1/teams/{self.other_team}/plans").status_code, 404
         )
         self.assertEqual(
             client.patch(
