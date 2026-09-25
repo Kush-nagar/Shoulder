@@ -490,8 +490,29 @@ class TestThePermissionSplit(ExecutorCase):
 
 class TestRecoveryAcrossHarnesses(ExecutorCase):
     def test_each_harness_knows_its_own_process_image(self) -> None:
-        self.assertIn("claude", executors.worker_image(executors.ClaudeCliExecutor()))
-        self.assertIn("opencode", executors.worker_image(executors.OpenCodeExecutor()))
+        # The answer depends on the platform and on how the harness is installed,
+        # so pin both instead of reading them from the machine running the test.
+        harnesses: dict[str, executors.Executor] = {
+            "claude": executors.ClaudeCliExecutor(),
+            "opencode": executors.OpenCodeExecutor(),
+        }
+        for base, executor in harnesses.items():
+            with self.subTest(harness=base, platform="posix"):
+                with mock.patch("sys.platform", "linux"):
+                    self.assertEqual(executors.worker_image(executor), base)
+            with self.subTest(harness=base, platform="win32 exe"):
+                with (
+                    mock.patch("sys.platform", "win32"),
+                    mock.patch("shutil.which", return_value=rf"C:\bin\{base}.exe"),
+                ):
+                    self.assertEqual(executors.worker_image(executor), f"{base}.exe")
+            with self.subTest(harness=base, platform="win32 npm shim"):
+                # A `.cmd` shim runs under cmd.exe, so that is the recorded image.
+                with (
+                    mock.patch("sys.platform", "win32"),
+                    mock.patch("shutil.which", return_value=rf"C:\npm\{base}.CMD"),
+                ):
+                    self.assertEqual(executors.worker_image(executor), "cmd.exe")
 
     def test_an_interrupted_opencode_worker_is_recognised_as_gone(self) -> None:
         self.assertFalse(
