@@ -1496,6 +1496,84 @@
         "title": "ObservationCreate",
         "type": "object"
       },
+      "PersonalRecord": {
+        "description": "The player's own best, as a plain fact; never compared with anyone.",
+        "properties": {
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "started_at",
+          "value"
+        ],
+        "title": "PersonalRecord",
+        "type": "object"
+      },
+      "PersonalRecords": {
+        "properties": {
+          "distance_m": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sprint_count": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "top_speed_cms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "distance_m",
+          "top_speed_cms",
+          "sprint_count",
+          "duration_s"
+        ],
+        "title": "PersonalRecords",
+        "type": "object"
+      },
       "PlaybackUrl": {
         "description": "One short-lived, object-specific coach playback URL.\n\n`docs/10-security-privacy.md` caps a coach URL at fifteen minutes. The\nobject is the coach-only `playback/{video_id}/coach-720p.mp4`; no player\nendpoint ever returns it, and no request value chooses it.",
         "properties": {
@@ -2725,6 +2803,61 @@
         "title": "RosterPlayer",
         "type": "object"
       },
+      "SessionSummary": {
+        "properties": {
+          "records": {
+            "$ref": "#/components/schemas/PersonalRecords"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/SessionWeek"
+            },
+            "title": "Weeks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "weeks",
+          "records"
+        ],
+        "title": "SessionSummary",
+        "type": "object"
+      },
+      "SessionWeek": {
+        "description": "Totals for one UTC ISO week starting Monday; zero-filled.",
+        "properties": {
+          "distance_m": {
+            "title": "Distance M",
+            "type": "integer"
+          },
+          "duration_s": {
+            "title": "Duration S",
+            "type": "integer"
+          },
+          "sessions": {
+            "title": "Sessions",
+            "type": "integer"
+          },
+          "sprint_count": {
+            "title": "Sprint Count",
+            "type": "integer"
+          },
+          "week_start": {
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week_start",
+          "sessions",
+          "distance_m",
+          "duration_s",
+          "sprint_count"
+        ],
+        "title": "SessionWeek",
+        "type": "object"
+      },
       "SignPartsRequest": {
         "properties": {
           "part_numbers": {
@@ -2983,6 +3116,247 @@
           "sheets"
         ],
         "title": "Timeline",
+        "type": "object"
+      },
+      "TrainingSession": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "distance_m": {
+            "title": "Distance M",
+            "type": "integer"
+          },
+          "duration_s": {
+            "title": "Duration S",
+            "type": "integer"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "title": "Ended At",
+            "type": "string"
+          },
+          "gps_quality": {
+            "enum": [
+              "good",
+              "fair",
+              "poor"
+            ],
+            "title": "Gps Quality",
+            "type": "string"
+          },
+          "half_split_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Half Split S"
+          },
+          "heatmap": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Heatmap",
+            "type": "array"
+          },
+          "heatmap_second_half": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heatmap Second Half"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "training",
+              "match"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "sprint_count": {
+            "title": "Sprint Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "top_speed_cms": {
+            "title": "Top Speed Cms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "started_at",
+          "ended_at",
+          "duration_s",
+          "distance_m",
+          "top_speed_cms",
+          "sprint_count",
+          "half_split_s",
+          "heatmap",
+          "heatmap_second_half",
+          "gps_quality",
+          "note",
+          "created_at"
+        ],
+        "title": "TrainingSession",
+        "type": "object"
+      },
+      "TrainingSessionCreate": {
+        "additionalProperties": false,
+        "description": "Aggregates only. `extra=\"forbid\"` refuses any lat/long or point array.",
+        "properties": {
+          "distance_m": {
+            "maximum": 30000.0,
+            "minimum": 0.0,
+            "title": "Distance M",
+            "type": "integer"
+          },
+          "duration_s": {
+            "maximum": 14400.0,
+            "minimum": 60.0,
+            "title": "Duration S",
+            "type": "integer"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "title": "Ended At",
+            "type": "string"
+          },
+          "gps_quality": {
+            "enum": [
+              "good",
+              "fair",
+              "poor"
+            ],
+            "title": "Gps Quality",
+            "type": "string"
+          },
+          "half_split_s": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Half Split S"
+          },
+          "heatmap": {
+            "items": {
+              "maximum": 1000.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 96,
+            "minItems": 96,
+            "title": "Heatmap",
+            "type": "array"
+          },
+          "heatmap_second_half": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 1000.0,
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "maxItems": 96,
+                "minItems": 96,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heatmap Second Half"
+          },
+          "kind": {
+            "enum": [
+              "training",
+              "match"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 280,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "sprint_count": {
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "Sprint Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "top_speed_cms": {
+            "maximum": 1300.0,
+            "minimum": 0.0,
+            "title": "Top Speed Cms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "started_at",
+          "ended_at",
+          "duration_s",
+          "distance_m",
+          "top_speed_cms",
+          "sprint_count",
+          "heatmap",
+          "gps_quality"
+        ],
+        "title": "TrainingSessionCreate",
         "type": "object"
       },
       "UploadCompleted": {
@@ -4571,6 +4945,202 @@
         "summary": "Complete Practice Video"
       }
     },
+    "/v1/player/sessions": {
+      "get": {
+        "operationId": "list_sessions_v1_player_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrainingSession"
+                  },
+                  "title": "Response List Sessions V1 Player Sessions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Sessions"
+      },
+      "post": {
+        "operationId": "create_session_v1_player_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingSessionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Session"
+      }
+    },
+    "/v1/player/sessions/summary": {
+      "get": {
+        "operationId": "session_summary_v1_player_sessions_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "weeks",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 52,
+              "minimum": 1,
+              "title": "Weeks",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Session Summary"
+      }
+    },
+    "/v1/player/sessions/{session_id}": {
+      "delete": {
+        "operationId": "remove_session_v1_player_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Session"
+      },
+      "get": {
+        "operationId": "read_session_v1_player_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Session"
+      }
+    },
     "/v1/players/{player_id}": {
       "patch": {
         "operationId": "update_player_v1_players__player_id__patch",
@@ -5053,6 +5623,55 @@
           }
         ],
         "summary": "List Player Reflections"
+      }
+    },
+    "/v1/players/{player_id}/sessions": {
+      "get": {
+        "operationId": "list_player_sessions_v1_players__player_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Player Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrainingSession"
+                  },
+                  "title": "Response List Player Sessions V1 Players  Player Id  Sessions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Player Sessions"
       }
     },
     "/v1/review-publications/{publication_id}": {
