@@ -197,10 +197,26 @@ def retention_sweep_job(
             text("SELECT private.prepare_retention_sweep(:job_id, :worker_id)"),
             {"job_id": str(job.id), "worker_id": job.locked_by},
         )
+    # Database-only, so it runs before practice objects can fail the sweep.
+    purge_training_sessions(job)
     # After the coach sweep, so a practice storage failure cannot delay it.
     purge_practice_videos(job, keep_going)
     if not keep_going(1.0):
         raise Cancelled
+
+
+def purge_training_sessions(job: jobs.Job) -> int:
+    """Delete training sessions older than 365 days (ADR 0023); no objects."""
+    with jobs.transaction() as connection:
+        return int(
+            connection.execute(
+                text(
+                    "SELECT private.purge_expired_training_sessions("
+                    ":job_id, :worker_id)"
+                ),
+                {"job_id": str(job.id), "worker_id": job.locked_by},
+            ).scalar_one()
+        )
 
 
 def purge_practice_videos(

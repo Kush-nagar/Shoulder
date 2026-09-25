@@ -1,8 +1,10 @@
-from datetime import datetime
+import re
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -840,3 +842,97 @@ class AiCoachFeedback(BaseModel):
     body: str
     drills: list[Drill]
     created_at: datetime
+
+
+# Block 09B W1 (ADR 0023): player-recorded training and match sessions.
+
+SessionKind = Literal["training", "match"]
+GpsQuality = Literal["good", "fair", "poor"]
+HeatmapCell = Annotated[int, Field(ge=0, le=1000)]
+Heatmap = Annotated[list[HeatmapCell], Field(min_length=96, max_length=96)]
+# A decimal-degree pair ("51.50735, -0.12776") in free text is a location.
+COORDINATE_PATTERN = re.compile(r"-?\d{1,3}\.\d{4,}\s*[,;/ ]\s*-?\d{1,3}\.\d{4,}")
+SESSION_CLOCK_SKEW = timedelta(minutes=10)
+
+
+class TrainingSessionCreate(BaseModel):
+    """Aggregates only. `extra="forbid"` refuses any lat/long or point array."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: SessionKind
+    started_at: AwareDatetime
+    ended_at: AwareDatetime
+    duration_s: int = Field(ge=60, le=14400)
+    distance_m: int = Field(ge=0, le=30000)
+    top_speed_cms: int = Field(ge=0, le=1300)
+    sprint_count: int = Field(ge=0, le=500)
+    half_split_s: int | None = Field(default=None, gt=0)
+    heatmap: Heatmap
+    heatmap_second_half: Heatmap | None = None
+    gps_quality: GpsQuality
+    note: str | None = Field(default=None, max_length=280)
+
+    @model_validator(mode="after")
+    def consistent(self) -> Self:
+        elapsed = (self.ended_at - self.started_at).total_seconds()
+        if elapsed <= 0:
+            raise ValueError("ended_at must be after started_at")
+        if self.duration_s > elapsed + 60:
+            raise ValueError("duration_s exceeds the elapsed time")
+        if self.ended_at > datetime.now(UTC) + SESSION_CLOCK_SKEW:
+            raise ValueError("ended_at is in the future")
+        if self.half_split_s is not None and self.half_split_s >= self.duration_s:
+            raise ValueError("half_split_s must fall inside the session")
+        if self.heatmap_second_half is not None and self.half_split_s is None:
+            raise ValueError("heatmap_second_half needs half_split_s")
+        if self.note is not None and COORDINATE_PATTERN.search(self.note):
+            raise ValueError("note must not contain coordinates")
+        return self
+
+
+class TrainingSession(BaseModel):
+    id: UUID
+    kind: SessionKind
+    started_at: datetime
+    ended_at: datetime
+    duration_s: int
+    distance_m: int
+    top_speed_cms: int
+    sprint_count: int
+    half_split_s: int | None
+    heatmap: list[int]
+    heatmap_second_half: list[int] | None
+    gps_quality: GpsQuality
+    note: str | None
+    created_at: datetime
+
+
+class SessionWeek(BaseModel):
+    """Totals for one UTC ISO week starting Monday; zero-filled."""
+
+    week_start: date
+    sessions: int
+    distance_m: int
+    duration_s: int
+    sprint_count: int
+
+
+class PersonalRecord(BaseModel):
+    """The player's own best, as a plain fact; never compared with anyone."""
+
+    session_id: UUID
+    started_at: datetime
+    value: int
+
+
+class PersonalRecords(BaseModel):
+    distance_m: PersonalRecord | None
+    top_speed_cms: PersonalRecord | None
+    sprint_count: PersonalRecord | None
+    duration_s: PersonalRecord | None
+
+
+class SessionSummary(BaseModel):
+    weeks: list[SessionWeek]
+    records: PersonalRecords

@@ -70,6 +70,8 @@ TABLES = (
     "practice_video",
     "ai_coach_feedback",
     "ai_coach_usage",
+    # 0016 - Block 09B player training and match sessions (ADR 0023).
+    "training_session",
 )
 
 
@@ -953,7 +955,8 @@ class ZMigrationTests(unittest.TestCase):
                 # deletion, replay, event, and operator-confirmation helpers.
                 # 0014 adds two fenced practice-video retention helpers.
                 # 0015 adds the demo self-join (ADR 0021).
-                self.assertEqual(self.function_count(connection), 84)
+                # 0016 adds the fenced training-session purge (ADR 0023).
+                self.assertEqual(self.function_count(connection), 85)
                 # This helper intentionally counts only the baseline auth-sync
                 # trigger; Task 22 trigger coverage lives in the policy suite.
                 self.assertEqual(self.trigger_count(connection), 1)

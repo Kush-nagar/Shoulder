@@ -56,14 +56,14 @@ class BoundedBodyRoute(APIRoute):
     """Refuse an oversized body before FastAPI reads or parses it.
 
     FastAPI reads the whole body before running dependencies, so the bound has
-    to wrap the route handler itself. Every practice request body is small.
+    to wrap the route handler itself. Practice and session bodies are small.
     """
 
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
 
         async def bounded(request: Request) -> Response:
-            too_large = Problem(413, "Those practice features are too large.")
+            too_large = Problem(413, "That request is too large.")
             declared = request.headers.get("content-length")
             if declared is not None and (
                 not declared.isdigit() or int(declared) > BODY_MAX_BYTES

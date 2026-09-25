@@ -307,6 +307,18 @@ EXPECTED_POLICIES = {
             ("player_update", "UPDATE", "{shoulder_api}"),
         )
     ),
+    # 0016 (ADR 0023): sessions are player-self, plus a team-coach read.
+    # No UPDATE policy: a recorded session is immutable.
+    *(
+        ("training_session", f"training_session_{suffix}", verb, role)
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+            ("player_insert", "INSERT", "{shoulder_api}"),
+            ("player_delete", "DELETE", "{shoulder_api}"),
+            ("coach_select", "SELECT", "{shoulder_api}"),
+        )
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -379,6 +391,8 @@ EXPECTED_WORKER_FUNCTIONS = {
     # 0014: the fenced practice-video expiry sweep.
     "expired_practice_videos",
     "purge_practice_video",
+    # 0016: the fenced 365-day training-session purge.
+    "purge_expired_training_sessions",
 }
 
 
@@ -543,6 +557,8 @@ class PolicySurfaceTests(DatabaseTestCase):
                 ("shoulder_api", "ai_coach_feedback", "INSERT"),
                 ("shoulder_api", "ai_coach_feedback", "DELETE"),
                 ("shoulder_api", "ai_coach_usage", "INSERT"),
+                ("shoulder_api", "training_session", "INSERT"),
+                ("shoulder_api", "training_session", "DELETE"),
                 # ADR 0018: the worker reads every job and every video, and
                 # holds no INSERT or DELETE anywhere. Its UPDATE surface is
                 # column-level and snapshotted in `test_database_video.py`.

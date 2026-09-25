@@ -410,6 +410,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/player/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sessions */
+        get: operations["list_sessions_v1_player_sessions_get"];
+        put?: never;
+        /** Create Session */
+        post: operations["create_session_v1_player_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/player/sessions/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session Summary */
+        get: operations["session_summary_v1_player_sessions_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/player/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Session */
+        get: operations["read_session_v1_player_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        /** Remove Session */
+        delete: operations["remove_session_v1_player_sessions__session_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/players/{player_id}": {
         parameters: {
             query?: never;
@@ -548,6 +601,23 @@ export interface paths {
         };
         /** List Player Reflections */
         get: operations["list_player_reflections_v1_players__player_id__reflections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/players/{player_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Player Sessions */
+        get: operations["list_player_sessions_v1_players__player_id__sessions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1576,6 +1646,31 @@ export interface components {
             t_start_ms: number;
         };
         /**
+         * PersonalRecord
+         * @description The player's own best, as a plain fact; never compared with anyone.
+         */
+        PersonalRecord: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Value */
+            value: number;
+        };
+        /** PersonalRecords */
+        PersonalRecords: {
+            distance_m: components["schemas"]["PersonalRecord"] | null;
+            duration_s: components["schemas"]["PersonalRecord"] | null;
+            sprint_count: components["schemas"]["PersonalRecord"] | null;
+            top_speed_cms: components["schemas"]["PersonalRecord"] | null;
+        };
+        /**
          * PlaybackUrl
          * @description One short-lived, object-specific coach playback URL.
          *
@@ -2066,6 +2161,31 @@ export interface components {
              */
             team_id: string;
         };
+        /** SessionSummary */
+        SessionSummary: {
+            records: components["schemas"]["PersonalRecords"];
+            /** Weeks */
+            weeks: components["schemas"]["SessionWeek"][];
+        };
+        /**
+         * SessionWeek
+         * @description Totals for one UTC ISO week starting Monday; zero-filled.
+         */
+        SessionWeek: {
+            /** Distance M */
+            distance_m: number;
+            /** Duration S */
+            duration_s: number;
+            /** Sessions */
+            sessions: number;
+            /** Sprint Count */
+            sprint_count: number;
+            /**
+             * Week Start
+             * Format: date
+             */
+            week_start: string;
+        };
         /** SignPartsRequest */
         SignPartsRequest: {
             /** Part Numbers */
@@ -2171,6 +2291,97 @@ export interface components {
              * Format: uuid
              */
             video_id: string;
+        };
+        /** TrainingSession */
+        TrainingSession: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Distance M */
+            distance_m: number;
+            /** Duration S */
+            duration_s: number;
+            /**
+             * Ended At
+             * Format: date-time
+             */
+            ended_at: string;
+            /**
+             * Gps Quality
+             * @enum {string}
+             */
+            gps_quality: "good" | "fair" | "poor";
+            /** Half Split S */
+            half_split_s: number | null;
+            /** Heatmap */
+            heatmap: number[];
+            /** Heatmap Second Half */
+            heatmap_second_half: number[] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "training" | "match";
+            /** Note */
+            note: string | null;
+            /** Sprint Count */
+            sprint_count: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Top Speed Cms */
+            top_speed_cms: number;
+        };
+        /**
+         * TrainingSessionCreate
+         * @description Aggregates only. `extra="forbid"` refuses any lat/long or point array.
+         */
+        TrainingSessionCreate: {
+            /** Distance M */
+            distance_m: number;
+            /** Duration S */
+            duration_s: number;
+            /**
+             * Ended At
+             * Format: date-time
+             */
+            ended_at: string;
+            /**
+             * Gps Quality
+             * @enum {string}
+             */
+            gps_quality: "good" | "fair" | "poor";
+            /** Half Split S */
+            half_split_s?: number | null;
+            /** Heatmap */
+            heatmap: number[];
+            /** Heatmap Second Half */
+            heatmap_second_half?: number[] | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "training" | "match";
+            /** Note */
+            note?: string | null;
+            /** Sprint Count */
+            sprint_count: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Top Speed Cms */
+            top_speed_cms: number;
         };
         /** UploadCompleted */
         UploadCompleted: {
@@ -3148,6 +3359,150 @@ export interface operations {
             };
         };
     };
+    list_sessions_v1_player_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"][];
+                };
+            };
+        };
+    };
+    create_session_v1_player_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainingSessionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    session_summary_v1_player_sessions_summary_get: {
+        parameters: {
+            query?: {
+                weeks?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_session_v1_player_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_session_v1_player_sessions__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_player_v1_players__player_id__patch: {
         parameters: {
             query?: never;
@@ -3433,6 +3788,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerReflection"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_player_sessions_v1_players__player_id__sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"][];
                 };
             };
             /** @description Validation Error */
