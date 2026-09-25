@@ -1,9 +1,10 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CalendarDays, History } from "lucide-react";
 import Link from "next/link";
 import { fetchPlayerPlans } from "../../../lib/api";
 import { mondayOf } from "../../../lib/plans";
+import { SectionHeading } from "../heading";
 import { requirePlayerSession } from "../session";
-import { backLink, errorBox, pageTitle, sectionTitle } from "../ui";
+import { backLink, errorBox, pageTitle } from "../ui";
 import { PlayerPlanCard } from "./plan-card";
 
 export default async function PlayerPlansPage() {
@@ -34,11 +35,11 @@ export default async function PlayerPlansPage() {
       ) : (
         <>
           <section aria-labelledby="current-plans" className="mt-8">
-            <h2 id="current-plans" className={sectionTitle}>
+            <SectionHeading id="current-plans" Icon={CalendarDays}>
               This week and ahead
-            </h2>
+            </SectionHeading>
             {current.length ? (
-              <div className="mt-3 space-y-4">
+              <div className="sh-stagger mt-3 space-y-4">
                 {current.map((plan) => (
                   <PlayerPlanCard key={plan.id} plan={plan} />
                 ))}
@@ -51,9 +52,9 @@ export default async function PlayerPlansPage() {
           </section>
           {earlier.length ? (
             <section aria-labelledby="earlier-plans" className="mt-10">
-              <h2 id="earlier-plans" className={sectionTitle}>
+              <SectionHeading id="earlier-plans" Icon={History}>
                 Earlier plans
-              </h2>
+              </SectionHeading>
               <div className="mt-3 space-y-4">
                 {earlier.map((plan) => (
                   <PlayerPlanCard key={plan.id} plan={plan} />

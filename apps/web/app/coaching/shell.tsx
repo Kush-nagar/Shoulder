@@ -76,7 +76,7 @@ export function CoachingSubheader() {
         Adults-only pilot. Payments run in Stripe test mode, so no real money
         moves.
       </p>
-      <div className="-mx-4 mt-2 border-b border-line min-[375px]:-mx-5 md:-mx-6">
+      <div className="-mx-4 mt-2 border-b border-line min-[375px]:-mx-5 md:-mx-8">
         <SectionNav set="coaching" />
       </div>
     </div>

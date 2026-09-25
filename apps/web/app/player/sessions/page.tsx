@@ -1,5 +1,14 @@
-import { ChevronRight, Timer, Users } from "lucide-react";
+import {
+  ChartColumn,
+  ChevronRight,
+  Flag,
+  List,
+  MapPinOff,
+  Timer,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
+import { SectionHeading } from "../heading";
 import { requirePlayerSession } from "../session";
 import {
   errorBox,
@@ -10,7 +19,7 @@ import {
   textLink,
 } from "../ui";
 import { WeeklyChart } from "./charts";
-import { km, kmh, kindLabel, minutes, sessionDate, stopwatch } from "./format";
+import { kindLabel, km, kmh, minutes, sessionDate, stopwatch } from "./format";
 import {
   fetchSessionSummary,
   fetchSessions,
@@ -28,9 +37,9 @@ function Records({ records }: { records: SessionSummary["records"] }) {
   if (!shown.length) return null;
   return (
     <section aria-labelledby="records-title" className="min-w-0">
-      <h2 id="records-title" className={sectionTitle}>
+      <SectionHeading id="records-title" Icon={Flag}>
         Your bests
-      </h2>
+      </SectionHeading>
       <dl className="mt-3 divide-y divide-line border-y border-line">
         {shown.map(([label, record, format]) =>
           record ? (
@@ -75,15 +84,22 @@ export default async function SessionsPage() {
           Record a session
         </Link>
       </div>
-      <p className="mt-3 max-w-[60ch] text-[16px] leading-6 text-ink-2">
-        Your phone&apos;s GPS measures distance, speed and sprints. Your exact
-        location stays on your phone; only the totals and a grid of where you
-        spent time are saved, for one year.
-      </p>
-      <Link href="/player/team" className={`${textLink} mt-2`}>
-        <Users size={18} strokeWidth={2} aria-hidden="true" />
-        Team board
-      </Link>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-1">
+        <p className="flex max-w-[60ch] items-start gap-2 text-pretty text-[15px] leading-6 text-muted">
+          <MapPinOff
+            size={16}
+            strokeWidth={2}
+            aria-hidden="true"
+            className="mt-1 shrink-0"
+          />
+          Your exact route stays on your phone. Totals and a heat grid are kept
+          for a year.
+        </p>
+        <Link href="/player/team" className={textLink}>
+          <Users size={18} strokeWidth={2} aria-hidden="true" />
+          Team board
+        </Link>
+      </div>
 
       {sessions === null || summary.data === null ? (
         <p role="alert" className={`${errorBox} mt-8`}>
@@ -92,14 +108,20 @@ export default async function SessionsPage() {
       ) : sessions.length === 0 ? (
         <section
           aria-labelledby="sessions-empty-title"
-          className="mt-8 max-w-[680px] rounded-xl border border-dashed border-control-border px-5 py-8 md:px-8"
+          className="sh-rise mt-8 max-w-[680px] rounded-xl bg-surface-subtle px-5 py-8 md:px-8"
         >
+          <span
+            aria-hidden="true"
+            className="mb-4 flex size-12 items-center justify-center rounded-full bg-surface text-brand"
+          >
+            <Timer size={22} strokeWidth={2} />
+          </span>
           <h2 id="sessions-empty-title" className={sectionTitle}>
             No sessions yet
           </h2>
           <p className="mt-2 text-[16px] leading-6 text-ink-2">
-            Take your phone to training or a match, start recording, and keep it
-            in a pocket or armband.
+            Start recording at training or a match, then keep your phone in a
+            pocket or armband.
           </p>
           <Link href="/player/sessions/new" className={`${primaryButton} mt-5`}>
             <Timer size={20} strokeWidth={2} aria-hidden="true" />
@@ -107,14 +129,14 @@ export default async function SessionsPage() {
           </Link>
         </section>
       ) : (
-        <div className="mt-8 grid gap-10 lg:grid-cols-12 lg:gap-x-8">
+        <div className="sh-rise mt-8 grid gap-10 lg:grid-cols-12 lg:gap-x-8">
           <section
             aria-labelledby="weeks-title"
             className="min-w-0 lg:col-span-8"
           >
-            <h2 id="weeks-title" className={sectionTitle}>
+            <SectionHeading id="weeks-title" Icon={ChartColumn}>
               Last 12 weeks
-            </h2>
+            </SectionHeading>
             <div className="mt-4">
               <WeeklyChart weeks={summary.data.weeks} />
             </div>
@@ -126,15 +148,15 @@ export default async function SessionsPage() {
             aria-labelledby="all-sessions-title"
             className="min-w-0 lg:col-span-12"
           >
-            <h2 id="all-sessions-title" className={sectionTitle}>
+            <SectionHeading id="all-sessions-title" Icon={List}>
               All sessions
-            </h2>
-            <ul className="mt-3 divide-y divide-line border-y border-line">
+            </SectionHeading>
+            <ul className="sh-stagger mt-3 divide-y divide-line border-y border-line">
               {sessions.map((session) => (
                 <li key={session.id}>
                   <Link
                     href={`/player/sessions/${session.id}`}
-                    className={`group flex min-h-16 items-center gap-3 py-3 hover:bg-surface-subtle md:px-2 ${focus}`}
+                    className={`group flex min-h-16 items-center gap-3 rounded-lg py-3 transition-colors duration-150 hover:bg-surface-subtle md:px-2 ${focus}`}
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block text-[16px] font-semibold leading-[1.35] group-hover:underline group-hover:underline-offset-4">
@@ -151,7 +173,7 @@ export default async function SessionsPage() {
                       size={18}
                       strokeWidth={2}
                       aria-hidden="true"
-                      className="shrink-0 text-muted"
+                      className="shrink-0 text-muted transition-transform duration-150 ease-out group-hover:translate-x-0.5"
                     />
                   </Link>
                 </li>

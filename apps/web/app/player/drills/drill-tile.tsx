@@ -45,7 +45,7 @@ export function DrillTile({
   return (
     <Link
       href={`/player/drills/${drill.slug}`}
-      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface p-4 transition-[border-color,transform] duration-150 ease-out hover:border-line-strong active:scale-[0.99] md:p-5 ${focus}`}
+      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface p-4 transition-[border-color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-line-strong active:translate-y-0 active:scale-[0.99] md:p-5 ${focus}`}
     >
       {forGoal ? (
         <span

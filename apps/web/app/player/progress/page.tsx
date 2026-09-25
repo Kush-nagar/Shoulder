@@ -1,7 +1,15 @@
+import {
+  ChevronDown,
+  MessageSquareQuote,
+  NotebookPen,
+  Target,
+  Video,
+} from "lucide-react";
 import Link from "next/link";
 import { DevelopmentTimeline } from "../../../components/development-timeline";
 import { fetchEvidence, fetchGoals, fetchReflections } from "../../../lib/api";
 import type { TimelineGoal } from "../../../lib/development-timeline";
+import { SectionHeading } from "../heading";
 import {
   clock,
   monthLabel,
@@ -10,7 +18,7 @@ import {
 } from "../practice/format";
 import { fetchPracticeVideos } from "../practice/server";
 import { requirePlayerSession } from "../session";
-import { errorBox, focus, pageTitle, sectionTitle } from "../ui";
+import { errorBox, focus, pageTitle } from "../ui";
 import { ReflectionList } from "./reflection-list";
 
 function longDate(value: string) {
@@ -94,11 +102,11 @@ export default async function PlayerProgressPage() {
       <h1 className={pageTitle}>Progress</h1>
       <p className="mt-3 max-w-[56ch] text-[16px] leading-6 text-ink-2">
         {empty
-          ? "Clips from your coach and your practice videos will line up here over the season."
-          : "Every clip your coach has shared, game by game, and the practice you filmed."}
+          ? "Your coach's clips and your practice line up here over the season."
+          : "Every clip your coach shared, game by game, and your practice."}
       </p>
 
-      <div className="mt-8 grid gap-10 lg:mt-10 lg:grid-cols-12 lg:gap-8">
+      <div className="sh-rise mt-8 grid gap-10 lg:mt-10 lg:grid-cols-12 lg:gap-8">
         <aside
           aria-label="Goal summary"
           className="space-y-6 lg:sticky lg:top-6 lg:order-2 lg:col-span-4 lg:self-start"
@@ -110,12 +118,13 @@ export default async function PlayerProgressPage() {
             >
               <span
                 aria-hidden="true"
-                className="absolute inset-y-0 left-0 w-0.5 bg-brand"
+                className="absolute inset-y-0 left-0 w-1 bg-brand"
               />
               <h2
                 id="active-goal-title"
-                className="text-[14px] font-semibold text-night-muted"
+                className="flex items-center gap-2 text-[14px] font-semibold text-night-muted"
               >
+                <Target size={16} strokeWidth={2} aria-hidden="true" />
                 What you’re working on
               </h2>
               <p className="mt-2 font-display text-[24px] leading-[1.05] uppercase text-balance">
@@ -132,9 +141,12 @@ export default async function PlayerProgressPage() {
                 className={`flex min-h-12 cursor-pointer list-none items-center justify-between rounded-xl px-4 text-[16px] font-semibold [&::-webkit-details-marker]:hidden ${focus}`}
               >
                 Past goals
-                <span className="text-[13px] font-normal text-muted group-open:hidden">
-                  Show
-                </span>
+                <ChevronDown
+                  size={18}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                  className="text-muted transition-transform duration-150 group-open:rotate-180"
+                />
               </summary>
               <ul className="divide-y divide-line border-t border-line">
                 {past.map((goal) => (
@@ -155,9 +167,9 @@ export default async function PlayerProgressPage() {
 
         <div className="min-w-0 space-y-12 lg:order-1 lg:col-span-8">
           <section aria-labelledby="evidence-title">
-            <h2 id="evidence-title" className={sectionTitle}>
+            <SectionHeading id="evidence-title" Icon={MessageSquareQuote}>
               From your coach
-            </h2>
+            </SectionHeading>
             {timelineUnavailable ? (
               <p role="alert" className={`${errorBox} mt-4`}>
                 Your clips could not be loaded. Try again.
@@ -180,9 +192,9 @@ export default async function PlayerProgressPage() {
             aria-labelledby="practice-log-title"
             className="border-t border-line pt-8"
           >
-            <h2 id="practice-log-title" className={sectionTitle}>
+            <SectionHeading id="practice-log-title" Icon={Video}>
               Practice log
-            </h2>
+            </SectionHeading>
             {videos === null ? (
               <p role="alert" className={`${errorBox} mt-4`}>
                 Your practice videos could not be loaded. Try again.
@@ -234,11 +246,11 @@ export default async function PlayerProgressPage() {
             aria-labelledby="reflection-title"
             className="scroll-mt-20 border-t border-line pt-8"
           >
-            <h2 id="reflection-title" className={sectionTitle}>
+            <SectionHeading id="reflection-title" Icon={NotebookPen}>
               Your notes
-            </h2>
-            <p className="mt-2 text-[16px] leading-6 text-ink-2">
-              You can edit or permanently delete any note you wrote.
+            </SectionHeading>
+            <p className="mt-2 text-[15px] leading-6 text-muted">
+              Edit or permanently delete any note you wrote.
             </p>
             {reflections === null ? (
               <p role="alert" className={`${errorBox} mt-4`}>
