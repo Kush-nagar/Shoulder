@@ -1,6 +1,6 @@
 "use client";
 
-import { Footprints, House, ListChecks, Route } from "lucide-react";
+import { Footprints, House, ListChecks, Route, Timer } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -17,6 +17,13 @@ const tabs = [
     label: "Practice",
     Icon: Footprints,
     match: (path: string) => path.startsWith("/player/practice"),
+  },
+  {
+    href: "/player/sessions",
+    label: "Sessions",
+    Icon: Timer,
+    match: (path: string) =>
+      path.startsWith("/player/sessions") || path.startsWith("/player/team"),
   },
   {
     href: "/player/drills",
@@ -43,7 +50,7 @@ export function BottomTabs() {
       aria-label="Player navigation"
       className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] md:hidden"
     >
-      <ul className="grid h-16 grid-cols-4 px-1">
+      <ul className="grid h-16 grid-cols-5 px-0.5">
         {tabs.map(({ href, label, Icon, match }) => {
           const current = match(path);
           return (
@@ -59,7 +66,7 @@ export function BottomTabs() {
               >
                 <span
                   aria-hidden="true"
-                  className={`absolute inset-x-5 top-0 h-0.5 rounded-full bg-action transition-transform duration-180 ease-out ${
+                  className={`absolute inset-x-3 top-0 h-0.5 rounded-full bg-action transition-transform duration-180 ease-out ${
                     current ? "scale-x-100" : "scale-x-0"
                   }`}
                 />
@@ -113,10 +120,14 @@ export function SideNav() {
 const titles: [string, string][] = [
   ["/player/practice/new", "Film practice"],
   ["/player/practice", "Practice"],
+  ["/player/sessions/new", "Record a session"],
+  ["/player/sessions", "Sessions"],
+  ["/player/team", "Team board"],
   ["/player/drills", "Drills"],
   ["/player/progress", "Progress"],
   ["/player/profile", "Profile"],
   ["/player/goals", "Your clips"],
+  ["/player/plans", "Plans"],
 ];
 
 /** Phone top bar title; Home shows none because its greeting is the title. */

@@ -1,8 +1,10 @@
-from datetime import datetime
+import re
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -840,3 +842,238 @@ class AiCoachFeedback(BaseModel):
     body: str
     drills: list[Drill]
     created_at: datetime
+
+
+# Block 09B W1 (ADR 0023): player-recorded training and match sessions.
+
+SessionKind = Literal["training", "match"]
+GpsQuality = Literal["good", "fair", "poor"]
+HeatmapCell = Annotated[int, Field(ge=0, le=1000)]
+Heatmap = Annotated[list[HeatmapCell], Field(min_length=96, max_length=96)]
+# A decimal-degree pair ("51.50735, -0.12776") in free text is a location.
+COORDINATE_PATTERN = re.compile(
+    r"-?\d{1,3}\.\d{4,}\s*[,;/ ]\s*-?\d{1,3}\.\d{4,}"  # 51.50735, -0.12776
+    r"|\d{1,3}\s*°"  # 51°30'N
+    r"|\d{1,3}\.\d{4,}\s*[NSEWnsew](?![A-Za-z])"  # 51.50735N
+)
+SESSION_CLOCK_SKEW = timedelta(minutes=10)
+
+
+class TrainingSessionCreate(BaseModel):
+    """Aggregates only. `extra="forbid"` refuses any lat/long or point array."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: SessionKind
+    started_at: AwareDatetime
+    ended_at: AwareDatetime
+    duration_s: int = Field(ge=60, le=14400)
+    distance_m: int = Field(ge=0, le=30000)
+    top_speed_cms: int = Field(ge=0, le=1300)
+    sprint_count: int = Field(ge=0, le=500)
+    half_split_s: int | None = Field(default=None, gt=0)
+    heatmap: Heatmap
+    heatmap_second_half: Heatmap | None = None
+    gps_quality: GpsQuality
+    note: str | None = Field(default=None, max_length=280)
+
+    @model_validator(mode="after")
+    def consistent(self) -> Self:
+        elapsed = (self.ended_at - self.started_at).total_seconds()
+        if elapsed <= 0:
+            raise ValueError("ended_at must be after started_at")
+        if self.duration_s > elapsed + 60:
+            raise ValueError("duration_s exceeds the elapsed time")
+        if self.ended_at > datetime.now(UTC) + SESSION_CLOCK_SKEW:
+            raise ValueError("ended_at is in the future")
+        if self.half_split_s is not None and self.half_split_s >= self.duration_s:
+            raise ValueError("half_split_s must fall inside the session")
+        if self.heatmap_second_half is not None and self.half_split_s is None:
+            raise ValueError("heatmap_second_half needs half_split_s")
+        if self.note is not None and COORDINATE_PATTERN.search(self.note):
+            raise ValueError("note must not contain coordinates")
+        return self
+
+
+class TrainingSession(BaseModel):
+    id: UUID
+    kind: SessionKind
+    started_at: datetime
+    ended_at: datetime
+    duration_s: int
+    distance_m: int
+    top_speed_cms: int
+    sprint_count: int
+    half_split_s: int | None
+    heatmap: list[int]
+    heatmap_second_half: list[int] | None
+    gps_quality: GpsQuality
+    note: str | None
+    created_at: datetime
+
+
+class SessionWeek(BaseModel):
+    """Totals for one UTC ISO week starting Monday; zero-filled."""
+
+    week_start: date
+    sessions: int
+    distance_m: int
+    duration_s: int
+    sprint_count: int
+
+
+class PersonalRecord(BaseModel):
+    """The player's own best, as a plain fact; never compared with anyone."""
+
+    session_id: UUID
+    started_at: datetime
+    value: int
+
+
+class PersonalRecords(BaseModel):
+    distance_m: PersonalRecord | None
+    top_speed_cms: PersonalRecord | None
+    sprint_count: PersonalRecord | None
+    duration_s: PersonalRecord | None
+
+
+class SessionSummary(BaseModel):
+    weeks: list[SessionWeek]
+    records: PersonalRecords
+
+
+# Block 09B W3: coach-authored weekly training plans. Slugs name static drills
+# in `apps/web/content/drills.ts`; only their shape is checked here.
+DRILL_SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+
+
+class TrainingPlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    drill_slug: str = Field(min_length=1, max_length=60, pattern=DRILL_SLUG_PATTERN)
+    note: str = Field(default="", max_length=200)
+
+
+class TrainingPlanCreate(BaseModel):
+    """`player_id` null means the whole team. `week_of` snaps to its Monday."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=80)
+    week_of: date
+    player_id: UUID | None = None
+    items: list[TrainingPlanItem] = Field(min_length=1, max_length=8)
+
+
+class TrainingPlanPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=80)
+    week_of: date | None = None
+    items: list[TrainingPlanItem] | None = Field(
+        default=None, min_length=1, max_length=8
+    )
+
+    @model_validator(mode="after")
+    def at_least_one_change(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("At least one field is required")
+        for name in self.model_fields_set:
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be cleared")
+        return self
+
+
+class TrainingPlan(BaseModel):
+    id: UUID
+    team_id: UUID
+    player_id: UUID | None
+    title: str
+    week_of: date
+    items: list[TrainingPlanItem]
+    created_at: datetime
+    updated_at: datetime
+
+
+# Block 09B W2 (ADR 0023): opt-in team leaderboard of tracking totals only.
+LeaderboardMetric = Literal["distance", "sprints", "top_speed", "sessions"]
+LeaderboardPeriod = Literal["week", "season"]
+NICKNAME_PATTERN = re.compile(r"[A-Za-z0-9 ]{2,20}")
+# ponytail: a short screen, not a moderation system. Substrings have no
+# innocent spelling inside ordinary names; the whole words are short ones that
+# would otherwise hit names ("ass" in "Cassie", "cock" in "Hancock").
+NICKNAME_BLOCKED_SUBSTRINGS = (
+    "fuck", "shit", "cunt", "nigg", "fagg", "bitch", "whore", "slut", "porn",
+    "wank", "twat", "retard", "pedo", "hitler",
+)  # fmt: skip
+NICKNAME_BLOCKED_WORDS = frozenset(
+    {
+        "ass", "arse", "fag", "dick", "cock", "sex", "rape", "nazi", "kkk",
+        "tits", "piss", "penis", "anal", "homo", "spaz",
+        # Contact details spelled out with spaces instead of "@" or ".".
+        "www", "http", "https", "com", "net", "org", "gmail", "hotmail",
+        "yahoo", "outlook", "icloud", "insta", "snap", "tiktok", "whatsapp",
+        "instagram", "ig", "discord", "telegram", "kik", "snapchat", "twitter",
+    }
+)  # fmt: skip
+LEET = str.maketrans("013457", "oieast")
+
+
+def screen_nickname(value: str) -> str:
+    """Collapse spaces, then refuse slurs, profanity and contact details."""
+    nickname = " ".join(value.split())
+    if not NICKNAME_PATTERN.fullmatch(nickname):
+        raise ValueError("Use 2 to 20 letters, numbers or spaces")
+    words = nickname.lower().split()
+    squashed = "".join(words)
+    blocked = (
+        # A phone number: six or more digits anywhere, spaced or not.
+        sum(c.isdigit() for c in squashed) >= 6
+        or any(
+            word in NICKNAME_BLOCKED_WORDS
+            or word.translate(LEET) in NICKNAME_BLOCKED_WORDS
+            for word in words
+        )
+        or any(
+            bad in form
+            for form in (squashed, squashed.translate(LEET))
+            for bad in NICKNAME_BLOCKED_SUBSTRINGS
+        )
+    )
+    if blocked:
+        raise ValueError("Choose a different nickname")
+    return nickname
+
+
+class LeaderboardMembershipUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str = Field(max_length=60)
+
+    @model_validator(mode="after")
+    def screened(self) -> Self:
+        self.nickname = screen_nickname(self.nickname)
+        return self
+
+
+class LeaderboardMembership(BaseModel):
+    """The caller's own opt-in state; `nickname` is null when not joined."""
+
+    team_id: UUID
+    nickname: str | None
+    joined_at: datetime | None
+
+
+class LeaderboardEntry(BaseModel):
+    """Nickname and a whole-number total only; never a player id or name."""
+
+    nickname: str
+    value: int
+    is_me: bool
+
+
+class Leaderboard(BaseModel):
+    metric: LeaderboardMetric
+    period: LeaderboardPeriod
+    since: datetime
+    entries: list[LeaderboardEntry]

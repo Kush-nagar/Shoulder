@@ -3,6 +3,17 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+/**
+ * ADR 0022 entrance animations fade content in; axe measured mid-fade reads
+ * blended colours. Audit only once every animation has settled.
+ */
+async function audit(page) {
+  await page.waitForFunction(() =>
+    document.getAnimations().every((a) => a.playState !== "running"),
+  );
+  return new AxeBuilder({ page }).analyze();
+}
+
 const origin = "http://127.0.0.1:3000";
 const api = "http://127.0.0.1:8000";
 const mail = "http://127.0.0.1:54324";
@@ -389,7 +400,7 @@ test("linked player sees only current clips across phone viewports", async ({
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBeLessThanOrEqual(width + 1);
-      const results = await new AxeBuilder({ page }).analyze();
+      const results = await audit(page);
       expect(results.violations).toEqual([]);
       const screenshotPath = testInfo.outputPath(
         `player-home-${width}x${height}.png`,
@@ -440,7 +451,8 @@ test("linked player sees only current clips across phone viewports", async ({
 
     await page.setViewportSize({ width: 375, height: 812 });
     await page.locator(`a[href="/player/goals/${goalId}"]`).click();
-    await expect(page.getByText("You did this.")).toBeVisible();
+    // The redesigned goal page labels every clip card; the current verdict is first.
+    await expect(page.getByText("You did this.").first()).toBeVisible();
     await expect(page.getByText("Coach sentence 1.")).toBeVisible();
     await expect(page.getByText("not_relevant")).toHaveCount(0);
     const currentVideo = page.locator("video:not([aria-hidden='true'])");
@@ -565,7 +577,7 @@ test("linked player sees only current clips across phone viewports", async ({
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBeLessThanOrEqual(width + 1);
-      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      expect((await audit(page)).violations).toEqual([]);
       const timelineScreenshot = testInfo.outputPath(
         `player-progress-${width}x${height}.png`,
       );
@@ -590,9 +602,7 @@ test("linked player sees only current clips across phone viewports", async ({
     await expect(
       coachPage.getByRole("link", { name: /Chance to do this\..*clip 2 of 3/ }),
     ).toBeVisible();
-    expect(
-      (await new AxeBuilder({ page: coachPage }).analyze()).violations,
-    ).toEqual([]);
+    expect((await audit(coachPage)).violations).toEqual([]);
     const coachTimelineScreenshot = testInfo.outputPath(
       "coach-development-timeline-1024x768.png",
     );
@@ -708,7 +718,7 @@ test("linked player sees only current clips across phone viewports", async ({
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBe(375);
-    const finalA11y = await new AxeBuilder({ page }).analyze();
+    const finalA11y = await audit(page);
     expect(finalA11y.violations).toEqual([]);
     const evidenceScreenshot = testInfo.outputPath(
       "player-evidence-375x812.png",

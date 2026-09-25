@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronRight, Footprints } from "lucide-react";
+import { ArrowRight, ChevronRight, Footprints, Timer } from "lucide-react";
 import Link from "next/link";
 import { type CSSProperties, type ReactNode, Suspense } from "react";
 import { drillOfTheDay, drillsForGoal } from "../../content/drills";
@@ -6,13 +6,16 @@ import {
   type EvidenceSet,
   fetchEvidence,
   fetchGoals,
+  fetchPlayerPlans,
   fetchReflections,
   type Goal,
   type PlayerReflection,
 } from "../../lib/api";
+import { mondayOf } from "../../lib/plans";
 import { DrillTile } from "./drills/drill-tile";
 import { HowItWorks, PracticePoster } from "./home-client";
 import { firstName } from "./identity";
+import { PlayerPlanCard } from "./plans/plan-card";
 import {
   clock,
   practiceDate,
@@ -25,6 +28,8 @@ import {
   fetchPracticeVideos,
 } from "./practice/server";
 import type { PracticeVideo } from "./practice/types";
+import { km, minutes } from "./sessions/format";
+import { fetchSessionSummary, type SessionSummary } from "./sessions/server";
 import { requirePlayerSession } from "./session";
 import {
   chip,
@@ -453,6 +458,64 @@ function YourNotes({
   );
 }
 
+function ThisWeek({
+  summary,
+  index,
+}: {
+  summary: SessionSummary | null;
+  index: number;
+}) {
+  const week = summary?.weeks.at(-1);
+  return (
+    <Section
+      id="this-week-title"
+      title="This week"
+      index={index}
+      className="lg:col-span-12"
+      action={
+        <Link href="/player/sessions" className={textLink}>
+          Sessions
+        </Link>
+      }
+    >
+      {summary === null ? (
+        <SectionError />
+      ) : week?.sessions ? (
+        <dl className="mt-3 grid grid-cols-3 gap-3 rounded-xl border border-line bg-surface p-4 md:p-5">
+          {(
+            [
+              [
+                week.sessions === 1 ? "Session" : "Sessions",
+                String(week.sessions),
+              ],
+              ["Distance", km(week.distance_m)],
+              ["Time", minutes(week.duration_s)],
+            ] as const
+          ).map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-[13px] text-muted">{label}</dt>
+              <dd className="mt-0.5 truncate text-[20px] font-semibold tabular-nums md:text-[22px]">
+                {value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl border border-dashed border-control-border p-4 md:p-5">
+          <p className="max-w-[46ch] text-[16px] leading-6 text-ink-2">
+            Record training or a match with your phone to see distance, speed
+            and where you played.
+          </p>
+          <Link href="/player/sessions/new" className={secondaryButton}>
+            <Timer size={20} strokeWidth={2} aria-hidden="true" />
+            Record a session
+          </Link>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function greetingDate() {
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
@@ -463,11 +526,21 @@ function greetingDate() {
 
 export default async function PlayerHome() {
   const { token, player, me } = await requirePlayerSession();
-  const [goals, practiceReply, reflections] = await Promise.all([
-    fetchGoals(token, player.id),
-    fetchPracticeVideos(token),
-    fetchReflections(token),
-  ]);
+  const [goals, practiceReply, reflections, weekReply, plans] =
+    await Promise.all([
+      fetchGoals(token, player.id),
+      fetchPracticeVideos(token),
+      fetchReflections(token),
+      fetchSessionSummary(token, 1),
+      fetchPlayerPlans(token),
+    ]);
+  // This week's plan, else the next one ahead. No plan, no card.
+  const thisWeek = mondayOf(new Date());
+  const weekPlans = plans?.filter((plan) => plan.week_of === thisWeek) ?? [];
+  const nextPlan = [...(plans ?? [])]
+    .reverse()
+    .find((plan) => plan.week_of > thisWeek);
+  const shownPlans = weekPlans.length ? weekPlans : nextPlan ? [nextPlan] : [];
   const goal = goals?.find((item) => item.status === "active");
   const evidence = goal ? await fetchEvidence(token, goal.id) : [];
   const videos = practiceReply.data
@@ -507,6 +580,36 @@ export default async function PlayerHome() {
       </div>
     </Section>
   );
+
+  const fromCoach =
+    plans === null ? (
+      <Section
+        id="plan-title"
+        title="From your coach"
+        index={2}
+        className="lg:col-span-12"
+      >
+        <SectionError />
+      </Section>
+    ) : shownPlans.length ? (
+      <Section
+        id="plan-title"
+        title="From your coach"
+        index={2}
+        className="lg:col-span-12"
+        action={
+          <Link href="/player/plans" className={textLink}>
+            All plans
+          </Link>
+        }
+      >
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          {shownPlans.slice(0, 2).map((plan) => (
+            <PlayerPlanCard key={plan.id} plan={plan} />
+          ))}
+        </div>
+      </Section>
+    ) : null;
 
   const practice = (
     <Section
@@ -598,6 +701,8 @@ export default async function PlayerHome() {
       <div className="mt-6 grid gap-8 md:mt-8 lg:grid-cols-12 lg:gap-x-6 lg:gap-y-10">
         {hero}
         {tryToday}
+        <ThisWeek summary={weekReply.data} index={3} />
+        {fromCoach}
         {firstRun ? (
           <>
             <HowItWorks className="lg:col-span-12" />

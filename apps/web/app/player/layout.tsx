@@ -45,7 +45,10 @@ export default async function PlayerLayout({
       data-theme={theme}
       className="sh-themed min-h-dvh bg-paper text-ink md:grid md:grid-cols-[88px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
     >
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line pt-[env(safe-area-inset-top)] md:flex">
+      <aside
+        aria-label="Shoulder sections"
+        className="sticky top-0 hidden h-dvh flex-col border-r border-line pt-[env(safe-area-inset-top)] md:flex"
+      >
         <Link
           href="/player"
           aria-label="Shoulder home"

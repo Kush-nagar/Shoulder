@@ -307,6 +307,42 @@ EXPECTED_POLICIES = {
             ("player_update", "UPDATE", "{shoulder_api}"),
         )
     ),
+    # 0016 (ADR 0023): sessions are player-self, plus a team-coach read.
+    # No UPDATE policy: a recorded session is immutable.
+    *(
+        ("training_session", f"training_session_{suffix}", verb, role)
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+            ("player_insert", "INSERT", "{shoulder_api}"),
+            ("player_delete", "DELETE", "{shoulder_api}"),
+            ("coach_select", "SELECT", "{shoulder_api}"),
+        )
+    ),
+    # 0018 (Block 09B W3): coach training plans. Players read only.
+    *(
+        ("training_plan", f"training_plan_{suffix}", verb, role)
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("coach_select", "SELECT", "{shoulder_api}"),
+            ("coach_insert", "INSERT", "{shoulder_api}"),
+            ("coach_update", "UPDATE", "{shoulder_api}"),
+            ("coach_delete", "DELETE", "{shoulder_api}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+        )
+    ),
+    # 0019 (ADR 0023): leaderboard opt-in is player-self only; teammates and
+    # the coach read the board through `private.team_leaderboard`.
+    *(
+        ("leaderboard_member", f"leaderboard_member_{suffix}", verb, role)
+        for suffix, verb, role in (
+            ("owner_maintenance", "ALL", "{shoulder_migration}"),
+            ("player_select", "SELECT", "{shoulder_api}"),
+            ("player_insert", "INSERT", "{shoulder_api}"),
+            ("player_update", "UPDATE", "{shoulder_api}"),
+            ("player_delete", "DELETE", "{shoulder_api}"),
+        )
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -350,6 +386,8 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "confirm_manifest_backup_expired",
     # 0015 (ADR 0021): public-demo self-join, bounded to age_group 'DEMO'.
     "demo_join",
+    # 0019 (ADR 0023): the team-member-only leaderboard read.
+    "team_leaderboard",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
@@ -379,6 +417,8 @@ EXPECTED_WORKER_FUNCTIONS = {
     # 0014: the fenced practice-video expiry sweep.
     "expired_practice_videos",
     "purge_practice_video",
+    # 0016: the fenced 365-day training-session purge.
+    "purge_expired_training_sessions",
 }
 
 
@@ -543,6 +583,14 @@ class PolicySurfaceTests(DatabaseTestCase):
                 ("shoulder_api", "ai_coach_feedback", "INSERT"),
                 ("shoulder_api", "ai_coach_feedback", "DELETE"),
                 ("shoulder_api", "ai_coach_usage", "INSERT"),
+                ("shoulder_api", "training_session", "INSERT"),
+                ("shoulder_api", "training_session", "DELETE"),
+                # 0018: plan UPDATE is column-level (title, week_of, items).
+                ("shoulder_api", "training_plan", "INSERT"),
+                ("shoulder_api", "training_plan", "DELETE"),
+                # 0019: nickname UPDATE is column-level.
+                ("shoulder_api", "leaderboard_member", "INSERT"),
+                ("shoulder_api", "leaderboard_member", "DELETE"),
                 # ADR 0018: the worker reads every job and every video, and
                 # holds no INSERT or DELETE anywhere. Its UPDATE surface is
                 # column-level and snapshotted in `test_database_video.py`.

@@ -339,6 +339,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Plan */
+        delete: operations["remove_plan_v1_plans__plan_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Plan */
+        patch: operations["patch_plan_v1_plans__plan_id__patch"];
+        trace?: never;
+    };
+    "/v1/player/leaderboard-membership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Membership */
+        get: operations["read_membership_v1_player_leaderboard_membership_get"];
+        /** Join Board */
+        put: operations["join_board_v1_player_leaderboard_membership_put"];
+        post?: never;
+        /** Leave Board */
+        delete: operations["leave_board_v1_player_leaderboard_membership_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/player/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Own Plans */
+        get: operations["list_own_plans_v1_player_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/player/practice-videos": {
         parameters: {
             query?: never;
@@ -405,6 +459,59 @@ export interface paths {
         /** Complete Practice Video */
         post: operations["complete_practice_video_v1_player_practice_videos__video_id__complete_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/player/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sessions */
+        get: operations["list_sessions_v1_player_sessions_get"];
+        put?: never;
+        /** Create Session */
+        post: operations["create_session_v1_player_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/player/sessions/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session Summary */
+        get: operations["session_summary_v1_player_sessions_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/player/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Session */
+        get: operations["read_session_v1_player_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        /** Remove Session */
+        delete: operations["remove_session_v1_player_sessions__session_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -556,6 +663,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/players/{player_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Player Sessions */
+        get: operations["list_player_sessions_v1_players__player_id__sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/review-publications/{publication_id}": {
         parameters: {
             query?: never;
@@ -673,6 +797,41 @@ export interface paths {
         get: operations["list_games_v1_teams__team_id__games_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Team Board */
+        get: operations["team_board_v1_teams__team_id__leaderboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Team Plans */
+        get: operations["list_team_plans_v1_teams__team_id__plans_get"];
+        put?: never;
+        /** Create Team Plan */
+        post: operations["create_team_plan_v1_teams__team_id__plans_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1489,6 +1648,58 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** Leaderboard */
+        Leaderboard: {
+            /** Entries */
+            entries: components["schemas"]["LeaderboardEntry"][];
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "distance" | "sprints" | "top_speed" | "sessions";
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "week" | "season";
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+        };
+        /**
+         * LeaderboardEntry
+         * @description Nickname and a whole-number total only; never a player id or name.
+         */
+        LeaderboardEntry: {
+            /** Is Me */
+            is_me: boolean;
+            /** Nickname */
+            nickname: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * LeaderboardMembership
+         * @description The caller's own opt-in state; `nickname` is null when not joined.
+         */
+        LeaderboardMembership: {
+            /** Joined At */
+            joined_at: string | null;
+            /** Nickname */
+            nickname: string | null;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /** LeaderboardMembershipUpdate */
+        LeaderboardMembershipUpdate: {
+            /** Nickname */
+            nickname: string;
+        };
         /** LinkedPlayer */
         LinkedPlayer: {
             /**
@@ -1574,6 +1785,31 @@ export interface components {
             t_end_ms: number;
             /** T Start Ms */
             t_start_ms: number;
+        };
+        /**
+         * PersonalRecord
+         * @description The player's own best, as a plain fact; never compared with anyone.
+         */
+        PersonalRecord: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Value */
+            value: number;
+        };
+        /** PersonalRecords */
+        PersonalRecords: {
+            distance_m: components["schemas"]["PersonalRecord"] | null;
+            duration_s: components["schemas"]["PersonalRecord"] | null;
+            sprint_count: components["schemas"]["PersonalRecord"] | null;
+            top_speed_cms: components["schemas"]["PersonalRecord"] | null;
         };
         /**
          * PlaybackUrl
@@ -2066,6 +2302,31 @@ export interface components {
              */
             team_id: string;
         };
+        /** SessionSummary */
+        SessionSummary: {
+            records: components["schemas"]["PersonalRecords"];
+            /** Weeks */
+            weeks: components["schemas"]["SessionWeek"][];
+        };
+        /**
+         * SessionWeek
+         * @description Totals for one UTC ISO week starting Monday; zero-filled.
+         */
+        SessionWeek: {
+            /** Distance M */
+            distance_m: number;
+            /** Duration S */
+            duration_s: number;
+            /** Sessions */
+            sessions: number;
+            /** Sprint Count */
+            sprint_count: number;
+            /**
+             * Week Start
+             * Format: date
+             */
+            week_start: string;
+        };
         /** SignPartsRequest */
         SignPartsRequest: {
             /** Part Numbers */
@@ -2171,6 +2432,167 @@ export interface components {
              * Format: uuid
              */
             video_id: string;
+        };
+        /** TrainingPlan */
+        TrainingPlan: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Items */
+            items: components["schemas"]["TrainingPlanItem"][];
+            /** Player Id */
+            player_id: string | null;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Week Of
+             * Format: date
+             */
+            week_of: string;
+        };
+        /**
+         * TrainingPlanCreate
+         * @description `player_id` null means the whole team. `week_of` snaps to its Monday.
+         */
+        TrainingPlanCreate: {
+            /** Items */
+            items: components["schemas"]["TrainingPlanItem"][];
+            /** Player Id */
+            player_id?: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Week Of
+             * Format: date
+             */
+            week_of: string;
+        };
+        /** TrainingPlanItem */
+        TrainingPlanItem: {
+            /** Drill Slug */
+            drill_slug: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** TrainingPlanPatch */
+        TrainingPlanPatch: {
+            /** Items */
+            items?: components["schemas"]["TrainingPlanItem"][] | null;
+            /** Title */
+            title?: string | null;
+            /** Week Of */
+            week_of?: string | null;
+        };
+        /** TrainingSession */
+        TrainingSession: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Distance M */
+            distance_m: number;
+            /** Duration S */
+            duration_s: number;
+            /**
+             * Ended At
+             * Format: date-time
+             */
+            ended_at: string;
+            /**
+             * Gps Quality
+             * @enum {string}
+             */
+            gps_quality: "good" | "fair" | "poor";
+            /** Half Split S */
+            half_split_s: number | null;
+            /** Heatmap */
+            heatmap: number[];
+            /** Heatmap Second Half */
+            heatmap_second_half: number[] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "training" | "match";
+            /** Note */
+            note: string | null;
+            /** Sprint Count */
+            sprint_count: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Top Speed Cms */
+            top_speed_cms: number;
+        };
+        /**
+         * TrainingSessionCreate
+         * @description Aggregates only. `extra="forbid"` refuses any lat/long or point array.
+         */
+        TrainingSessionCreate: {
+            /** Distance M */
+            distance_m: number;
+            /** Duration S */
+            duration_s: number;
+            /**
+             * Ended At
+             * Format: date-time
+             */
+            ended_at: string;
+            /**
+             * Gps Quality
+             * @enum {string}
+             */
+            gps_quality: "good" | "fair" | "poor";
+            /** Half Split S */
+            half_split_s?: number | null;
+            /** Heatmap */
+            heatmap: number[];
+            /** Heatmap Second Half */
+            heatmap_second_half?: number[] | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "training" | "match";
+            /** Note */
+            note?: string | null;
+            /** Sprint Count */
+            sprint_count: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Top Speed Cms */
+            top_speed_cms: number;
         };
         /** UploadCompleted */
         UploadCompleted: {
@@ -2934,6 +3356,161 @@ export interface operations {
             };
         };
     };
+    remove_plan_v1_plans__plan_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_plan_v1_plans__plan_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainingPlanPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_membership_v1_player_leaderboard_membership_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardMembership"];
+                };
+            };
+        };
+    };
+    join_board_v1_player_leaderboard_membership_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaderboardMembershipUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardMembership"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    leave_board_v1_player_leaderboard_membership_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_own_plans_v1_player_plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"][];
+                };
+            };
+        };
+    };
     list_practice_videos_v1_player_practice_videos_get: {
         parameters: {
             query?: never;
@@ -3136,6 +3713,150 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PracticeVideo"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sessions_v1_player_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"][];
+                };
+            };
+        };
+    };
+    create_session_v1_player_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainingSessionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    session_summary_v1_player_sessions_summary_get: {
+        parameters: {
+            query?: {
+                weeks?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_session_v1_player_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_session_v1_player_sessions__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -3446,6 +4167,37 @@ export interface operations {
             };
         };
     };
+    list_player_sessions_v1_players__player_id__sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSession"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_publication_v1_review_publications__publication_id__get: {
         parameters: {
             query?: never;
@@ -3683,6 +4435,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GamePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    team_board_v1_teams__team_id__leaderboard_get: {
+        parameters: {
+            query?: {
+                metric?: "distance" | "sprints" | "top_speed" | "sessions";
+                period?: "week" | "season";
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Leaderboard"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_team_plans_v1_teams__team_id__plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_team_plan_v1_teams__team_id__plans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainingPlanCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"];
                 };
             };
             /** @description Validation Error */
