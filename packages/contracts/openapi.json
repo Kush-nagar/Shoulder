@@ -1,89 +1,22 @@
 {
   "components": {
     "schemas": {
-      "AdminDocument": {
+      "AdminDocumentUrl": {
         "properties": {
-          "content_type": {
-            "enum": [
-              "application/pdf",
-              "image/jpeg",
-              "image/png"
-            ],
-            "title": "Content Type",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "background_check",
-              "id",
-              "certification"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "size_bytes": {
-            "title": "Size Bytes",
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
             "type": "integer"
           },
-          "status": {
-            "enum": [
-              "uploading",
-              "ready"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "uploaded_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Uploaded At"
-          },
           "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Url"
-          },
-          "url_expires_in_seconds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Url Expires In Seconds"
+            "title": "Url",
+            "type": "string"
           }
         },
         "required": [
-          "id",
-          "kind",
-          "content_type",
-          "size_bytes",
-          "status",
-          "uploaded_at",
           "url",
-          "url_expires_in_seconds"
+          "expires_in_seconds"
         ],
-        "title": "AdminDocument",
+        "title": "AdminDocumentUrl",
         "type": "object"
       },
       "AgeAttestation": {
@@ -990,7 +923,7 @@
           },
           "documents": {
             "items": {
-              "$ref": "#/components/schemas/AdminDocument"
+              "$ref": "#/components/schemas/CoachDocument"
             },
             "title": "Documents",
             "type": "array"
@@ -5579,6 +5512,61 @@
           }
         ],
         "summary": "Admin Decide"
+      }
+    },
+    "/v1/admin/coach-reviews/{profile_id}/documents/{document_id}/url": {
+      "get": {
+        "operationId": "admin_document_url_v1_admin_coach_reviews__profile_id__documents__document_id__url_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDocumentUrl"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Document Url"
       }
     },
     "/v1/admin/reports": {

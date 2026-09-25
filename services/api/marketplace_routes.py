@@ -21,6 +21,7 @@ from services.api.practice_routes import BoundedBodyRoute
 from services.api.problems import Problem
 from services.api.routes import PRIVATE, unavailable
 from services.api.schemas import (
+    AdminDocumentUrl,
     AgeAttestation,
     AgeAttestationUpdate,
     BookingCheckout,
@@ -202,6 +203,19 @@ def admin_review_queue(
 )
 def admin_review_detail(profile_id: UUID, user_id: User) -> CoachReview:
     return run(user_id, lambda c: service.review_detail(c, profile_id))
+
+
+@router.get(
+    "/admin/coach-reviews/{profile_id}/documents/{document_id}/url",
+    response_model=AdminDocumentUrl,
+    dependencies=PRIVATE,
+)
+def admin_document_url(
+    profile_id: UUID, document_id: UUID, user_id: User
+) -> AdminDocumentUrl:
+    return run(
+        user_id, lambda c: service.review_document_url(c, profile_id, document_id)
+    )
 
 
 @router.post(

@@ -48,7 +48,12 @@ def origin() -> str:
 
 
 def _client() -> stripe.StripeClient:
-    return stripe.StripeClient(secret_key())
+    # A request thread never waits on Stripe for long: 10 s, one retry.
+    return stripe.StripeClient(
+        secret_key(),
+        max_network_retries=1,
+        http_client=stripe.new_default_http_client(timeout=10),
+    )
 
 
 def _call(operation: Any, params: Any, idempotency_key: str | None = None) -> Any:
@@ -108,6 +113,8 @@ def create_checkout_session(
         _client().v1.checkout.sessions.create,
         {
             "mode": "payment",
+            # Cards settle at checkout; no delayed method outlives the hold.
+            "payment_method_types": ["card"],
             "line_items": [
                 {
                     "quantity": 1,

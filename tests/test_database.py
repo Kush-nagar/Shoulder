@@ -85,6 +85,7 @@ TABLES = (
     "coach_booking",
     "marketplace_report",
     "marketplace_audit",
+    "coach_document_purge",
 )
 
 
@@ -986,8 +987,8 @@ class ZMigrationTests(unittest.TestCase):
                 # 0015 adds the demo self-join (ADR 0021).
                 # 0016 adds the fenced training-session purge (ADR 0023).
                 # 0019 adds the membership-checked team leaderboard read.
-                # 0020 adds 18 marketplace helpers (two are triggers).
-                self.assertEqual(self.function_count(connection), 104)
+                # 0020 adds 24 marketplace helpers (four are triggers).
+                self.assertEqual(self.function_count(connection), 110)
                 # This helper intentionally counts only the baseline auth-sync
                 # trigger; Task 22 trigger coverage lives in the policy suite.
                 self.assertEqual(self.trigger_count(connection), 1)

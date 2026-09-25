@@ -9,8 +9,8 @@ fails, so the database never records a payment step that did not happen.
 """
 
 import os
-from datetime import datetime, timedelta
-from typing import Any, Literal
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Connection, CursorResult, text
@@ -20,7 +20,7 @@ from services.api import payments, storage
 from services.api.problems import Problem
 from services.api.routes import sqlstate
 from services.api.schemas import (
-    AdminDocument,
+    AdminDocumentUrl,
     AgeAttestation,
     BookingCheckout,
     BookingCreate,
@@ -45,7 +45,7 @@ from services.api.schemas import (
     ReportStatus,
 )
 
-FULL_REFUND_NOTICE = timedelta(hours=24)
+REPORTS_PER_DAY = 5  # matches the `marketplace_report` insert policy
 DECISIONS: dict[CoachDecision, str] = {
     "approve": "verified",
     "reject": "rejected",
@@ -77,18 +77,6 @@ NO_PROFILE = Problem(404, "You have no coach profile yet.")
 
 def enabled() -> bool:
     return os.environ.get("MARKETPLACE_ENABLED", "").strip().lower() == "on"
-
-
-def refund_for(
-    price_cents: int,
-    starts_at: datetime,
-    now: datetime,
-    by: Literal["player", "coach"],
-) -> int:
-    """Coach cancels: full. Player cancels more than 24 h ahead: full; else none."""
-    if by == "coach" or starts_at - now > FULL_REFUND_NOTICE:
-        return price_cents
-    return 0
 
 
 def _execute(
@@ -248,16 +236,19 @@ def create_document(
     connection: Connection, body: CoachDocumentCreate
 ) -> CoachDocumentUpload:
     profile = require_profile(connection)
+    if profile.status not in ("draft", "rejected"):
+        raise Problem(409, "Documents change only before you submit for review.")
     document_id = UUID(
         str(connection.execute(text("SELECT gen_random_uuid()")).scalar_one())
     )
     key = storage.coach_doc_key(profile.id, document_id, body.content_type)
-    connection.execute(
-        text("""
+    _execute(
+        connection,
+        """
             INSERT INTO app.coach_document (
                 id, coach_profile_id, kind, object_key, content_type, size_bytes
             ) VALUES (:id, :profile, :kind, :key, :content_type, :size)
-        """),
+        """,
         {
             "id": str(document_id),
             "profile": str(profile.id),
@@ -266,6 +257,7 @@ def create_document(
             "content_type": body.content_type,
             "size": body.size_bytes,
         },
+        {"54000": Problem(409, "A profile holds at most ten documents.")},
     )
     return CoachDocumentUpload(
         id=document_id,
@@ -306,7 +298,9 @@ def complete_document(
             f" WHERE id = :id RETURNING {DOCUMENT_COLUMNS}"
         ),
         {"id": str(row.id)},
-    ).one()
+    ).one_or_none()
+    if ready is None:  # the profile went to review in the meantime
+        raise Problem(409, "Documents change only before you submit for review.")
     return document_model(ready)
 
 
@@ -330,14 +324,10 @@ def stripe_onboarding(connection: Connection) -> str:
         raise Problem(409, "Payments open once your profile is verified.")
     account = profile.stripe_account_id
     if account is None:
-        account = payments.create_express_account(profile.id)
-        connection.execute(
-            text(
-                "UPDATE app.coach_profile SET stripe_account_id = :account"
-                " WHERE id = :id AND stripe_account_id IS NULL"
-            ),
-            {"account": account, "id": str(profile.id)},
-        )
+        account = connection.execute(
+            text("SELECT private.set_coach_stripe_account(:account)"),
+            {"account": payments.create_express_account(profile.id)},
+        ).scalar_one()
     return payments.account_link(account)
 
 
@@ -381,15 +371,14 @@ def create_slot(connection: Connection, body: CoachSlotCreate) -> CoachSlot:
     return slot_model(row)
 
 
-def cancel_booking(
-    connection: Connection, booking_id: UUID, refund_cents: int
-) -> tuple[str, int]:
-    """Definer cancel, then the Stripe refund inside the same transaction."""
+def cancel_booking(connection: Connection, booking_id: UUID) -> tuple[str, int]:
+    """Definer cancel (it applies the 24-hour rule itself), then the Stripe
+    refund inside the same transaction."""
     row = _execute(
         connection,
         "SELECT status, refund_cents, stripe_payment_intent_id"
-        " FROM private.cancel_coach_booking(:id, :refund)",
-        {"id": str(booking_id), "refund": refund_cents},
+        " FROM private.cancel_coach_booking(:id)",
+        {"id": str(booking_id)},
         {
             "P0002": Problem(404, "That booking is not available."),
             "55000": Problem(409, "That booking can no longer be cancelled."),
@@ -423,10 +412,10 @@ def delete_slot(connection: Connection, slot_id: UUID) -> None:
         )
     elif slot.status in ("held", "booked"):
         booking = connection.execute(
-            text("SELECT id, price_cents FROM app.coach_booking WHERE slot_id = :id"),
+            text("SELECT id FROM app.coach_booking WHERE slot_id = :id"),
             {"id": str(slot_id)},
         ).one()
-        cancel_booking(connection, booking.id, booking.price_cents)
+        cancel_booking(connection, booking.id)
 
 
 def coach_bookings(connection: Connection) -> list[CoachBooking]:
@@ -454,7 +443,7 @@ def review_queue(
 
 
 def review_detail(connection: Connection, profile_id: UUID) -> CoachReview:
-    """Profile plus 60-second signed URLs; every signed document is audited."""
+    """Profile and document metadata; a document URL is signed on request."""
     require_admin(connection)
     row = connection.execute(
         text(f"SELECT {PROFILE_COLUMNS} FROM app.coach_profile WHERE id = :id"),
@@ -469,27 +458,6 @@ def review_detail(connection: Connection, profile_id: UUID) -> CoachReview:
         ),
         {"id": str(profile_id)},
     ).scalar_one()
-    signed: list[AdminDocument] = []
-    for doc in documents(connection, profile_id):
-        url = None
-        if doc.status == "ready":
-            url = storage.sign_get(doc.object_key, storage.COACH_DOC_GET_URL_SECONDS)
-            connection.execute(
-                text(
-                    "SELECT private.write_marketplace_audit("
-                    "'coach_document.viewed', 'coach_document', :id, NULL)"
-                ),
-                {"id": str(doc.id)},
-            )
-        signed.append(
-            AdminDocument(
-                **document_model(doc).model_dump(),
-                url=url,
-                url_expires_in_seconds=(
-                    storage.COACH_DOC_GET_URL_SECONDS if url else None
-                ),
-            )
-        )
     return CoachReview(
         id=row.id,
         display_name=row.display_name,
@@ -503,7 +471,24 @@ def review_detail(connection: Connection, profile_id: UUID) -> CoachReview:
         verified_at=row.verified_at,
         charges_enabled=row.charges_enabled,
         open_reports=reports,
-        documents=signed,
+        documents=[document_model(doc) for doc in documents(connection, profile_id)],
+    )
+
+
+def review_document_url(
+    connection: Connection, profile_id: UUID, document_id: UUID
+) -> AdminDocumentUrl:
+    """One 60-second URL for one ready document; the access is audited."""
+    require_admin(connection)
+    key = _execute(
+        connection,
+        "SELECT private.admin_coach_document(:profile, :document)",
+        {"profile": str(profile_id), "document": str(document_id)},
+        {"P0002": Problem(404, "That document is not available.")},
+    ).scalar_one()
+    return AdminDocumentUrl(
+        url=storage.sign_get(key, storage.COACH_DOC_GET_URL_SECONDS),
+        expires_in_seconds=storage.COACH_DOC_GET_URL_SECONDS,
     )
 
 
@@ -640,20 +625,12 @@ def player_bookings(connection: Connection) -> list[PlayerBooking]:
 def player_cancel(connection: Connection, booking_id: UUID) -> PlayerBooking:
     expire_holds(connection)
     row = connection.execute(
-        text(
-            "SELECT id, price_cents, starts_at FROM private.player_booking_list()"
-            " WHERE id = :id"
-        ),
+        text("SELECT id FROM private.player_booking_list() WHERE id = :id"),
         {"id": str(booking_id)},
     ).one_or_none()
     if row is None:
         raise Problem(404, "That booking is not available.")
-    now = connection.execute(text("SELECT now()")).scalar_one()
-    cancel_booking(
-        connection,
-        booking_id,
-        refund_for(row.price_cents, row.starts_at, now, "player"),
-    )
+    cancel_booking(connection, booking_id)
     updated = connection.execute(
         text("SELECT * FROM private.player_booking_list() WHERE id = :id"),
         {"id": str(booking_id)},
@@ -663,6 +640,15 @@ def player_cancel(connection: Connection, booking_id: UUID) -> PlayerBooking:
 
 def report(connection: Connection, body: MarketplaceReportCreate) -> MarketplaceReport:
     require_adult(connection)
+    recent = connection.execute(
+        text(
+            "SELECT count(*) FROM app.marketplace_report"
+            " WHERE reporter_user_id = private.current_user_id()"
+            " AND created_at > now() - interval '24 hours'"
+        )
+    ).scalar_one()
+    if recent >= REPORTS_PER_DAY:
+        raise Problem(429, "You have sent several reports today. Try again tomorrow.")
     row = _execute(
         connection,
         f"""
@@ -679,6 +665,7 @@ def report(connection: Connection, body: MarketplaceReportCreate) -> Marketplace
         {
             "42501": Problem(422, "That booking is not one of yours with this coach."),
             "23503": Problem(404, "That coach is not available."),
+            "23505": Problem(409, "You already have an open report about this coach."),
         },
     ).one()
     return MarketplaceReport.model_validate(row._mapping)
@@ -687,27 +674,62 @@ def report(connection: Connection, body: MarketplaceReportCreate) -> Marketplace
 # -- Stripe webhook ----
 
 
+PAID = ("checkout.session.completed", "checkout.session.async_payment_succeeded")
+LAPSED = ("checkout.session.expired", "checkout.session.async_payment_failed")
+
+
+def _metadata_id(obj: dict[str, Any], key: str) -> str | None:
+    """A UUID this app put in the object's metadata, or None."""
+    metadata = obj.get("metadata")
+    try:
+        return str(UUID(str(metadata[key]))) if isinstance(metadata, dict) else None
+    except (KeyError, ValueError):
+        return None
+
+
 def apply_event(connection: Connection, event: dict[str, Any]) -> None:
     """Idempotent by state: replaying any event changes nothing twice, and a
-    refund's idempotency key is its payment intent and amount."""
+    refund's idempotency key is its payment intent and amount. An object
+    without this app's metadata is ignored: the database only acts on a
+    session it recorded for that booking, or an account that profile owns."""
     kind = event.get("type")
     obj = event.get("data", {}).get("object", {})
-    if kind == "checkout.session.completed":
-        if obj.get("payment_status") != "paid" or not obj.get("payment_intent"):
+    if kind in PAID:
+        booking = _metadata_id(obj, "booking_id")
+        if (
+            booking is None
+            or obj.get("payment_status") != "paid"
+            or not obj.get("payment_intent")
+        ):
             return
-        outcome = connection.execute(
-            text("SELECT private.confirm_booking_payment(:session, :intent)"),
-            {"session": obj["id"], "intent": obj["payment_intent"]},
-        ).scalar_one()
+        outcome, amount = connection.execute(
+            text(
+                "SELECT outcome, refund_amount"
+                " FROM private.confirm_booking_payment(:booking, :session, :intent)"
+            ),
+            {"booking": booking, "session": obj["id"], "intent": obj["payment_intent"]},
+        ).one()
         if outcome == "refund":
-            payments.refund(obj["payment_intent"])
-    elif kind == "checkout.session.expired":
+            payments.refund(obj["payment_intent"], amount)
+    elif kind in LAPSED:
+        booking = _metadata_id(obj, "booking_id")
+        if booking is None:
+            return
         connection.execute(
-            text("SELECT private.expire_booking_checkout(:session)"),
-            {"session": obj["id"]},
+            text("SELECT private.expire_booking_checkout(:booking, :session)"),
+            {"booking": booking, "session": obj["id"]},
         )
     elif kind == "account.updated":
+        profile = _metadata_id(obj, "coach_profile_id")
+        if profile is None:
+            return
         connection.execute(
-            text("SELECT private.set_coach_charges_enabled(:account, :enabled)"),
-            {"account": obj["id"], "enabled": bool(obj.get("charges_enabled"))},
+            text(
+                "SELECT private.set_coach_charges_enabled(:profile, :account, :enabled)"
+            ),
+            {
+                "profile": profile,
+                "account": obj["id"],
+                "enabled": bool(obj.get("charges_enabled")),
+            },
         )

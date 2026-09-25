@@ -356,6 +356,7 @@ EXPECTED_POLICIES = {
             "coach_booking",
             "marketplace_report",
             "marketplace_audit",
+            "coach_document_purge",
         )
     ),
     *(
@@ -431,14 +432,16 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "demo_join",
     # 0019 (ADR 0023): the team-member-only leaderboard read.
     "team_leaderboard",
-    # 0020 (Block 10M): marketplace. The two trigger functions are ungranted.
+    # 0020 (Block 10M): marketplace. Trigger functions and the raw audit
+    # writer are ungranted; the webhook functions refuse a signed-in caller.
     "is_platform_admin",
     "is_adult",
     "attest_age",
     "marketplace_coaches",
     "marketplace_coach_slots",
-    "write_marketplace_audit",
+    "admin_coach_document",
     "set_coach_profile_status",
+    "set_coach_stripe_account",
     "set_coach_charges_enabled",
     "expire_marketplace_holds",
     "book_coach_slot",
@@ -479,8 +482,11 @@ EXPECTED_WORKER_FUNCTIONS = {
     "purge_practice_video",
     # 0016: the fenced 365-day training-session purge.
     "purge_expired_training_sessions",
-    # 0020: lapsed marketplace booking holds return to open slots.
+    # 0020: lapsed marketplace booking holds return to open slots, and the
+    # fenced coach-document purge.
     "expire_marketplace_holds",
+    "expired_coach_documents",
+    "purge_coach_document_object",
 }
 
 
@@ -632,6 +638,8 @@ class PolicySurfaceTests(DatabaseTestCase):
                     "deletion_manifest",
                     "deletion_manifest_object",
                     "product_event",
+                    # 0020: the document purge queue is definer-only.
+                    "coach_document_purge",
                 )
             }
             | {

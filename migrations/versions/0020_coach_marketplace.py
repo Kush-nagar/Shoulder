@@ -36,33 +36,79 @@ TABLES = (
     "coach_booking",
     "marketplace_report",
     "marketplace_audit",
+    # Object keys of deleted documents, until the retention sweep removes them.
+    "coach_document_purge",
 )
-# signature -> roles granted EXECUTE (none: trigger functions)
+# signature -> roles granted EXECUTE (none: triggers and definer-only helpers)
 FUNCTIONS: dict[str, tuple[str, ...]] = {
     "private.is_platform_admin()": (API_ROLE,),
     "private.is_adult()": (API_ROLE,),
     "private.attest_age(integer)": (API_ROLE,),
     "private.marketplace_coaches(text,text)": (API_ROLE,),
     "private.marketplace_coach_slots(uuid)": (API_ROLE,),
-    "private.write_marketplace_audit(text,text,uuid,jsonb)": (API_ROLE,),
+    "private.write_marketplace_audit(text,text,uuid,jsonb)": (),
     "private.audit_marketplace_status()": (),
     "private.coach_profile_rereview()": (),
+    "private.coach_document_cap()": (),
+    "private.queue_coach_document_purge()": (),
+    "private.admin_coach_document(uuid,uuid)": (API_ROLE,),
     "private.set_coach_profile_status(uuid,text,text)": (API_ROLE,),
-    "private.set_coach_charges_enabled(text,boolean)": (API_ROLE,),
+    "private.set_coach_stripe_account(text)": (API_ROLE,),
+    "private.set_coach_charges_enabled(uuid,text,boolean)": (API_ROLE,),
     "private.expire_marketplace_holds()": (API_ROLE, WORKER_ROLE),
     "private.book_coach_slot(uuid,text)": (API_ROLE,),
     "private.attach_booking_checkout(uuid,text)": (API_ROLE,),
-    "private.confirm_booking_payment(text,text)": (API_ROLE,),
-    "private.expire_booking_checkout(text)": (API_ROLE,),
-    "private.cancel_coach_booking(uuid,integer)": (API_ROLE,),
+    "private.confirm_booking_payment(uuid,text,text)": (API_ROLE,),
+    "private.expire_booking_checkout(uuid,text)": (API_ROLE,),
+    "private.cancel_coach_booking(uuid)": (API_ROLE,),
     "private.player_booking_list()": (API_ROLE,),
     "private.coach_booking_list()": (API_ROLE,),
+    "private.expired_coach_documents(uuid,text)": (WORKER_ROLE,),
+    "private.purge_coach_document_object(uuid,text,text)": (WORKER_ROLE,),
 }
 
 OWNS_PROFILE = """EXISTS (
     SELECT 1 FROM app.coach_profile p
     WHERE p.id = coach_profile_id AND p.user_id = private.current_user_id()
 )"""
+# Documents change only while the coach can still edit what goes to review.
+OWNS_EDITABLE_PROFILE = """EXISTS (
+    SELECT 1 FROM app.coach_profile p
+    WHERE p.id = coach_profile_id AND p.user_id = private.current_user_id()
+      AND p.status IN ('draft', 'rejected')
+)"""
+MAX_DOCUMENTS = 10
+
+
+def blocked(profile: str) -> str:
+    """An open report hides a coach only when its author paid for a session
+    with them; any other report waits in the admin queue."""
+    return f"""EXISTS (
+        SELECT 1 FROM app.marketplace_report r
+        JOIN app.coach_booking rb ON rb.player_user_id = r.reporter_user_id
+            AND rb.coach_profile_id = r.coach_profile_id
+        WHERE r.coach_profile_id = {profile} AND r.status = 'open'
+          AND (rb.status IN ('confirmed', 'completed') OR (
+              rb.status IN ('cancelled_by_player', 'cancelled_by_coach')
+              AND rb.stripe_payment_intent_id IS NOT NULL
+          ))
+    )"""
+
+
+# Fencing matches 0014: only the running retention sweep holder may purge.
+SWEEP_FENCE = """
+    EXISTS (
+        SELECT 1 FROM app.processing_job job
+        WHERE job.id = p_job_id AND job.kind = 'retention_sweep'
+          AND job.status = 'running' AND job.locked_by = p_worker_id
+    )
+"""
+# Webhook calls carry no user identity; a signed-in caller never reaches these.
+WEBHOOK_ONLY = """
+            IF private.current_user_id() IS NOT NULL THEN
+                RAISE EXCEPTION 'webhook only' USING ERRCODE = '42501';
+            END IF;
+"""
 SPECIALTIES = (
     "'scanning','first_touch','passing','finishing','dribbling','defending',"
     "'goalkeeping','fitness','tactics'"
@@ -265,6 +311,18 @@ def upgrade() -> None:
         "CREATE INDEX marketplace_audit_subject_idx"
         " ON app.marketplace_audit (subject_id, created_at)"
     )
+    # One open report per reporter and coach.
+    op.execute(
+        "CREATE UNIQUE INDEX marketplace_report_one_open"
+        " ON app.marketplace_report (reporter_user_id, coach_profile_id)"
+        " WHERE status = 'open'"
+    )
+    op.execute("""
+        CREATE TABLE app.coach_document_purge (
+            object_key text PRIMARY KEY,
+            queued_at timestamptz NOT NULL DEFAULT now()
+        )
+    """)
 
     for table in TABLES:
         op.execute(f"ALTER TABLE app.{table} OWNER TO {MIGRATION_ROLE}")
@@ -275,8 +333,9 @@ def upgrade() -> None:
                 FOR ALL TO {MIGRATION_ROLE} USING (true) WITH CHECK (true)
         """)
         # Reads only; every write below is either a narrow column grant under
-        # a policy, or a definer function.
-        op.execute(f"GRANT SELECT ON app.{table} TO {API_ROLE}")
+        # a policy, or a definer function. The purge queue is definer-only.
+        if table != "coach_document_purge":
+            op.execute(f"GRANT SELECT ON app.{table} TO {API_ROLE}")
     op.execute(
         f"ALTER SEQUENCE app.marketplace_audit_id_seq OWNER TO {MIGRATION_ROLE}"
     )
@@ -331,17 +390,18 @@ def upgrade() -> None:
         "GRANT INSERT (user_id, display_name, bio, specialties, city, formats,"
         f" rate_cents) ON app.coach_profile TO {API_ROLE}"
     )
-    # Status, review, and charges_enabled change only in definer functions.
+    # Status, review, Stripe account and charges_enabled change only in
+    # definer functions.
     op.execute(
         "GRANT UPDATE (display_name, bio, specialties, city, formats, rate_cents,"
-        f" stripe_account_id, updated_at) ON app.coach_profile TO {API_ROLE}"
+        f" updated_at) ON app.coach_profile TO {API_ROLE}"
     )
 
     policy("coach_document", "owner_select", "SELECT", OWNS_PROFILE, None)
     policy("coach_document", "admin_select", "SELECT", admin, None)
-    policy("coach_document", "owner_insert", "INSERT", None, f"{OWNS_PROFILE} AND status = 'uploading'")
-    policy("coach_document", "owner_update", "UPDATE", OWNS_PROFILE, OWNS_PROFILE)
-    policy("coach_document", "owner_delete", "DELETE", OWNS_PROFILE, None)
+    policy("coach_document", "owner_insert", "INSERT", None, f"{OWNS_EDITABLE_PROFILE} AND status = 'uploading'")
+    policy("coach_document", "owner_update", "UPDATE", f"{OWNS_EDITABLE_PROFILE} AND status = 'uploading'", OWNS_EDITABLE_PROFILE)
+    policy("coach_document", "owner_delete", "DELETE", OWNS_EDITABLE_PROFILE, None)
     op.execute(
         "GRANT INSERT (id, coach_profile_id, kind, object_key, content_type,"
         f" size_bytes) ON app.coach_document TO {API_ROLE}"
@@ -372,7 +432,8 @@ def upgrade() -> None:
 
     policy("marketplace_report", "reporter_select", "SELECT", f"reporter_user_id = {me}", None)
     policy("marketplace_report", "admin_select", "SELECT", admin, None)
-    # A report may cite only the reporter's own booking with that coach.
+    # A report may cite only the reporter's own booking with that coach, and
+    # one reporter files at most five a day (the API says so first).
     policy(
         "marketplace_report", "reporter_insert", "INSERT", None,
         f"""reporter_user_id = {me} AND private.is_adult() AND (
@@ -381,7 +442,11 @@ def upgrade() -> None:
                 WHERE b.id = booking_id AND b.player_user_id = {me}
                   AND b.coach_profile_id = marketplace_report.coach_profile_id
             )
-        )""",
+        ) AND (
+            SELECT count(*) FROM app.marketplace_report m
+            WHERE m.reporter_user_id = {me}
+              AND m.created_at > now() - interval '24 hours'
+        ) < 5""",
     )  # fmt: skip
     policy("marketplace_report", "admin_update", "UPDATE", admin, admin)
     op.execute(
@@ -437,6 +502,9 @@ def upgrade() -> None:
                 NEW.rate_cents IS DISTINCT FROM OLD.rate_cents
                 OR NEW.specialties IS DISTINCT FROM OLD.specialties
                 OR NEW.bio IS DISTINCT FROM OLD.bio
+                OR NEW.display_name IS DISTINCT FROM OLD.display_name
+                OR NEW.city IS DISTINCT FROM OLD.city
+                OR NEW.formats IS DISTINCT FROM OLD.formats
             ) THEN
                 NEW.status := 'pending_review';
             END IF;
@@ -448,6 +516,66 @@ def upgrade() -> None:
         CREATE TRIGGER coach_profile_rereview
             BEFORE UPDATE ON app.coach_profile
             FOR EACH ROW EXECUTE FUNCTION private.coach_profile_rereview()
+    """)
+
+    # At most ten documents per profile; the profile lock serializes inserts.
+    op.execute(f"""
+        CREATE FUNCTION private.coach_document_cap() RETURNS trigger
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+        BEGIN
+            PERFORM 1 FROM app.coach_profile WHERE id = NEW.coach_profile_id FOR UPDATE;
+            IF (
+                SELECT count(*) FROM app.coach_document d
+                WHERE d.coach_profile_id = NEW.coach_profile_id
+            ) >= {MAX_DOCUMENTS} THEN
+                RAISE EXCEPTION 'document limit' USING ERRCODE = '54000';
+            END IF;
+            RETURN NEW;
+        END $$
+    """)
+    op.execute("""
+        CREATE TRIGGER coach_document_cap
+            BEFORE INSERT ON app.coach_document
+            FOR EACH ROW EXECUTE FUNCTION private.coach_document_cap()
+    """)
+    # Every removed document row, including a cascade from a deleted profile
+    # or account, leaves its object key for the retention sweep to delete.
+    op.execute("""
+        CREATE FUNCTION private.queue_coach_document_purge() RETURNS trigger
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+        BEGIN
+            INSERT INTO app.coach_document_purge (object_key) VALUES (OLD.object_key)
+            ON CONFLICT (object_key) DO NOTHING;
+            RETURN NULL;
+        END $$
+    """)
+    op.execute("""
+        CREATE TRIGGER coach_document_purge
+            AFTER DELETE ON app.coach_document
+            FOR EACH ROW EXECUTE FUNCTION private.queue_coach_document_purge()
+    """)
+    # Admin opens one ready document: audited here, signed by the API.
+    op.execute("""
+        CREATE FUNCTION private.admin_coach_document(p_profile_id uuid, p_document_id uuid)
+        RETURNS text
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+        DECLARE
+            v_key text;
+        BEGIN
+            IF NOT private.is_platform_admin() THEN
+                RAISE EXCEPTION 'no such document' USING ERRCODE = 'P0002';
+            END IF;
+            SELECT d.object_key INTO v_key FROM app.coach_document d
+            WHERE d.id = p_document_id AND d.coach_profile_id = p_profile_id
+              AND d.status = 'ready';
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'no such document' USING ERRCODE = 'P0002';
+            END IF;
+            PERFORM private.write_marketplace_audit(
+                'coach_document.viewed', 'coach_document', p_document_id, NULL
+            );
+            RETURN v_key;
+        END $$
     """)
 
     # Once set, an attestation may not make the account older: a minor cannot
@@ -478,15 +606,12 @@ def upgrade() -> None:
         END $$
     """)
 
-    # Browsing: adults only; verified, Stripe-ready coaches with no open
+    # Browsing: adults only; verified, Stripe-ready coaches with no blocking
     # report. Public columns only: never user_id, email, Stripe ids, notes.
-    listed = """
+    listed = f"""
         cp.status = 'verified' AND cp.charges_enabled
         AND cp.stripe_account_id IS NOT NULL
-        AND NOT EXISTS (
-            SELECT 1 FROM app.marketplace_report r
-            WHERE r.coach_profile_id = cp.id AND r.status = 'open'
-        )
+        AND NOT {blocked("cp.id")}
         AND private.is_adult()
     """
     op.execute(f"""
@@ -573,14 +698,40 @@ def upgrade() -> None:
             RETURN p_status;
         END $$
     """)
-    # Called only from a signature-verified Stripe `account.updated` event.
+    # The verified coach's own Express account, set once. Returns the stored id.
     op.execute("""
-        CREATE FUNCTION private.set_coach_charges_enabled(p_account text, p_enabled boolean)
-        RETURNS void
-        LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+        CREATE FUNCTION private.set_coach_stripe_account(p_account text) RETURNS text
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+        DECLARE
+            v_account text;
+        BEGIN
+            IF p_account !~ '^acct_[A-Za-z0-9]{1,255}$' THEN
+                RAISE EXCEPTION 'bad account' USING ERRCODE = '22023';
+            END IF;
+            UPDATE app.coach_profile SET stripe_account_id = p_account
+            WHERE user_id = private.current_user_id() AND status = 'verified'
+              AND stripe_account_id IS NULL;
+            SELECT stripe_account_id INTO v_account FROM app.coach_profile
+            WHERE user_id = private.current_user_id() AND status = 'verified';
+            IF v_account IS NULL THEN
+                RAISE EXCEPTION 'no such profile' USING ERRCODE = 'P0002';
+            END IF;
+            RETURN v_account;
+        END $$
+    """)
+    # Stripe `account.updated` only: the profile id from the account metadata
+    # must own the account id the event names.
+    op.execute(f"""
+        CREATE FUNCTION private.set_coach_charges_enabled(
+            p_profile_id uuid, p_account text, p_enabled boolean
+        ) RETURNS void
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+        BEGIN
+            {WEBHOOK_ONLY}
             UPDATE app.coach_profile SET charges_enabled = p_enabled
-            WHERE stripe_account_id = p_account AND charges_enabled <> p_enabled
-        $$
+            WHERE id = p_profile_id AND stripe_account_id = p_account
+              AND charges_enabled <> p_enabled;
+        END $$
     """)
 
     # Lock order everywhere: slot, then booking. SKIP LOCKED here, so the
@@ -610,7 +761,7 @@ def upgrade() -> None:
 
     # SQLSTATEs: 42501 not allowed (not adult, own slot), P0002 not bookable
     # (missing, past, cancelled, coach not listed), 23505 already taken.
-    op.execute("""
+    op.execute(f"""
         CREATE FUNCTION private.book_coach_slot(p_slot_id uuid, p_note text)
         RETURNS TABLE (
             booking_id uuid, price_cents integer, platform_fee_cents integer,
@@ -642,10 +793,7 @@ def upgrade() -> None:
             IF v_coach.status <> 'verified' OR NOT v_coach.charges_enabled
                OR v_coach.stripe_account_id IS NULL
                OR v_slot.status = 'cancelled' OR v_slot.starts_at <= now()
-               OR EXISTS (
-                   SELECT 1 FROM app.marketplace_report r
-                   WHERE r.coach_profile_id = v_coach.id AND r.status = 'open'
-               ) THEN
+               OR {blocked("v_coach.id")} THEN
                 RAISE EXCEPTION 'not bookable' USING ERRCODE = 'P0002';
             END IF;
             IF v_slot.status <> 'open' THEN
@@ -696,64 +844,116 @@ def upgrade() -> None:
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'no such hold' USING ERRCODE = 'P0002';
             END IF;
+            -- Proof this app created the session, after the booking row moves
+            -- on (a lapsed hold re-booked) or is gone (the coach was deleted).
+            PERFORM private.write_marketplace_audit(
+                'coach_booking.checkout', 'coach_booking', p_booking_id,
+                pg_catalog.jsonb_build_object('session', p_session)
+            );
         END $$
     """)
-    # Webhook `checkout.session.completed`. Returns 'confirmed' (now or
-    # already), 'ignored' (paid, then cancelled with its own refund), or
-    # 'refund' (nothing to confirm: late payment for a hold that lapsed and was
-    # re-booked, or a coach cancelled during checkout). Idempotent.
-    op.execute("""
-        CREATE FUNCTION private.confirm_booking_payment(p_session text, p_payment_intent text)
-        RETURNS text
+    # Webhook `checkout.session.completed` (or async success), with the
+    # booking id from the session metadata. Returns (outcome, refund_amount):
+    # 'confirmed'; 'ignored' (not a session this app created, or already
+    # settled); or 'refund' with an amount, NULL meaning in full: a late
+    # payment for a hold that lapsed and was re-booked, a coach who is no
+    # longer bookable, or a cancel that happened before the payment arrived
+    # (the 24-hour rule applied at the cancel time). Idempotent.
+    op.execute(f"""
+        CREATE FUNCTION private.confirm_booking_payment(
+            p_booking_id uuid, p_session text, p_payment_intent text
+        ) RETURNS TABLE (outcome text, refund_amount integer)
         LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
         DECLARE
             v_slot app.coach_slot%ROWTYPE;
             v_booking app.coach_booking%ROWTYPE;
+            v_coach app.coach_profile%ROWTYPE;
+            v_refund integer;
         BEGIN
+            {WEBHOOK_ONLY}
+            IF NOT EXISTS (
+                SELECT 1 FROM app.marketplace_audit a
+                WHERE a.subject_id = p_booking_id AND a.action = 'coach_booking.checkout'
+                  AND a.detail ->> 'session' = p_session
+            ) THEN
+                RETURN QUERY SELECT 'ignored'::text, 0;
+                RETURN;
+            END IF;
             SELECT s.* INTO v_slot FROM app.coach_slot s
             JOIN app.coach_booking b ON b.slot_id = s.id
-            WHERE b.stripe_checkout_session_id = p_session
+            WHERE b.id = p_booking_id
             FOR UPDATE OF s;
-            IF NOT FOUND THEN RETURN 'refund'; END IF;
-            SELECT * INTO v_booking FROM app.coach_booking
-            WHERE slot_id = v_slot.id FOR UPDATE;
+            IF NOT FOUND THEN
+                RETURN QUERY SELECT 'refund'::text, NULL::integer;
+                RETURN;
+            END IF;
+            SELECT * INTO v_booking FROM app.coach_booking b
+            WHERE b.id = p_booking_id FOR UPDATE;
             IF v_booking.stripe_checkout_session_id IS DISTINCT FROM p_session THEN
-                RETURN 'refund';
+                RETURN QUERY SELECT 'refund'::text, NULL::integer;
+                RETURN;
             END IF;
-            IF v_booking.status IN ('confirmed', 'completed') THEN RETURN 'confirmed'; END IF;
-            IF v_booking.status = 'pending_payment' OR (
-                v_booking.status = 'expired' AND v_slot.status = 'open'
-                AND v_slot.starts_at > now()
-            ) THEN
-                UPDATE app.coach_booking SET status = 'confirmed',
+            IF v_booking.status IN ('confirmed', 'completed') THEN
+                RETURN QUERY SELECT 'confirmed'::text, 0;
+                RETURN;
+            END IF;
+            IF v_booking.status IN ('cancelled_by_player', 'cancelled_by_coach') THEN
+                IF v_booking.stripe_payment_intent_id IS NOT NULL THEN
+                    RETURN QUERY SELECT 'ignored'::text, 0;
+                    RETURN;
+                END IF;
+                v_refund := CASE
+                    WHEN v_booking.status = 'cancelled_by_coach'
+                      OR v_slot.starts_at - v_booking.cancelled_at > interval '24 hours'
+                    THEN v_booking.price_cents ELSE 0 END;
+                UPDATE app.coach_booking b SET stripe_payment_intent_id = p_payment_intent,
+                    refund_cents = v_refund, updated_at = now()
+                WHERE b.id = v_booking.id;
+                RETURN QUERY SELECT
+                    CASE WHEN v_refund > 0 THEN 'refund' ELSE 'ignored' END, v_refund;
+                RETURN;
+            END IF;
+            SELECT * INTO v_coach FROM app.coach_profile cp
+            WHERE cp.id = v_booking.coach_profile_id;
+            IF v_coach.status = 'verified' AND v_coach.charges_enabled
+               AND NOT {blocked("v_coach.id")}
+               AND v_booking.stripe_payment_intent_id IS NULL
+               AND (v_booking.status = 'pending_payment' OR (
+                   v_booking.status = 'expired' AND v_slot.status = 'open'
+                   AND v_slot.starts_at > now()
+               )) THEN
+                UPDATE app.coach_booking b SET status = 'confirmed',
                     stripe_payment_intent_id = p_payment_intent, updated_at = now()
-                WHERE id = v_booking.id;
-                UPDATE app.coach_slot SET status = 'booked' WHERE id = v_slot.id;
-                RETURN 'confirmed';
+                WHERE b.id = v_booking.id;
+                UPDATE app.coach_slot s SET status = 'booked' WHERE s.id = v_slot.id;
+                RETURN QUERY SELECT 'confirmed'::text, 0;
+                RETURN;
             END IF;
-            IF v_booking.status LIKE 'cancelled_by_%'
-               AND v_booking.stripe_payment_intent_id IS NOT NULL THEN
-                RETURN 'ignored';
-            END IF;
-            UPDATE app.coach_booking SET stripe_payment_intent_id = p_payment_intent,
-                updated_at = now()
-            WHERE id = v_booking.id;
-            RETURN 'refund';
+            -- Nothing to confirm: release the hold, remember the refund.
+            UPDATE app.coach_booking b SET status = 'expired',
+                stripe_payment_intent_id = p_payment_intent,
+                refund_cents = b.price_cents, updated_at = now()
+            WHERE b.id = v_booking.id;
+            UPDATE app.coach_slot s SET status = 'open'
+            WHERE s.id = v_slot.id AND s.status = 'held';
+            RETURN QUERY SELECT 'refund'::text, NULL::integer;
         END $$
     """)
-    op.execute("""
-        CREATE FUNCTION private.expire_booking_checkout(p_session text) RETURNS void
+    op.execute(f"""
+        CREATE FUNCTION private.expire_booking_checkout(p_booking_id uuid, p_session text)
+        RETURNS void
         LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
         DECLARE
             v_slot_id uuid;
         BEGIN
+            {WEBHOOK_ONLY}
             SELECT s.id INTO v_slot_id FROM app.coach_slot s
             JOIN app.coach_booking b ON b.slot_id = s.id
-            WHERE b.stripe_checkout_session_id = p_session
+            WHERE b.id = p_booking_id AND b.stripe_checkout_session_id = p_session
             FOR UPDATE OF s;
             IF NOT FOUND THEN RETURN; END IF;
             UPDATE app.coach_booking SET status = 'expired', updated_at = now()
-            WHERE slot_id = v_slot_id AND stripe_checkout_session_id = p_session
+            WHERE id = p_booking_id AND stripe_checkout_session_id = p_session
               AND status = 'pending_payment';
             IF FOUND THEN
                 UPDATE app.coach_slot SET status = 'open'
@@ -761,12 +961,13 @@ def upgrade() -> None:
             END IF;
         END $$
     """)
-    # The caller's role on the booking picks the status. The API computes the
-    # refund under the 24-hour rule; this clamps it and returns what to refund.
-    # An unpaid hold refunds nothing here; a payment that lands later is
-    # refunded in full by the webhook. The slot is withdrawn either way.
+    # The caller's role on the booking picks the status and the refund: a
+    # coach cancel refunds in full; a player cancel refunds in full only more
+    # than 24 hours before the start. An unpaid hold refunds nothing here; a
+    # payment that lands later gets the same rule at the stored cancel time.
+    # The slot is withdrawn either way.
     op.execute("""
-        CREATE FUNCTION private.cancel_coach_booking(p_booking_id uuid, p_refund_cents integer)
+        CREATE FUNCTION private.cancel_coach_booking(p_booking_id uuid)
         RETURNS TABLE (status text, refund_cents integer, stripe_payment_intent_id text)
         LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
         #variable_conflict use_column
@@ -799,8 +1000,11 @@ def upgrade() -> None:
                OR v_slot.starts_at <= now() THEN
                 RAISE EXCEPTION 'not cancellable' USING ERRCODE = '55000';
             END IF;
-            v_refund := CASE WHEN v_booking.status = 'confirmed'
-                THEN greatest(0, least(coalesce(p_refund_cents, 0), v_booking.price_cents))
+            v_refund := CASE
+                WHEN v_booking.status <> 'confirmed' THEN 0
+                WHEN v_status = 'cancelled_by_coach'
+                  OR v_slot.starts_at - now() > interval '24 hours'
+                THEN v_booking.price_cents
                 ELSE 0 END;
             UPDATE app.coach_booking b SET status = v_status, refund_cents = v_refund,
                 cancelled_at = now(), updated_at = now()
@@ -852,6 +1056,44 @@ def upgrade() -> None:
             WHERE cp.user_id = private.current_user_id()
             ORDER BY s.starts_at DESC, b.id
         $$
+    """)
+
+    # Retention sweep: drop document rows past their deadline (an upload
+    # never finished in 24 hours; a profile rejected 90 days ago), which
+    # queues their keys, then list the queue for object deletion.
+    op.execute(f"""
+        CREATE FUNCTION private.expired_coach_documents(p_job_id uuid, p_worker_id text)
+        RETURNS TABLE (object_key text)
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+        BEGIN
+            IF NOT {SWEEP_FENCE} THEN RETURN; END IF;
+            DELETE FROM app.coach_document d
+            WHERE (d.status = 'uploading' AND d.created_at <= now() - interval '24 hours')
+               OR EXISTS (
+                   SELECT 1 FROM app.coach_profile cp
+                   WHERE cp.id = d.coach_profile_id AND cp.status = 'rejected'
+                     AND (
+                         SELECT max(a.created_at) FROM app.marketplace_audit a
+                         WHERE a.subject_id = cp.id AND a.action = 'coach_profile.rejected'
+                     ) <= now() - interval '90 days'
+               );
+            RETURN QUERY SELECT q.object_key FROM app.coach_document_purge q
+            ORDER BY q.queued_at, q.object_key LIMIT 500;
+        END $$
+    """)
+    op.execute(f"""
+        CREATE FUNCTION private.purge_coach_document_object(
+            p_job_id uuid, p_worker_id text, p_object_key text
+        ) RETURNS boolean
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+        BEGIN
+            IF NOT {SWEEP_FENCE} THEN RETURN false; END IF;
+            DELETE FROM app.coach_document_purge q WHERE q.object_key = p_object_key
+              AND NOT EXISTS (
+                  SELECT 1 FROM app.coach_document d WHERE d.object_key = p_object_key
+              );
+            RETURN FOUND;
+        END $$
     """)
 
     for signature, roles in FUNCTIONS.items():

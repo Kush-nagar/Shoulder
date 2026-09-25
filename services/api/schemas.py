@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -1110,6 +1111,26 @@ CoachBookingStatus = Literal[
 CoachDecision = Literal["approve", "reject", "suspend", "reinstate"]
 ReportStatus = Literal["open", "resolved"]
 Trimmed = StringConstraints(strip_whitespace=True)
+# Coach and player meet through the platform: free text a stranger reads may
+# not carry an email, phone number, link, or social handle.
+# ponytail: pattern list, not a classifier; "2015-2020" reads as a phone.
+CONTACT_DETAILS = re.compile(
+    r"[^\s@]+@[^\s@]+\.[a-z]{2,}"  # email
+    r"|(?:\d[\s().+-]*){7,}"  # phone: seven or more digits
+    r"|https?://|www\.|\b[a-z0-9-]+\.(?:com|net|org|io|co|me|app|ly|gg|tv|link|us|uk)\b"
+    r"|(?:^|[\s(])@\w"  # @handle
+    r"|\b(?:instagram|insta|snapchat|snap|whatsapp|telegram|wa\.me|t\.me)\b",
+    re.IGNORECASE,
+)
+
+
+def no_contact_details(value: str | None) -> str | None:
+    if value and CONTACT_DETAILS.search(value):
+        raise ValueError("contact details are not allowed here")
+    return value
+
+
+NoContact = AfterValidator(no_contact_details)
 
 
 class AgeAttestationUpdate(BaseModel):
@@ -1124,8 +1145,8 @@ class AgeAttestation(BaseModel):
 
 class CoachProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    display_name: Annotated[str, Trimmed, Field(min_length=2, max_length=60)]
-    bio: Annotated[str, Trimmed, Field(max_length=600)] = ""
+    display_name: Annotated[str, Trimmed, Field(min_length=2, max_length=60), NoContact]
+    bio: Annotated[str, Trimmed, Field(max_length=600), NoContact] = ""
     specialties: list[CoachSpecialty] = Field(min_length=1, max_length=5)
     city: Annotated[str, Trimmed, Field(min_length=2, max_length=80)]
     formats: list[CoachFormat] = Field(min_length=1, max_length=2)
@@ -1188,7 +1209,9 @@ class CoachSlotCreate(BaseModel):
     starts_at: AwareDatetime
     ends_at: AwareDatetime
     format: CoachFormat
-    venue: Annotated[str, Trimmed, Field(min_length=2, max_length=120)] | None = None
+    venue: (
+        Annotated[str, Trimmed, Field(min_length=2, max_length=120), NoContact] | None
+    ) = None
 
     @model_validator(mode="after")
     def shape(self) -> Self:
@@ -1265,7 +1288,7 @@ class CoachBooking(BookingBase):
 class BookingCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     slot_id: UUID
-    note: Annotated[str, Trimmed, Field(max_length=280)] | None = None
+    note: Annotated[str, Trimmed, Field(max_length=280), NoContact] | None = None
 
 
 class BookingCheckout(BaseModel):
@@ -1299,9 +1322,9 @@ class CoachReviewSummary(BaseModel):
     updated_at: datetime
 
 
-class AdminDocument(CoachDocument):
-    url: str | None
-    url_expires_in_seconds: int | None
+class AdminDocumentUrl(BaseModel):
+    url: str
+    expires_in_seconds: int
 
 
 class CoachReview(BaseModel):
@@ -1317,7 +1340,7 @@ class CoachReview(BaseModel):
     verified_at: datetime | None
     charges_enabled: bool
     open_reports: int
-    documents: list[AdminDocument]
+    documents: list[CoachDocument]
 
 
 class CoachDecisionRequest(BaseModel):

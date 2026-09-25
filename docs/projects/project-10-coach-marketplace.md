@@ -66,8 +66,15 @@ their `open` future slots through a SECURITY DEFINER view-function
 `private.marketplace_coaches(p_specialty text, p_city text)` returning public
 columns only (never user_id, email, stripe ids, review_note); player reads own
 bookings; coach reads bookings on own profile (player shown as first name from
-`user_account.display_name` only). An open report on a coach blocks new
-bookings (checked inside the booking function). Every status change writes
+`user_account.display_name` only). An open report unlists a coach and blocks
+new bookings (checked inside the booking function) only when its reporter has
+or had a paid booking with that coach (confirmed, completed, or cancelled after
+payment); any other report waits in the admin queue without unlisting. One open
+report per reporter and coach; at most 5 reports per reporter per 24 h.
+Documents: at most 10 per profile, changed only while the profile is draft or
+rejected; unfinished uploads are swept after 24 h, a rejected profile's
+documents 90 days after rejection, and a deleted profile's objects on the next
+sweep. Every status change writes
 `marketplace_audit` via a definer helper.
 
 Slot holding: booking creates `pending_payment`, sets slot `held`, and
@@ -89,7 +96,8 @@ expires stale holds back to `open`.
 | DELETE | `/v1/coach-profile/slots/{id}` | coach | open → cancelled; booked → cancels booking with full refund |
 | GET | `/v1/coach-profile/bookings` | coach | own |
 | GET | `/v1/admin/coach-reviews?status=` | admin | queue |
-| GET | `/v1/admin/coach-reviews/{id}` | admin | profile + 60 s signed doc URLs |
+| GET | `/v1/admin/coach-reviews/{id}` | admin | profile + document metadata |
+| GET | `/v1/admin/coach-reviews/{id}/documents/{doc_id}/url` | admin | one 60 s signed URL; access audited |
 | POST | `/v1/admin/coach-reviews/{id}/decision` | admin | `{decision: approve|reject|suspend|reinstate, note}` |
 | GET | `/v1/admin/reports` / POST `/v1/admin/reports/{id}/resolve` | admin | |
 | GET | `/v1/marketplace/coaches?specialty=&city=` | adult | public columns |
@@ -98,7 +106,7 @@ expires stale holds back to `open`.
 | GET | `/v1/me/bookings` | adult | own |
 | POST | `/v1/me/bookings/{id}/cancel` | player | refund per 24 h rule |
 | POST | `/v1/marketplace/reports` | adult | `{coach_profile_id, booking_id?, reason}` |
-| POST | `/v1/stripe/webhook` | Stripe | signature-verified; `checkout.session.completed` → confirmed; `checkout.session.expired` → expired; `account.updated` → charges_enabled |
+| POST | `/v1/stripe/webhook` | Stripe | signature-verified; `checkout.session.completed`/`async_payment_succeeded` → confirmed; `checkout.session.expired`/`async_payment_failed` → expired; `account.updated` → charges_enabled. Acts only on objects carrying this app's metadata (`booking_id` + recorded session, `coach_profile_id` + stored account) |
 
 Stripe: new production dependency `stripe` (official SDK; webhook signature
 verification and Connect are not safe to hand-roll). Env: `STRIPE_SECRET_KEY`

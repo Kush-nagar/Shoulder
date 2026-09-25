@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/coach-reviews/{profile_id}/documents/{document_id}/url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Document Url */
+        get: operations["admin_document_url_v1_admin_coach_reviews__profile_id__documents__document_id__url_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/reports": {
         parameters: {
             query?: never;
@@ -1438,36 +1455,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AdminDocument */
-        AdminDocument: {
-            /**
-             * Content Type
-             * @enum {string}
-             */
-            content_type: "application/pdf" | "image/jpeg" | "image/png";
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "background_check" | "id" | "certification";
-            /** Size Bytes */
-            size_bytes: number;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "uploading" | "ready";
-            /** Uploaded At */
-            uploaded_at: string | null;
+        /** AdminDocumentUrl */
+        AdminDocumentUrl: {
+            /** Expires In Seconds */
+            expires_in_seconds: number;
             /** Url */
-            url: string | null;
-            /** Url Expires In Seconds */
-            url_expires_in_seconds: number | null;
+            url: string;
         };
         /** AgeAttestation */
         AgeAttestation: {
@@ -1823,7 +1816,7 @@ export interface components {
             /** Display Name */
             display_name: string;
             /** Documents */
-            documents: components["schemas"]["AdminDocument"][];
+            documents: components["schemas"]["CoachDocument"][];
             /** Formats */
             formats: ("in_person" | "online")[];
             /**
@@ -3742,6 +3735,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoachReviewSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_document_url_v1_admin_coach_reviews__profile_id__documents__document_id__url_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminDocumentUrl"];
                 };
             };
             /** @description Validation Error */
