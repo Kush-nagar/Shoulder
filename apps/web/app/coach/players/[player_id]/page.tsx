@@ -9,9 +9,11 @@ import {
   fetchPlayerReflections,
   fetchRetentionStatus,
   fetchRoster,
+  fetchTeamPlans,
   fetchTeams,
 } from "../../../../lib/api";
 import type { TimelineGoal } from "../../../../lib/development-timeline";
+import { PlanCard } from "../../plans/plan-list";
 import { requireCoach } from "../../session";
 import { PageHeader } from "../../shell";
 import {
@@ -57,10 +59,13 @@ export default async function Player({
   const player = roster?.find((row) => row.id === player_id);
   // Absent or hidden by policy both land on not-found.
   if (!player) notFound();
-  const [goalsResult, retention] = await Promise.all([
+  const [goalsResult, retention, teamPlans] = await Promise.all([
     fetchGoals(token, player.id),
     fetchRetentionStatus(token, player.team_id),
+    fetchTeamPlans(token, player.team_id),
   ]);
+  // Individual plans only; whole-team plans live on the Plans page.
+  const plans = teamPlans?.filter((plan) => plan.player_id === player.id);
   const goals = goalsResult ?? [];
   const [evidence, reflections, erasureImpact] = await Promise.all([
     Promise.all(
@@ -198,6 +203,37 @@ export default async function Player({
             <p className={`${metadata} mt-3`}>Closed goals are read-only.</p>
           </details>
         ) : null}
+
+        <div className="mt-8 flex max-w-170 flex-wrap items-center justify-between gap-3">
+          <h2 className={sectionTitle}>Training plans</h2>
+          {player.active ? (
+            <Link
+              href={`/coach/plans?player=${player.id}`}
+              className={tertiary}
+            >
+              Make a plan for {player.display_name}
+            </Link>
+          ) : null}
+        </div>
+        {plans === undefined ? (
+          <p role="alert" className="mt-3 text-[15px] text-error">
+            Plans could not be loaded. Try again.
+          </p>
+        ) : plans.length === 0 ? (
+          <p className="mt-3 text-[15px] leading-[1.5] text-muted">
+            No individual plans yet. Whole-team plans reach this player too.
+          </p>
+        ) : (
+          <div className="mt-3 max-w-170 space-y-3">
+            {plans.slice(0, 4).map((plan) => (
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                names={new Map([[player.id, player.display_name]])}
+              />
+            ))}
+          </div>
+        )}
 
         <h2 className={`${sectionTitle} mt-8`}>Evidence and reflections</h2>
         <div className={`${panel} mt-3 max-w-170 p-5`}>

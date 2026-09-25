@@ -6,13 +6,16 @@ import {
   type EvidenceSet,
   fetchEvidence,
   fetchGoals,
+  fetchPlayerPlans,
   fetchReflections,
   type Goal,
   type PlayerReflection,
 } from "../../lib/api";
+import { mondayOf } from "../../lib/plans";
 import { DrillTile } from "./drills/drill-tile";
 import { HowItWorks, PracticePoster } from "./home-client";
 import { firstName } from "./identity";
+import { PlayerPlanCard } from "./plans/plan-card";
 import {
   clock,
   practiceDate,
@@ -463,11 +466,19 @@ function greetingDate() {
 
 export default async function PlayerHome() {
   const { token, player, me } = await requirePlayerSession();
-  const [goals, practiceReply, reflections] = await Promise.all([
+  const [goals, practiceReply, reflections, plans] = await Promise.all([
     fetchGoals(token, player.id),
     fetchPracticeVideos(token),
     fetchReflections(token),
+    fetchPlayerPlans(token),
   ]);
+  // This week's plan, else the next one ahead. No plan, no card.
+  const thisWeek = mondayOf(new Date());
+  const weekPlans = plans?.filter((plan) => plan.week_of === thisWeek) ?? [];
+  const nextPlan = [...(plans ?? [])]
+    .reverse()
+    .find((plan) => plan.week_of > thisWeek);
+  const shownPlans = weekPlans.length ? weekPlans : nextPlan ? [nextPlan] : [];
   const goal = goals?.find((item) => item.status === "active");
   const evidence = goal ? await fetchEvidence(token, goal.id) : [];
   const videos = practiceReply.data
@@ -507,6 +518,36 @@ export default async function PlayerHome() {
       </div>
     </Section>
   );
+
+  const fromCoach =
+    plans === null ? (
+      <Section
+        id="plan-title"
+        title="From your coach"
+        index={2}
+        className="lg:col-span-12"
+      >
+        <SectionError />
+      </Section>
+    ) : shownPlans.length ? (
+      <Section
+        id="plan-title"
+        title="From your coach"
+        index={2}
+        className="lg:col-span-12"
+        action={
+          <Link href="/player/plans" className={textLink}>
+            All plans
+          </Link>
+        }
+      >
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          {shownPlans.slice(0, 2).map((plan) => (
+            <PlayerPlanCard key={plan.id} plan={plan} />
+          ))}
+        </div>
+      </Section>
+    ) : null;
 
   const practice = (
     <Section
@@ -598,6 +639,7 @@ export default async function PlayerHome() {
       <div className="mt-6 grid gap-8 md:mt-8 lg:grid-cols-12 lg:gap-x-6 lg:gap-y-10">
         {hero}
         {tryToday}
+        {fromCoach}
         {firstRun ? (
           <>
             <HowItWorks className="lg:col-span-12" />

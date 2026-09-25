@@ -30,6 +30,8 @@ export type PlayerReflection = Schema["PlayerReflection"];
 export type RetentionStatus = Schema["RetentionStatus"];
 export type PlayerErasureImpact = Schema["PlayerErasureImpact"];
 export type DeletionStatus = Schema["DeletionStatus"];
+export type TrainingPlan = Schema["TrainingPlan"];
+export type TrainingPlanItem = Schema["TrainingPlanItem"];
 
 /** Status plus parsed body. Problem details stay server-side; callers map status. */
 /**
@@ -249,16 +251,36 @@ export async function fetchObservations(
   ).data;
 }
 
+/** Coach view: every plan of one team, newest week first. */
+export async function fetchTeamPlans(
+  token: string,
+  teamId: string,
+): Promise<TrainingPlan[] | null> {
+  return (
+    await request<TrainingPlan[]>(
+      token,
+      `/v1/teams/${encodeURIComponent(teamId)}/plans`,
+    )
+  ).data;
+}
+
+/** Player view: own plans plus whole-team plans, newest week first. */
+export async function fetchPlayerPlans(
+  token: string,
+): Promise<TrainingPlan[] | null> {
+  return (await request<TrainingPlan[]>(token, "/v1/player/plans")).data;
+}
+
 export function apiWrite<T>(
   token: string,
   path: string,
-  method: "POST" | "PATCH",
-  body: unknown,
+  method: "POST" | "PATCH" | "DELETE",
+  body?: unknown,
   headers?: Record<string, string>,
 ): Promise<ApiReply<T>> {
   return request<T>(token, path, {
     method,
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
     headers,
   });
 }
