@@ -90,11 +90,11 @@ function Row({ player }: { player: RosterPlayer }) {
 
 function Table({ players }: { players: RosterPlayer[] }) {
   return (
-    <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-white">
+    <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
       <table className="w-full border-collapse text-left text-[15px]">
         <caption className="sr-only">Roster</caption>
         <thead>
-          <tr className="border-b border-line bg-white">
+          <tr className="border-b border-line bg-surface">
             <th scope="col" className={head}>
               Player
             </th>

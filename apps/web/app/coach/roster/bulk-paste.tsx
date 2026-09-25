@@ -35,7 +35,7 @@ export function BulkPaste({ heading }: { heading: string }) {
         value={text}
         aria-describedby={helpId}
         onChange={(event) => setText(event.target.value)}
-        className={`mt-2 w-full rounded-lg border border-line bg-white p-3 text-[15px] leading-[1.5] text-ink hover:border-muted ${focus}`}
+        className={`mt-2 w-full rounded-lg border border-line bg-surface p-3 text-[15px] leading-[1.5] text-ink hover:border-muted ${focus}`}
       />
 
       {/* Reserve the preview geometry so nothing below moves when rows appear. */}
@@ -49,7 +49,7 @@ export function BulkPaste({ heading }: { heading: string }) {
               : `${invalid} of ${rows.length} ${rows.length === 1 ? "row needs" : "rows need"} a fix. Nothing is saved until every row is valid.`}
         </p>
         {rows.length > 0 ? (
-          <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-white">
+          <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-surface">
             <table className="w-full border-collapse text-left text-[15px]">
               <caption className="sr-only">Pasted roster preview</caption>
               <thead>

@@ -125,6 +125,7 @@ const titles: [string, string][] = [
   ["/player/progress", "Progress"],
   ["/player/profile", "Profile"],
   ["/player/goals", "Your clips"],
+  ["/player/plans", "Plans"],
 ];
 
 /** Phone top bar title; Home shows none because its greeting is the title. */

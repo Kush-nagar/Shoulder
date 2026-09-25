@@ -72,6 +72,8 @@ TABLES = (
     "ai_coach_usage",
     # 0016 - Block 09B player training and match sessions (ADR 0023).
     "training_session",
+    # 0018 - Block 09B W3 coach training plans.
+    "training_plan",
 )
 
 

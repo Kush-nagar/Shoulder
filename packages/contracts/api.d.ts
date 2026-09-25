@@ -339,6 +339,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Plan */
+        delete: operations["remove_plan_v1_plans__plan_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Plan */
+        patch: operations["patch_plan_v1_plans__plan_id__patch"];
+        trace?: never;
+    };
+    "/v1/player/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Own Plans */
+        get: operations["list_own_plans_v1_player_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/player/practice-videos": {
         parameters: {
             query?: never;
@@ -743,6 +778,24 @@ export interface paths {
         get: operations["list_games_v1_teams__team_id__games_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Team Plans */
+        get: operations["list_team_plans_v1_teams__team_id__plans_get"];
+        put?: never;
+        /** Create Team Plan */
+        post: operations["create_team_plan_v1_teams__team_id__plans_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2292,6 +2345,76 @@ export interface components {
              */
             video_id: string;
         };
+        /** TrainingPlan */
+        TrainingPlan: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Items */
+            items: components["schemas"]["TrainingPlanItem"][];
+            /** Player Id */
+            player_id: string | null;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Week Of
+             * Format: date
+             */
+            week_of: string;
+        };
+        /**
+         * TrainingPlanCreate
+         * @description `player_id` null means the whole team. `week_of` snaps to its Monday.
+         */
+        TrainingPlanCreate: {
+            /** Items */
+            items: components["schemas"]["TrainingPlanItem"][];
+            /** Player Id */
+            player_id?: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Week Of
+             * Format: date
+             */
+            week_of: string;
+        };
+        /** TrainingPlanItem */
+        TrainingPlanItem: {
+            /** Drill Slug */
+            drill_slug: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** TrainingPlanPatch */
+        TrainingPlanPatch: {
+            /** Items */
+            items?: components["schemas"]["TrainingPlanItem"][] | null;
+            /** Title */
+            title?: string | null;
+            /** Week Of */
+            week_of?: string | null;
+        };
         /** TrainingSession */
         TrainingSession: {
             /**
@@ -3141,6 +3264,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_plan_v1_plans__plan_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_plan_v1_plans__plan_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainingPlanPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_own_plans_v1_player_plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"][];
                 };
             };
         };
@@ -4069,6 +4276,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GamePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_team_plans_v1_teams__team_id__plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_team_plan_v1_teams__team_id__plans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainingPlanCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingPlan"];
                 };
             };
             /** @description Validation Error */

@@ -189,7 +189,7 @@ export function GoalSection({
           name="description"
           rows={3}
           maxLength={1000}
-          className={`mt-1 w-full rounded-lg border border-line bg-white p-3 text-[15px] leading-[1.5] text-ink hover:border-muted ${focus}`}
+          className={`mt-1 w-full rounded-lg border border-line bg-surface p-3 text-[15px] leading-[1.5] text-ink hover:border-muted ${focus}`}
         />
         <div className="mt-4">
           <button type="submit" disabled={pending} className={primary}>

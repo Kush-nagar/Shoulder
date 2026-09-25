@@ -154,6 +154,22 @@ async function signIn(page, context, request) {
   return email;
 }
 
+/**
+ * Task 22 fences roster writes, matches, and uploads behind the owner's
+ * retention sign-off. Confirm it through the real coach form.
+ */
+async function confirmRetention(page) {
+  await page.goto("/coach/roster");
+  await page.getByLabel("Provider backup maximum (days)").fill("30");
+  for (const box of await page.getByRole("checkbox").all()) await box.check();
+  await page.getByRole("button", { name: "Confirm retention setup" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Confirm retention before uploading footage",
+    }),
+  ).toHaveCount(0);
+}
+
 async function bootstrapTeam(context, request) {
   const identity = await context.request.get("/api/auth/identity");
   expect(identity.status()).toBe(200);
@@ -202,6 +218,7 @@ test("an interrupted upload resumes without repeating a completed part", async (
 }) => {
   await signIn(page, context, request);
   await bootstrapTeam(context, request);
+  await confirmRetention(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   const gameId = await addMatch(page, "Riverside");
   const file = payload();
@@ -293,6 +310,7 @@ test("a different file with the same name does not resume the old upload", async
 }) => {
   await signIn(page, context, request);
   await bootstrapTeam(context, request);
+  await confirmRetention(page);
   const gameId = await addMatch(page, "Eastside");
 
   const first = payload();
@@ -341,6 +359,7 @@ test("an unsupported file is refused before anything is signed", async ({
 }) => {
   await signIn(page, context, request);
   await bootstrapTeam(context, request);
+  await confirmRetention(page);
   const gameId = await addMatch(page, "Northgate");
   const path = join(scratch, "notes.txt");
   writeFileSync(path, "not a match video");
