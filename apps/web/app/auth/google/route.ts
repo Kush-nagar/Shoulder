@@ -5,6 +5,8 @@ import {
   verifiedRedirectPath,
 } from "../../../lib/auth/policy";
 import { authError, routeAuth } from "../../../lib/auth/route";
+import { BIRTHDAY_SCOPE } from "../../../lib/google-birthday";
+import { marketplaceEnabled } from "../../../lib/marketplace";
 
 /** The Capacitor app's URL scheme (apps/mobile), also allowed in Supabase. */
 const NATIVE_SCHEME = "app.shoulder.player";
@@ -23,17 +25,23 @@ export async function POST(request: NextRequest) {
     // app's scheme, and the app finishes on /auth/callback inside its WebView,
     // which holds this PKCE verifier; a code captured elsewhere cannot be used.
     const native = body?.get("native") === "1";
+    // Optional `/coaching` age check: the only flow that asks Google for the
+    // birthday scope. Web only; the main sign-in never requests it.
+    const birthday =
+      !native && body?.get("purpose") === "birthday" && marketplaceEnabled();
     // Google returns to the same PKCE callback the magic link uses; the
     // callback route already verifies host, code shape, and exchange result.
     const callback = new URL(
       native ? `${NATIVE_SCHEME}://auth/callback` : "/auth/callback",
       config.origin,
     );
-    if (next) callback.searchParams.set("next", next);
+    if (birthday) callback.searchParams.set("purpose", "birthday");
+    else if (next) callback.searchParams.set("next", next);
     const { data, error } = await auth.client.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: callback.toString(),
+        ...(birthday ? { scopes: BIRTHDAY_SCOPE } : {}),
         // Redirect from this route so the code verifier is written by finish().
         skipBrowserRedirect: true,
       },
@@ -43,7 +51,12 @@ export async function POST(request: NextRequest) {
       return auth.finish(
         native
           ? NextResponse.json({ error: "unavailable" }, { status: 502 })
-          : NextResponse.redirect(`${config.origin}/auth/sign-in?error=1`, 303),
+          : NextResponse.redirect(
+              birthday
+                ? `${config.origin}/coaching?birthday=error`
+                : `${config.origin}/auth/sign-in?error=1`,
+              303,
+            ),
       );
     }
     if (native) return auth.finish(NextResponse.json({ url: data.url }));

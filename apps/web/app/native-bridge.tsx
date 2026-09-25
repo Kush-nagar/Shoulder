@@ -28,6 +28,8 @@ export function NativeBridge() {
   useEffect(() => {
     const cap = (window as { Capacitor?: Bridge }).Capacitor;
     if (!cap?.isNativePlatform()) return;
+    // Hides web-only controls such as the Google birthday option (globals.css).
+    document.documentElement.dataset.native = "";
 
     // Google refuses embedded WebViews: start the PKCE flow here (the verifier
     // cookie stays in this WebView) and show only Google in the system browser.

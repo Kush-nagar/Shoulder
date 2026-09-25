@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
+import { fetchMe } from "../../lib/api";
 import { authConfig, verifiedRedirectPath } from "../../lib/auth/policy";
 import { createAuthClient, verifiedToken } from "../../lib/auth/server";
 import { marketplaceEnabled } from "../../lib/marketplace";
@@ -54,3 +55,28 @@ export async function requireSignedIn(destination: string): Promise<string> {
 export const readAge = cache((token: string) =>
   read<AgeAttestation>(token, "/v1/me/age-attestation"),
 );
+
+/** The signed-in player's `me`, or null for anyone else. No demo join here. */
+export const playerMe = cache(async () => {
+  const token = await verified();
+  if (!token) return null;
+  const me = await fetchMe(token);
+  return me?.roles.includes("player") && me.player ? me : null;
+});
+
+/**
+ * Whether the account has a Google identity. Only these users see "Use my
+ * Google birthday": for anyone else a Google flow could sign them into a
+ * different or new account. Reads the already verified token's claims.
+ */
+export function hasGoogleIdentity(token: string): boolean {
+  try {
+    const claims = JSON.parse(
+      Buffer.from(token.split(".")[1] ?? "", "base64url").toString(),
+    ) as { app_metadata?: { providers?: unknown } };
+    const providers = claims.app_metadata?.providers;
+    return Array.isArray(providers) && providers.includes("google");
+  } catch {
+    return false;
+  }
+}

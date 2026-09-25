@@ -23,11 +23,15 @@ const chipOff =
 export default async function CoachingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ specialty?: string; city?: string }>;
+  searchParams: Promise<{
+    specialty?: string;
+    city?: string;
+    birthday?: string;
+  }>;
 }) {
-  const gate = await adultOnly("/coaching");
-  if (!gate.token) return gate.blocked;
   const query = await searchParams;
+  const gate = await adultOnly("/coaching", query.birthday);
+  if (!gate.token) return gate.blocked;
   const specialty = SPECIALTIES.find((s) => s === query.specialty) ?? null;
   const city = (query.city ?? "").trim().slice(0, 80);
   const params = new URLSearchParams();

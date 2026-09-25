@@ -1,6 +1,15 @@
 import { AgeForm } from "./forms";
-import { readAge, requireSignedIn } from "./server";
-import { errorBox, lead, pageTitle, panel } from "./ui";
+import { hasGoogleIdentity, readAge, requireSignedIn } from "./server";
+import { errorBox, hint, lead, pageTitle, panel, secondaryButton } from "./ui";
+
+/** Messages after the optional Google birthday flow (`/coaching?birthday=`). */
+const birthdayNotices: Record<string, string> = {
+  none: "Google didn't share a birth year. Enter it below instead.",
+  refused:
+    "Your Google birth year can't be saved: a birth year can't be changed to a later one once it's recorded.",
+  error:
+    "Your Google birthday couldn't be checked. Enter your birth year below.",
+};
 
 const reasons = [
   "Paid sessions with independent coaches are new to Shoulder. We're testing them with adults first.",
@@ -15,17 +24,24 @@ const reasons = [
  */
 export async function adultOnly(
   destination: string,
+  birthday?: string,
 ): Promise<
   { token: string; blocked: null } | { token: null; blocked: React.ReactNode }
 > {
   const token = await requireSignedIn(destination);
   const age = await readAge(token);
   if (age.data?.adult) return { token, blocked: null };
+  const notice = birthday ? birthdayNotices[birthday] : undefined;
   if (age.data) {
     return {
       token: null,
       blocked: (
         <Intro title="Coaching is for adults for now">
+          {notice ? (
+            <p role="status" className={`${errorBox} mt-6 max-w-[560px]`}>
+              {notice}
+            </p>
+          ) : null}
           <p className={`${lead} mt-4`}>
             Your account says you&apos;re under 18, so you can&apos;t browse or
             book coaches in this pilot. Your team coach and your clips on
@@ -55,10 +71,39 @@ export async function adultOnly(
           Book a paid 1:1 session with an independent coach. First, confirm
           you&apos;re 18 or older.
         </p>
+        {notice ? (
+          <p role="status" className={`${errorBox} mt-6 max-w-[560px]`}>
+            {notice}
+          </p>
+        ) : null}
         <AgeForm />
+        {hasGoogleIdentity(token) ? <GoogleBirthday /> : null}
       </Intro>
     ),
   };
+}
+
+/**
+ * Optional: a separate Google consent for the birthday scope. Only the year is
+ * kept. Hidden inside the Capacitor app, where Google runs outside the page.
+ */
+function GoogleBirthday() {
+  return (
+    <form
+      action="/auth/google"
+      method="post"
+      data-web-only=""
+      className="mt-6 max-w-[420px] border-t border-line pt-6"
+    >
+      <input type="hidden" name="purpose" value="birthday" />
+      <button type="submit" className={secondaryButton}>
+        Use my Google birthday
+      </button>
+      <p className={`${hint} mt-2`}>
+        Google asks you to share your birthday. Shoulder keeps only the year.
+      </p>
+    </form>
+  );
 }
 
 function Intro({
