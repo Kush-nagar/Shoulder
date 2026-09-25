@@ -81,6 +81,12 @@ test("email redirects allow only exact authenticated product routes", () => {
     `/player/goals/${goal}?publication=${publication}`,
     `/coach/games/${game}`,
     `/coach/players/${player}`,
+    "/coaching",
+    "/coaching/bookings",
+    "/coaching/coach",
+    `/coaching/coaches/${player}`,
+    "/admin/coaches",
+    `/admin/coaches/${player}`,
   ]) {
     assert.equal(verifiedRedirectPath(path), path);
   }
@@ -94,6 +100,9 @@ test("email redirects allow only exact authenticated product routes", () => {
     `/coach/players/${player}#https://evil.invalid`,
     "/auth/session",
     "/player",
+    "/coaching?checkout=success",
+    "/coaching/coaches/not-a-uuid",
+    "/admin",
   ]) {
     assert.equal(verifiedRedirectPath(unsafe), null, unsafe);
   }

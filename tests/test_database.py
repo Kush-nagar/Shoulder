@@ -76,6 +76,16 @@ TABLES = (
     "training_plan",
     # 0019 - Block 09B W2 opt-in team leaderboard (ADR 0023).
     "leaderboard_member",
+    # 0020 - Block 10M coach marketplace (adults only, test mode).
+    "platform_admin",
+    "age_attestation",
+    "coach_profile",
+    "coach_document",
+    "coach_slot",
+    "coach_booking",
+    "marketplace_report",
+    "marketplace_audit",
+    "coach_document_purge",
 )
 
 
@@ -826,6 +836,7 @@ class RuntimeIsolationTests(DatabaseTestCase):
                         "deletion_manifest",
                         "deletion_manifest_object",
                         "product_event",
+                        "coach_document_purge",
                     ):
                         with self.assertRaises(ProgrammingError) as caught:
                             self.visible(user_id, f"SELECT 1 FROM app.{table}")
@@ -977,7 +988,8 @@ class ZMigrationTests(unittest.TestCase):
                 # 0015 adds the demo self-join (ADR 0021).
                 # 0016 adds the fenced training-session purge (ADR 0023).
                 # 0019 adds the membership-checked team leaderboard read.
-                self.assertEqual(self.function_count(connection), 86)
+                # 0020 adds 24 marketplace helpers (four are triggers).
+                self.assertEqual(self.function_count(connection), 110)
                 # This helper intentionally counts only the baseline auth-sync
                 # trigger; Task 22 trigger coverage lives in the policy suite.
                 self.assertEqual(self.trigger_count(connection), 1)

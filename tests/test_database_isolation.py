@@ -343,6 +343,50 @@ EXPECTED_POLICIES = {
             ("player_delete", "DELETE", "{shoulder_api}"),
         )
     ),
+    # 0020 (Block 10M): coach marketplace. Every table carries the owner
+    # maintenance policy; transitions run in definer functions.
+    *(
+        (table, f"{table}_owner_maintenance", "ALL", "{shoulder_migration}")
+        for table in (
+            "platform_admin",
+            "age_attestation",
+            "coach_profile",
+            "coach_document",
+            "coach_slot",
+            "coach_booking",
+            "marketplace_report",
+            "marketplace_audit",
+            "coach_document_purge",
+        )
+    ),
+    *(
+        (table, f"{table}_{suffix}", verb, "{shoulder_api}")
+        for table, suffix, verb in (
+            ("platform_admin", "self_select", "SELECT"),
+            ("age_attestation", "self_select", "SELECT"),
+            ("coach_profile", "owner_select", "SELECT"),
+            ("coach_profile", "admin_select", "SELECT"),
+            ("coach_profile", "owner_insert", "INSERT"),
+            ("coach_profile", "owner_update", "UPDATE"),
+            ("coach_document", "owner_select", "SELECT"),
+            ("coach_document", "admin_select", "SELECT"),
+            ("coach_document", "owner_insert", "INSERT"),
+            ("coach_document", "owner_update", "UPDATE"),
+            ("coach_document", "owner_delete", "DELETE"),
+            ("coach_slot", "owner_select", "SELECT"),
+            ("coach_slot", "owner_insert", "INSERT"),
+            ("coach_slot", "owner_update", "UPDATE"),
+            ("coach_booking", "player_select", "SELECT"),
+            ("coach_booking", "coach_select", "SELECT"),
+            ("coach_booking", "admin_select", "SELECT"),
+            ("marketplace_report", "reporter_select", "SELECT"),
+            ("marketplace_report", "admin_select", "SELECT"),
+            ("marketplace_report", "reporter_insert", "INSERT"),
+            ("marketplace_report", "admin_update", "UPDATE"),
+            # Append-only: no write policy and no write grant for anyone.
+            ("marketplace_audit", "admin_select", "SELECT"),
+        )
+    ),
 }
 
 EXPECTED_RUNTIME_FUNCTIONS = {
@@ -388,6 +432,25 @@ EXPECTED_RUNTIME_FUNCTIONS = {
     "demo_join",
     # 0019 (ADR 0023): the team-member-only leaderboard read.
     "team_leaderboard",
+    # 0020 (Block 10M): marketplace. Trigger functions and the raw audit
+    # writer are ungranted; the webhook functions refuse a signed-in caller.
+    "is_platform_admin",
+    "is_adult",
+    "attest_age",
+    "marketplace_coaches",
+    "marketplace_coach_slots",
+    "admin_coach_document",
+    "set_coach_profile_status",
+    "set_coach_stripe_account",
+    "set_coach_charges_enabled",
+    "expire_marketplace_holds",
+    "book_coach_slot",
+    "attach_booking_checkout",
+    "confirm_booking_payment",
+    "expire_booking_checkout",
+    "cancel_coach_booking",
+    "player_booking_list",
+    "coach_booking_list",
 }
 # ADR 0018: the worker holds no `private` execute grant, because it authorizes
 # nothing on a user's behalf.
@@ -419,6 +482,11 @@ EXPECTED_WORKER_FUNCTIONS = {
     "purge_practice_video",
     # 0016: the fenced 365-day training-session purge.
     "purge_expired_training_sessions",
+    # 0020: lapsed marketplace booking holds return to open slots, and the
+    # fenced coach-document purge.
+    "expire_marketplace_holds",
+    "expired_coach_documents",
+    "purge_coach_document_object",
 }
 
 
@@ -570,6 +638,8 @@ class PolicySurfaceTests(DatabaseTestCase):
                     "deletion_manifest",
                     "deletion_manifest_object",
                     "product_event",
+                    # 0020: the document purge queue is definer-only.
+                    "coach_document_purge",
                 )
             }
             | {
@@ -591,6 +661,9 @@ class PolicySurfaceTests(DatabaseTestCase):
                 # 0019: nickname UPDATE is column-level.
                 ("shoulder_api", "leaderboard_member", "INSERT"),
                 ("shoulder_api", "leaderboard_member", "DELETE"),
+                # 0020: marketplace INSERT/UPDATE grants are column-level;
+                # a mismatched document upload deletes its own row.
+                ("shoulder_api", "coach_document", "DELETE"),
                 # ADR 0018: the worker reads every job and every video, and
                 # holds no INSERT or DELETE anywhere. Its UPDATE surface is
                 # column-level and snapshotted in `test_database_video.py`.
@@ -1130,6 +1203,7 @@ class ContextIsolationTests(IsolationHarness):
                         "deletion_manifest",
                         "deletion_manifest_object",
                         "product_event",
+                        "coach_document_purge",
                     ):
                         self.assertEqual(
                             self.refused_as(identity, f"SELECT 1 FROM app.{table}"),

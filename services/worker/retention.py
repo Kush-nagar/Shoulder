@@ -4,6 +4,7 @@ All stored/logged failures use fixed codes. Object keys remain confined to the
 restricted manifest and storage calls; they never enter exception messages.
 """
 
+import logging
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from services.worker import accounts as accounts
 from services.worker import jobs
 from services.worker.jobs import Cancelled
 
+LOGGER = logging.getLogger(__name__)
 INCOMPLETE_UPLOAD_RETENTION = timedelta(days=7)
 REJECTED_MEDIA_RETENTION = timedelta(hours=24)
 FAILED_PROCESSING_RETENTION = timedelta(days=7)
@@ -199,8 +201,13 @@ def retention_sweep_job(
         )
     # Database-only, so it runs before practice objects can fail the sweep.
     purge_training_sessions(job)
-    # After the coach sweep, so a practice storage failure cannot delay it.
     purge_practice_videos(job, keep_going)
+    # The API also expires holds lazily, so a failure here only logs.
+    try:
+        expire_marketplace_holds()
+    except Exception:
+        LOGGER.warning("marketplace_hold_expiry_failed")
+    purge_coach_documents(job, keep_going)
     if not keep_going(1.0):
         raise Cancelled
 
@@ -217,6 +224,54 @@ def purge_training_sessions(job: jobs.Job) -> int:
                 {"job_id": str(job.id), "worker_id": job.locked_by},
             ).scalar_one()
         )
+
+
+def expire_marketplace_holds() -> int:
+    """Return lapsed 15-minute booking holds to open slots (Block 10M)."""
+    with jobs.transaction() as connection:
+        return int(
+            connection.execute(
+                text("SELECT private.expire_marketplace_holds()")
+            ).scalar_one()
+        )
+
+
+def purge_coach_documents(
+    job: jobs.Job, keep_going: Callable[[float | None], bool]
+) -> int:
+    """Expire marketplace document rows, then delete every queued object key
+    (expired, rejected, or cascaded from a deleted profile) and verify it."""
+    with jobs.transaction() as connection:
+        keys = (
+            connection.execute(
+                text(
+                    "SELECT object_key FROM private.expired_coach_documents("
+                    ":job_id, :worker_id)"
+                ),
+                {"job_id": str(job.id), "worker_id": job.locked_by},
+            )
+            .scalars()
+            .all()
+        )
+    for key in keys:
+        if not keep_going(None):
+            raise Cancelled
+        try:
+            storage.delete_object(key)
+            if storage.head_object(key) is not None:
+                raise RetentionError("coach document absence was not verified")
+        except Exception:
+            # The key stays queued, so the next hourly sweep retries it.
+            raise RetentionError("coach document deletion failed") from None
+        with jobs.transaction() as connection:
+            connection.execute(
+                text(
+                    "SELECT private.purge_coach_document_object("
+                    ":job_id, :worker_id, :key)"
+                ),
+                {"job_id": str(job.id), "worker_id": job.locked_by, "key": key},
+            )
+    return len(keys)
 
 
 def purge_practice_videos(

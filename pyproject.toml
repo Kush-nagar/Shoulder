@@ -10,6 +10,7 @@ dependencies = [
     "pydantic==2.13.5",
     "pyjwt[crypto]==2.13.0",
     "sqlalchemy==2.0.52",
+    "stripe==15.6.1",
     "uvicorn==0.52.4",
 ]
 

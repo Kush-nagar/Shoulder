@@ -189,6 +189,22 @@ def practice_key(practice_video_id: UUID, content_type: str) -> str:
     return f"practice/{practice_video_id}/source.{PRACTICE_MEDIA[content_type]}"
 
 
+COACH_DOC_MEDIA: dict[str, str] = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+}
+# Admin document viewing (Block 10M): one minute, one object.
+COACH_DOC_GET_URL_SECONDS = 60
+
+
+def coach_doc_key(profile_id: UUID, document_id: UUID, content_type: str) -> str:
+    """`coach-docs/{profile}/{doc}.{ext}`; the extension comes from the allowlist."""
+    if content_type not in COACH_DOC_MEDIA:
+        raise StorageError("unsupported document type")
+    return f"coach-docs/{profile_id}/{document_id}.{COACH_DOC_MEDIA[content_type]}"
+
+
 def sprite_key(video_id: UUID, sheet: int) -> str:
     """`thumbs/{video_id}/sprite-{n}.jpg`. `sheet` is a bounded integer."""
     if not 0 <= sheet <= 99:

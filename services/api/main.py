@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from services.api.demo_routes import router as demo_router
 from services.api.judgment_routes import router as judgment_router
 from services.api.leaderboard_routes import router as leaderboard_router
+from services.api.marketplace_routes import router as marketplace_router
+from services.api.marketplace_routes import webhook_router as stripe_webhook_router
 from services.api.observation_routes import router as observation_router
 from services.api.plan_routes import router as plan_router
 from services.api.practice_routes import router as practice_router
@@ -30,6 +32,8 @@ app.include_router(tracking_router)
 app.include_router(demo_router)
 app.include_router(plan_router)
 app.include_router(leaderboard_router)
+app.include_router(marketplace_router)
+app.include_router(stripe_webhook_router)
 install_problem_handlers(app)
 
 
