@@ -141,3 +141,31 @@ Admins: `scripts/grant_admin.py --email ...` (operator DB URL) inserts
 Agents must not run `check-db.ps1` or migrate/truncate the shared DB; the
 coordinator runs DB and browser suites serially after integration, then an
 independent security review, then deploy with both flags **off** in production.
+
+## Follow-up: public 18+ pilot entry, demo coaches, Google birthday
+
+- Player Home shows a "Train with a coach" card and the rail/sidebar a
+  "Coaching" item (phone: account menu, so the bottom bar keeps five tabs) when
+  `NEXT_PUBLIC_MARKETPLACE_ENABLED=on`. `/coaching` renders inside the player
+  shell for players; other accounts keep the marketplace shell.
+- Demo coaches: `scripts/seed_demo_coaches.py` (usage in its docstring; `--remove`
+  deletes them). Browse-only: their Stripe accounts are fake, so Checkout fails.
+
+### Google birthday (optional age check)
+
+`/coaching`'s 18+ gate offers "Use my Google birthday" to accounts with a
+Google identity (others could land in a different account). It starts a
+separate Google OAuth with the extra scope
+`https://www.googleapis.com/auth/user.birthday.read`; the main sign-in never
+asks for it. The callback reads the People API once server-side, sends only the
+year to `PUT /v1/me/age-attestation`, and re-saves the session without the
+Google tokens. No year, or a refused year, returns to the gate with a message;
+the manual birth-year form stays. Hidden in the Capacitor app.
+
+Owner steps (Google Cloud project behind the Supabase Google provider):
+
+1. Enable the **People API**.
+2. OAuth consent screen: add the `user.birthday.read` scope.
+3. It is a sensitive scope: until Google verifies the app, users of this
+   optional flow see the "Google hasn't verified this app" warning (and
+   unverified apps are capped at 100 users). Normal sign-in is unaffected.
