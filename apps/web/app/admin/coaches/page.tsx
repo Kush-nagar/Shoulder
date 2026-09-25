@@ -38,18 +38,19 @@ export default async function AdminCoachesPage({
   const query = await searchParams;
   const status =
     TABS.find(([s]) => s === query.status)?.[0] ?? "pending_review";
-  const [queue, reports] = await Promise.all([
+  const [queue, reports, resolvedReports] = await Promise.all([
     read<CoachReviewSummary[]>(
       token,
       `/v1/admin/coach-reviews?status=${status}`,
     ),
-    read<MarketplaceReport[]>(token, "/v1/admin/reports"),
+    read<MarketplaceReport[]>(token, "/v1/admin/reports?status=open"),
+    read<MarketplaceReport[]>(token, "/v1/admin/reports?status=resolved"),
   ]);
   // Not an admin, or the pilot is off at the API: the page does not exist.
   if ([403, 404].includes(queue.status) || [403, 404].includes(reports.status))
     notFound();
-  const open = (reports.data ?? []).filter((r) => r.status === "open");
-  const resolved = (reports.data ?? []).filter((r) => r.status === "resolved");
+  const open = reports.data ?? [];
+  const resolved = resolvedReports.data ?? [];
 
   return (
     <div className="grid gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-14">
@@ -122,7 +123,8 @@ export default async function AdminCoachesPage({
           Reports
         </h2>
         <p className="mt-1 text-[15px] leading-6 text-ink-2">
-          An open report stops new bookings with that coach.
+          An open report from a player who paid for a session with that coach
+          stops new bookings. Other reports wait here without unlisting.
         </p>
         {reports.data === null ? (
           <p role="alert" className={`${errorBox} mt-4`}>

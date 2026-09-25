@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 /** JSON call to a same-origin marketplace BFF route. Status 0 = offline. */
 export async function send<T>(
   path: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   body?: unknown,
 ): Promise<{ status: number; data: T | null }> {
   try {

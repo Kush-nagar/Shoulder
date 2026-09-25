@@ -1,13 +1,18 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, ExternalLink } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { send } from "../../coaching/client";
-import type { CoachStatus, Decision } from "../../coaching/types";
+import type {
+  CoachStatus,
+  Decision,
+  ReviewDocumentUrl,
+} from "../../coaching/types";
 import {
   field,
   fieldError,
+  focus,
   hint,
   label,
   primaryButton,
@@ -134,6 +139,57 @@ export function DecisionForm({
         {busy ? "Saving…" : decision ? `${names[decision]} coach` : "Save"}
       </button>
     </form>
+  );
+}
+
+/** Signs one document URL on click (each open is audited) and opens it in a new tab. */
+export function OpenDocument({
+  profileId,
+  documentId,
+}: {
+  profileId: string;
+  documentId: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function open() {
+    // Opened synchronously so the popup blocker allows it; filled once signed.
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    setBusy(true);
+    setError(null);
+    const reply = await send<ReviewDocumentUrl>(
+      `/api/admin/coach-reviews/${profileId}/documents/${documentId}/url`,
+      "GET",
+    );
+    setBusy(false);
+    const url = reply.data?.url;
+    if (tab && url?.startsWith("https://")) tab.location.href = url;
+    else {
+      tab?.close();
+      setError(
+        reply.status === 0 ? OFFLINE : "The document didn't open. Try again.",
+      );
+    }
+  }
+  return (
+    <div className="space-y-1 text-right">
+      <button
+        type="button"
+        onClick={() => void open()}
+        disabled={busy}
+        className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] font-semibold text-action underline-offset-4 hover:underline ${focus}`}
+      >
+        {busy ? "Opening…" : "Open"}
+        <ExternalLink size={16} strokeWidth={2} aria-hidden="true" />
+        <span className="sr-only">(opens in a new tab)</span>
+      </button>
+      {error ? (
+        <p role="alert" className={fieldError}>
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatBytes } from "../../../../lib/upload";
@@ -10,12 +10,11 @@ import {
   backLink,
   chip,
   errorBox,
-  focus,
   pageTitle,
   panel,
   sectionTitle,
 } from "../../../coaching/ui";
-import { DecisionForm } from "../forms";
+import { DecisionForm, OpenDocument } from "../forms";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -109,8 +108,8 @@ export default async function AdminCoachPage({
 
             <h2 className={`${sectionTitle} mt-10`}>Documents</h2>
             <p className="mt-1 text-[14px] leading-5 text-muted">
-              Links open in a new tab and stop working after about a minute.
-              Reload this page for fresh ones.
+              Each document opens in a new tab through a link that stops working
+              after about a minute. Every open is recorded.
             </p>
             {coach.data.documents.length ? (
               <ul className="mt-4 divide-y divide-line border-y border-line">
@@ -147,22 +146,8 @@ export default async function AdminCoachPage({
                         </span>
                       </span>
                     </span>
-                    {doc.status === "ready" &&
-                    doc.url?.startsWith("https://") ? (
-                      <a
-                        href={doc.url ?? undefined}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] font-semibold text-action underline-offset-4 hover:underline ${focus}`}
-                      >
-                        Open
-                        <ExternalLink
-                          size={16}
-                          strokeWidth={2}
-                          aria-hidden="true"
-                        />
-                        <span className="sr-only">(opens in a new tab)</span>
-                      </a>
+                    {doc.status === "ready" ? (
+                      <OpenDocument profileId={id} documentId={doc.id} />
                     ) : (
                       <span className="text-[14px] text-muted">
                         Upload not finished

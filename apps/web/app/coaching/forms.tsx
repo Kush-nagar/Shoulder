@@ -384,7 +384,13 @@ export function ReportForm({
     if (reply.status >= 200 && reply.status < 300) setSent(true);
     else
       setError(
-        reply.status === 0 ? OFFLINE : "The report wasn't sent. Try again.",
+        reply.status === 409
+          ? "You already have an open report about this coach. We're looking at it."
+          : reply.status === 429
+            ? "You've sent several reports today. Try again tomorrow."
+            : reply.status === 0
+              ? OFFLINE
+              : "The report wasn't sent. Try again.",
       );
   }
 
