@@ -132,6 +132,22 @@ async function signIn(page, context, request) {
 }
 
 /** A coach role exists only because a team membership row exists. */
+/**
+ * Task 22 fences roster writes, matches, and uploads behind the owner's
+ * retention sign-off. Confirm it through the real coach form.
+ */
+async function confirmRetention(page) {
+  await page.goto("/coach/roster");
+  await page.getByLabel("Provider backup maximum (days)").fill("30");
+  for (const box of await page.getByRole("checkbox").all()) await box.check();
+  await page.getByRole("button", { name: "Confirm retention setup" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Confirm retention before uploading footage",
+    }),
+  ).toHaveCount(0);
+}
+
 async function bootstrapTeam(context, request) {
   const identity = await context.request.get("/api/auth/identity");
   expect(identity.status()).toBe(200);
@@ -172,6 +188,7 @@ test("keyboard path through paste, preview, confirm, and saved", async ({
 }) => {
   await signIn(page, context, request);
   await bootstrapTeam(context, request);
+  await confirmRetention(page);
   await page.setViewportSize({ width: 1280, height: 800 });
 
   // The role-aware redirect resolves from the database, not the route.
@@ -232,6 +249,7 @@ test("inline add row adds one player without collecting an email", async ({
 }) => {
   await signIn(page, context, request);
   await bootstrapTeam(context, request);
+  await confirmRetention(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/coach/roster");
 
@@ -274,6 +292,7 @@ test("accessible names, axe, and no horizontal scroll at coach widths", async ({
 }, testInfo) => {
   await signIn(page, context, request);
   await bootstrapTeam(context, request);
+  await confirmRetention(page);
   await page.goto("/coach/roster");
   await page.getByLabel("Paste your roster").fill("Gia Moreau, 2, Fullback");
   await page.getByRole("button", { name: "Add 1 player" }).click();

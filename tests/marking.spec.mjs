@@ -196,13 +196,15 @@ async function readyReview(page, context, request) {
   psql(`
     INSERT INTO app.video (
       id, game_id, original_key, original_filename, content_type, size_bytes,
-      uploaded_by, status, playback_key, duration_ms, width, height, fps, ready_at
+      uploaded_by, status, playback_key, duration_ms, width, height, fps, ready_at,
+      derivatives_expires_at
     ) VALUES (
       ${quoted(videoId)}, ${quoted(gameId)},
       ${quoted(`originals/${videoId}/source.mp4`)}, 'match.mp4', 'video/mp4', 1,
       ${quoted(coachId)}, 'ready',
       ${quoted(`playback/${videoId}/coach-720p.mp4`)}, ${fixture.duration_ms},
-      ${fixture.width}, ${fixture.height}, ${fixture.fps}, now()
+      ${fixture.width}, ${fixture.height}, ${fixture.fps}, now(),
+      now() + interval '30 days'
     )
   `);
   await page.goto(`/coach/games/${gameId}/review/${playerId}`);
