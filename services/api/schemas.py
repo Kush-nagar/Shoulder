@@ -1077,3 +1077,249 @@ class Leaderboard(BaseModel):
     period: LeaderboardPeriod
     since: datetime
     entries: list[LeaderboardEntry]
+
+
+# -- Coach marketplace (Block 10M; adults only, test mode) -------------------
+
+CoachSpecialty = Literal[
+    "scanning",
+    "first_touch",
+    "passing",
+    "finishing",
+    "dribbling",
+    "defending",
+    "goalkeeping",
+    "fitness",
+    "tactics",
+]
+CoachFormat = Literal["in_person", "online"]
+CoachProfileStatus = Literal[
+    "draft", "pending_review", "verified", "suspended", "rejected"
+]
+CoachDocumentKind = Literal["background_check", "id", "certification"]
+CoachDocumentType = Literal["application/pdf", "image/jpeg", "image/png"]
+CoachSlotStatus = Literal["open", "held", "booked", "cancelled"]
+CoachBookingStatus = Literal[
+    "pending_payment",
+    "confirmed",
+    "cancelled_by_player",
+    "cancelled_by_coach",
+    "expired",
+    "completed",
+]
+CoachDecision = Literal["approve", "reject", "suspend", "reinstate"]
+ReportStatus = Literal["open", "resolved"]
+Trimmed = StringConstraints(strip_whitespace=True)
+
+
+class AgeAttestationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    birth_year: int = Field(ge=1900, le=2100)
+
+
+class AgeAttestation(BaseModel):
+    birth_year: int
+    adult: bool
+
+
+class CoachProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: Annotated[str, Trimmed, Field(min_length=2, max_length=60)]
+    bio: Annotated[str, Trimmed, Field(max_length=600)] = ""
+    specialties: list[CoachSpecialty] = Field(min_length=1, max_length=5)
+    city: Annotated[str, Trimmed, Field(min_length=2, max_length=80)]
+    formats: list[CoachFormat] = Field(min_length=1, max_length=2)
+    rate_cents: int = Field(ge=1000, le=50000)
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        self.specialties = list(dict.fromkeys(self.specialties))
+        self.formats = list(dict.fromkeys(self.formats))
+        return self
+
+
+class CoachDocument(BaseModel):
+    id: UUID
+    kind: CoachDocumentKind
+    content_type: CoachDocumentType
+    size_bytes: int
+    status: Literal["uploading", "ready"]
+    uploaded_at: datetime | None
+
+
+class CoachProfile(BaseModel):
+    """The coach's own view. Stripe ids stay server-side."""
+
+    id: UUID
+    display_name: str
+    bio: str
+    specialties: list[CoachSpecialty]
+    city: str
+    formats: list[CoachFormat]
+    rate_cents: int
+    status: CoachProfileStatus
+    review_note: str | None
+    verified_at: datetime | None
+    stripe_connected: bool
+    charges_enabled: bool
+    documents: list[CoachDocument]
+
+
+class CoachDocumentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: CoachDocumentKind
+    content_type: CoachDocumentType
+    size_bytes: int = Field(ge=1, le=10 * 1024 * 1024)
+
+
+class CoachDocumentUpload(BaseModel):
+    id: UUID
+    upload_url: str
+    content_type: CoachDocumentType
+    expires_in_seconds: int
+
+
+class StripeOnboarding(BaseModel):
+    url: str
+
+
+class CoachSlotCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
+    format: CoachFormat
+    venue: Annotated[str, Trimmed, Field(min_length=2, max_length=120)] | None = None
+
+    @model_validator(mode="after")
+    def shape(self) -> Self:
+        length = self.ends_at - self.starts_at
+        if not timedelta(minutes=30) <= length <= timedelta(hours=3):
+            raise ValueError("a slot lasts 30 minutes to 3 hours")
+        if self.format == "in_person" and not self.venue:
+            raise ValueError("an in-person slot names a public venue")
+        if self.format == "online":
+            self.venue = None
+        return self
+
+
+class CoachSlot(BaseModel):
+    id: UUID
+    starts_at: datetime
+    ends_at: datetime
+    format: CoachFormat
+    venue: str | None
+    status: CoachSlotStatus
+
+
+class PublicSlot(BaseModel):
+    id: UUID
+    starts_at: datetime
+    ends_at: datetime
+    format: CoachFormat
+    venue: str | None
+
+
+class MarketplaceCoach(BaseModel):
+    """Public columns only; `verified` means an admin checked the background check."""
+
+    id: UUID
+    display_name: str
+    bio: str
+    specialties: list[CoachSpecialty]
+    city: str
+    formats: list[CoachFormat]
+    rate_cents: int
+    background_check_verified: bool = True
+
+
+class MarketplaceCoachDetail(MarketplaceCoach):
+    slots: list[PublicSlot]
+
+
+class BookingBase(BaseModel):
+    id: UUID
+    slot_id: UUID
+    status: CoachBookingStatus
+    price_cents: int
+    platform_fee_cents: int
+    refund_cents: int
+    note: str | None
+    hold_expires_at: datetime | None
+    created_at: datetime
+    cancelled_at: datetime | None
+    starts_at: datetime
+    ends_at: datetime
+    format: CoachFormat
+    venue: str | None
+
+
+class PlayerBooking(BookingBase):
+    coach_profile_id: UUID
+    coach_display_name: str
+
+
+class CoachBooking(BookingBase):
+    player_first_name: str
+
+
+class BookingCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slot_id: UUID
+    note: Annotated[str, Trimmed, Field(max_length=280)] | None = None
+
+
+class BookingCheckout(BaseModel):
+    booking_id: UUID
+    checkout_url: str
+
+
+class MarketplaceReportCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    coach_profile_id: UUID
+    booking_id: UUID | None = None
+    reason: Annotated[str, Trimmed, Field(min_length=10, max_length=1000)]
+
+
+class MarketplaceReport(BaseModel):
+    id: UUID
+    coach_profile_id: UUID
+    booking_id: UUID | None
+    reason: str
+    status: ReportStatus
+    created_at: datetime
+
+
+class CoachReviewSummary(BaseModel):
+    id: UUID
+    display_name: str
+    city: str
+    status: CoachProfileStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminDocument(CoachDocument):
+    url: str | None
+    url_expires_in_seconds: int | None
+
+
+class CoachReview(BaseModel):
+    id: UUID
+    display_name: str
+    bio: str
+    specialties: list[CoachSpecialty]
+    city: str
+    formats: list[CoachFormat]
+    rate_cents: int
+    status: CoachProfileStatus
+    review_note: str | None
+    verified_at: datetime | None
+    charges_enabled: bool
+    open_reports: int
+    documents: list[AdminDocument]
+
+
+class CoachDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: CoachDecision
+    note: Annotated[str, Trimmed, Field(max_length=500)] | None = None

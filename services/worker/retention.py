@@ -199,6 +199,7 @@ def retention_sweep_job(
         )
     # Database-only, so it runs before practice objects can fail the sweep.
     purge_training_sessions(job)
+    expire_marketplace_holds()
     # After the coach sweep, so a practice storage failure cannot delay it.
     purge_practice_videos(job, keep_going)
     if not keep_going(1.0):
@@ -215,6 +216,16 @@ def purge_training_sessions(job: jobs.Job) -> int:
                     ":job_id, :worker_id)"
                 ),
                 {"job_id": str(job.id), "worker_id": job.locked_by},
+            ).scalar_one()
+        )
+
+
+def expire_marketplace_holds() -> int:
+    """Return lapsed 15-minute booking holds to open slots (Block 10M)."""
+    with jobs.transaction() as connection:
+        return int(
+            connection.execute(
+                text("SELECT private.expire_marketplace_holds()")
             ).scalar_one()
         )
 

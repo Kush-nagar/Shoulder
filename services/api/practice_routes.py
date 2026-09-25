@@ -59,20 +59,23 @@ class BoundedBodyRoute(APIRoute):
     to wrap the route handler itself. Practice and session bodies are small.
     """
 
+    max_bytes = BODY_MAX_BYTES
+
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
+        limit = self.max_bytes
 
         async def bounded(request: Request) -> Response:
             too_large = Problem(413, "That request is too large.")
             declared = request.headers.get("content-length")
             if declared is not None and (
-                not declared.isdigit() or int(declared) > BODY_MAX_BYTES
+                not declared.isdigit() or int(declared) > limit
             ):
                 raise too_large
             body = b""
             async for chunk in request.stream():
                 body += chunk
-                if len(body) > BODY_MAX_BYTES:
+                if len(body) > limit:
                     raise too_large
             request._body = body  # Starlette's cache; the handler reads it.
             return await handler(request)
