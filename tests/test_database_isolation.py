@@ -1203,6 +1203,7 @@ class ContextIsolationTests(IsolationHarness):
                         "deletion_manifest",
                         "deletion_manifest_object",
                         "product_event",
+                        "coach_document_purge",
                     ):
                         self.assertEqual(
                             self.refused_as(identity, f"SELECT 1 FROM app.{table}"),

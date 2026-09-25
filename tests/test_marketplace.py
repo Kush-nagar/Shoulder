@@ -1273,7 +1273,7 @@ class MarketplaceDatabaseTests(DatabaseTestCase):
         insert = (
             "INSERT INTO app.coach_document (coach_profile_id, kind, object_key,"
             " content_type, size_bytes) VALUES (CAST(:p AS uuid), 'certification',"
-            " :key, 'application/pdf', 10)"
+            " :key, 'application/pdf', 10) RETURNING id"
         )
         for index in range(10):
             self.as_(

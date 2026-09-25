@@ -836,6 +836,7 @@ class RuntimeIsolationTests(DatabaseTestCase):
                         "deletion_manifest",
                         "deletion_manifest_object",
                         "product_event",
+                        "coach_document_purge",
                     ):
                         with self.assertRaises(ProgrammingError) as caught:
                             self.visible(user_id, f"SELECT 1 FROM app.{table}")
