@@ -11,14 +11,14 @@ against Git and GitHub before editing anything.
 |---|---|
 | Last verified `main` | `de5903e` (PR #58, Task 21 development evidence timeline) |
 | Completed blocks | Tasks 1-5; Block 01 (Tasks 6-7); Block 02 (Tasks 8-10); Block 03 (Tasks 11-13); Block 04 (Tasks 14-16); Block 05 (Task 17); Block 06 (Tasks 18-21) |
-| Current block | Block 09B merged (#69) and deployed 2026-09-24: session tracking (0016), coach training plans (0018), opt-in team leaderboard (0019, ADR 0023), Capacitor app in `apps/mobile`, coach marketplace design only. Player redesign (#68, ADR 0022) live. |
+| Current block | Block 10M merged (#72) and deployed 2026-09-25 with the marketplace OFF: coach onboarding, admin verification, adult-only bookings with Stripe test mode (migration 0020). Block 09B (#69), redesign (#68) and suite fixes (#71) live. Local `check-db` 1606 OK and `check-player` 15/15. |
 | Current worker / branch | Coordinator / `block-08p-player-practice` |
 | Open PRs | Not checked in this task. This run did not push or open a Task 22 PR. |
 | Database revision | `0013_retention_deletion` on this branch; `0012_email_delivery` on the branch base. The local empty/up/down/up migration cycle passed. |
 | Last full verification | Task 22, 2026-09-21: `scripts/check-db.ps1` passed 1,478 tests against local Supabase/Postgres/MinIO with 18 documented media-tool skips. `scripts/check.ps1` passed formatting, lint, type checks, 53 Node tests, 1,478 Python tests (385 environment-gated skips), generated contracts, production build, bundle scan, and Chromium/Firefox/WebKit smoke. |
 | Blockers | Real-data onboarding remains blocked until the owner records the season cutoff, notice, collateral-deletion scope, responsible operator, and verified provider backup maximum of at most 30 days. Task 23 remains blocked by the mandatory real-use gate. |
 | Bootstrap blocker | none. Note that **Codex Cloud is NOT connected**: every `@codex` request on PR #32 was answered with "create a Codex account and connect to github". Nothing depends on it - the review gate declines lanes a caller cannot start, so CI picks DeepSeek to review Claude's work and Claude to review Codex's, both independent and both able to run. Reconnect it only to get Codex Cloud reviews specifically. |
-| Next action | Owner: add `app.shoulder.player://auth/callback` to Supabase redirect URLs; build the Android app with JDK 21 and iOS on a Mac (`docs/mobile.md`); rotate secrets exposed in chat. Engineering: fix the pre-existing "Written for an earlier version of this clip" failure in `check-player`; deploy the worker so retention sweeps run in production. Real-data onboarding stays blocked (retention decisions, real-use gate, consent review for AI feedback, tracking and leaderboards for ages 13–18). |
+| Next action | Owner: legal review per `docs/design/coach-marketplace.md` before setting `MARKETPLACE_ENABLED`/`NEXT_PUBLIC_MARKETPLACE_ENABLED`; Stripe test keys (`STRIPE_SECRET_KEY`, webhook secret) and `scripts/grant_admin.py` to try it; rotate secrets exposed in chat. Engineering: deploy the worker so retention sweeps (practice videos, sessions, coach documents, holds) run in production. Real-data onboarding stays blocked (retention decisions, real-use gate, consent review for AI feedback, tracking, leaderboards). |
 | Player redesign | [ADR 0022](docs/decisions/0022-player-app-shell-and-visual-refresh.md) on `first-signin-and-redesign`: responsive player shell (tabs/rail/sidebar), Home dashboard, Drills library (12 static drills), Profile with System/Light/Dark, restyled practice, progress, goal, sign-in, and session pages. New deps: `@fontsource-variable/archivo` 5.3.0, `lucide-react` 1.47.0. Frontend only; not yet pushed or reviewed. |
 | Outside the task graph | Google OAuth (ADR 0020, merged #63). Block 08P (ADR 0021): the owner waived rule 5 for the player practice lane only; `judgment` authorship, no-scores, and full-match rules are unchanged. |
 
@@ -48,17 +48,6 @@ Maintained by `services/agentops/reconcile.py`. Edit around this
 block, not inside it.
 
 <!-- agentops:progress:end -->
-
-### Pre-existing: `scripts/check-player.ps1` fails on `main`
-
-Found 2026-09-23 while verifying Block 08P. First, every spec's workspace reset
-`TRUNCATE` was refused because later tables (0012 email events, 0014 practice)
-reference the truncated ones; Block 08P fixed that with `CASCADE`. Behind it,
-15 tests (3 browsers x 5) fail identically on `main` (`cab8276`, with only the
-reset fix applied) and on the block branch: four coach-playback tests show
-"Shoulder could not open this video", and the phone matrix never shows
-"Written for an earlier version of this clip". Not caused by Block 08P; needs
-its own investigation.
 
 ### Standing gap: the Docker-backed suites do not run in CI
 
