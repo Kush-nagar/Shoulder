@@ -779,8 +779,15 @@ test("linked player sees only current clips across phone viewports", async ({
       new RegExp(`/clips/${judgments[1].id}/3\\.mp4`),
     );
     await page.unroute("**/api/player/reflections", reflectionListRoute);
+    // The sequence was opened from the timeline, whose link carries
+    // `?judgment=`, so a reload reopens that same clip rather than clip 1.
+    await expect(page).toHaveURL(
+      new RegExp(`[?&]judgment=${judgments[1].id}(&|$)`),
+    );
     await page.reload();
-    await page.getByRole("button", { name: "Next" }).click();
+    await expect(
+      page.getByText("Check the space again before receiving."),
+    ).toBeVisible();
     await expect(
       page.getByText("Written for an earlier version of this clip"),
     ).toBeVisible();
