@@ -65,8 +65,12 @@ export default async function AdminCoachPage({
               <span className="font-semibold text-ink">
                 {statusName[coach.data.status]}
               </span>
-              {", updated "}
-              <When iso={coach.data.updated_at} />
+              {coach.data.verified_at ? (
+                <>
+                  {", verified "}
+                  <When iso={coach.data.verified_at} />
+                </>
+              ) : null}
             </p>
             <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-y border-line py-5 sm:grid-cols-4">
               <div>
@@ -131,15 +135,22 @@ export default async function AdminCoachPage({
                             .replace("application/", "")
                             .replace("image/", "")
                             .toUpperCase()}
-                          , {formatBytes(doc.size_bytes)},{" "}
-                          <When iso={doc.uploaded_at} />
+                          , {formatBytes(doc.size_bytes)}
+                          {doc.uploaded_at ? (
+                            <>
+                              {", "}
+                              <When iso={doc.uploaded_at} />
+                            </>
+                          ) : (
+                            ", not uploaded yet"
+                          )}
                         </span>
                       </span>
                     </span>
                     {doc.status === "ready" &&
-                    doc.url.startsWith("https://") ? (
+                    doc.url?.startsWith("https://") ? (
                       <a
-                        href={doc.url}
+                        href={doc.url ?? undefined}
                         target="_blank"
                         rel="noopener noreferrer"
                         className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] font-semibold text-action underline-offset-4 hover:underline ${focus}`}

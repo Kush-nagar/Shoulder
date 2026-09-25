@@ -2469,6 +2469,8 @@ export interface components {
         MarketplaceReport: {
             /** Booking Id */
             booking_id: string | null;
+            /** Coach Display Name */
+            coach_display_name: string | null;
             /**
              * Coach Profile Id
              * Format: uuid

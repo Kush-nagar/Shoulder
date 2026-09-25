@@ -1283,6 +1283,7 @@ class MarketplaceReportCreate(BaseModel):
 class MarketplaceReport(BaseModel):
     id: UUID
     coach_profile_id: UUID
+    coach_display_name: str | None
     booking_id: UUID | None
     reason: str
     status: ReportStatus

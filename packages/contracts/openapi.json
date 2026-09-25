@@ -2539,6 +2539,17 @@
             ],
             "title": "Booking Id"
           },
+          "coach_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coach Display Name"
+          },
           "coach_profile_id": {
             "format": "uuid",
             "title": "Coach Profile Id",
@@ -2570,6 +2581,7 @@
         "required": [
           "id",
           "coach_profile_id",
+          "coach_display_name",
           "booking_id",
           "reason",
           "status",

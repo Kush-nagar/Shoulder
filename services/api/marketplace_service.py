@@ -59,7 +59,13 @@ PROFILE_COLUMNS = """
 """
 DOCUMENT_COLUMNS = "id, kind, content_type, size_bytes, status, uploaded_at, object_key"
 SLOT_COLUMNS = "id, starts_at, ends_at, format, venue, status"
-REPORT_COLUMNS = "id, coach_profile_id, booking_id, reason, status, created_at"
+# Admins read every profile, so the name resolves for them; a reporting player
+# cannot read coach_profile rows and gets null.
+REPORT_COLUMNS = (
+    "id, coach_profile_id, booking_id, reason, status, created_at,"
+    " (SELECT c.display_name FROM app.coach_profile c"
+    " WHERE c.id = marketplace_report.coach_profile_id) AS coach_display_name"
+)
 
 ADULTS_ONLY = Problem(
     403,
