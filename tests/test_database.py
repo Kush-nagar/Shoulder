@@ -200,6 +200,18 @@ class DatabaseTestCase(unittest.TestCase):
                     text("DELETE FROM auth.users WHERE id = :id"), {"id": user_id}
                 )
 
+    def start_from_an_empty_install(self) -> None:
+        """Operator bootstrap only runs on an install with no team at all.
+
+        A local database may hold teams no test created (a seeded Demo FC, a
+        developer's own workspace), so the bootstrap tests establish their own
+        precondition, only against a local, disposable database;
+        `scripts/seed_demo.py` recreates the demo team.
+        """
+        require_local_database(ADMIN_URL, RUNTIME_URL, OPERATOR_URL)
+        with self.admin.connect() as connection, connection.begin():
+            connection.execute(text("DELETE FROM app.team"))
+
     def create_auth_user(self, email: str, display_name: str | None = None) -> UUID:
         user_id = uuid4()
         # Each run gets its own address so a failed cleanup cannot collide.
@@ -568,6 +580,10 @@ class RosterConstraintTests(DatabaseTestCase):
 
 
 class BootstrapTests(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.start_from_an_empty_install()
+
     def test_operator_bootstrap_creates_one_team_with_its_coach(self) -> None:
         coach = self.create_auth_user("bootstrap.coach@example.test")
         with self.operator.connect() as connection, connection.begin():
@@ -1090,6 +1106,7 @@ class ApiIdentityTests(DatabaseTestCase):
         self.assertEqual(response.headers["cache-control"], "private, no-store")
 
     def test_bootstrap_requires_the_operator_token(self) -> None:
+        self.start_from_an_empty_install()
         coach = self.create_auth_user("api.bootstrap@example.test")
         payload = {
             "coach_user_id": str(coach),
@@ -1118,6 +1135,7 @@ class ApiIdentityTests(DatabaseTestCase):
         self.assertEqual(body["team_ids"], [team_id])
 
     def test_bootstrap_rejects_an_unknown_coach(self) -> None:
+        self.start_from_an_empty_install()
         response = TestClient(app).post(
             "/v1/teams",
             json={
