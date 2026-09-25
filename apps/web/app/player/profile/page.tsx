@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { initial } from "../identity";
+import { marketplaceEnabled } from "../../../lib/marketplace";
 import { savedTheme } from "../../../lib/theme";
 import { requirePlayerSession } from "../session";
 import { PlayerSignOutForm } from "../sign-out-form";
@@ -120,6 +121,13 @@ export default async function ProfilePage() {
 
       <Section id="help-title" title="Help">
         <ul className="space-y-1">
+          {marketplaceEnabled() ? (
+            <li>
+              <Link href="/coaching" className={textLink}>
+                Train with a coach (18+ pilot)
+              </Link>
+            </li>
+          ) : null}
           <li>
             <ShowGuideButton />
           </li>

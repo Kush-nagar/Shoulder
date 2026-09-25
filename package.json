@@ -13,7 +13,7 @@
     "format:check": "biome format .",
     "lint": "biome lint .",
     "typecheck": "pnpm --filter @shoulder/web typecheck",
-    "test": "node --test tests/repository.test.mjs tests/auth-policy.test.mjs tests/roster.test.mjs tests/upload.test.mjs tests/timeline.test.mjs tests/development-timeline.test.mjs tests/marking.test.mjs tests/reflections.test.mjs tests/pose-features.test.mjs tests/drills.test.mjs tests/tracking-metrics.test.mjs tests/plans.test.mjs",
+    "test": "node --test tests/repository.test.mjs tests/auth-policy.test.mjs tests/roster.test.mjs tests/upload.test.mjs tests/timeline.test.mjs tests/development-timeline.test.mjs tests/marking.test.mjs tests/reflections.test.mjs tests/pose-features.test.mjs tests/drills.test.mjs tests/tracking-metrics.test.mjs tests/plans.test.mjs tests/marketplace.test.mjs",
     "smoke": "playwright test",
     "contracts": "openapi-typescript packages/contracts/openapi.json -o packages/contracts/api.d.ts"
   },
