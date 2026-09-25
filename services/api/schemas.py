@@ -989,3 +989,86 @@ class TrainingPlan(BaseModel):
     items: list[TrainingPlanItem]
     created_at: datetime
     updated_at: datetime
+
+
+# Block 09B W2 (ADR 0023): opt-in team leaderboard of tracking totals only.
+LeaderboardMetric = Literal["distance", "sprints", "top_speed", "sessions"]
+LeaderboardPeriod = Literal["week", "season"]
+NICKNAME_PATTERN = re.compile(r"[A-Za-z0-9 ]{2,20}")
+# ponytail: a short screen, not a moderation system. Substrings have no
+# innocent spelling inside ordinary names; the whole words are short ones that
+# would otherwise hit names ("ass" in "Cassie", "cock" in "Hancock").
+NICKNAME_BLOCKED_SUBSTRINGS = (
+    "fuck", "shit", "cunt", "nigg", "fagg", "bitch", "whore", "slut", "porn",
+    "wank", "twat", "retard", "pedo", "hitler",
+)  # fmt: skip
+NICKNAME_BLOCKED_WORDS = frozenset(
+    {
+        "ass", "arse", "fag", "dick", "cock", "sex", "rape", "nazi", "kkk",
+        "tits", "piss", "penis", "anal", "homo", "spaz",
+        # Contact details spelled out with spaces instead of "@" or ".".
+        "www", "http", "https", "com", "net", "org", "gmail", "hotmail",
+        "yahoo", "outlook", "icloud", "insta", "snap", "tiktok", "whatsapp",
+    }
+)  # fmt: skip
+LEET = str.maketrans("013457", "oieast")
+
+
+def screen_nickname(value: str) -> str:
+    """Collapse spaces, then refuse slurs, profanity and contact details."""
+    nickname = " ".join(value.split())
+    if not NICKNAME_PATTERN.fullmatch(nickname):
+        raise ValueError("Use 2 to 20 letters, numbers or spaces")
+    words = nickname.lower().split()
+    squashed = "".join(words)
+    blocked = (
+        # A phone number: six or more digits anywhere, spaced or not.
+        sum(c.isdigit() for c in squashed) >= 6
+        or any(
+            word in NICKNAME_BLOCKED_WORDS
+            or word.translate(LEET) in NICKNAME_BLOCKED_WORDS
+            for word in words
+        )
+        or any(
+            bad in form
+            for form in (squashed, squashed.translate(LEET))
+            for bad in NICKNAME_BLOCKED_SUBSTRINGS
+        )
+    )
+    if blocked:
+        raise ValueError("Choose a different nickname")
+    return nickname
+
+
+class LeaderboardMembershipUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str = Field(max_length=60)
+
+    @model_validator(mode="after")
+    def screened(self) -> Self:
+        self.nickname = screen_nickname(self.nickname)
+        return self
+
+
+class LeaderboardMembership(BaseModel):
+    """The caller's own opt-in state; `nickname` is null when not joined."""
+
+    team_id: UUID
+    nickname: str | None
+    joined_at: datetime | None
+
+
+class LeaderboardEntry(BaseModel):
+    """Nickname and a whole-number total only; never a player id or name."""
+
+    nickname: str
+    value: int
+    is_me: bool
+
+
+class Leaderboard(BaseModel):
+    metric: LeaderboardMetric
+    period: LeaderboardPeriod
+    since: datetime
+    entries: list[LeaderboardEntry]

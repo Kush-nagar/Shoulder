@@ -357,6 +357,25 @@ export interface paths {
         patch: operations["patch_plan_v1_plans__plan_id__patch"];
         trace?: never;
     };
+    "/v1/player/leaderboard-membership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Membership */
+        get: operations["read_membership_v1_player_leaderboard_membership_get"];
+        /** Join Board */
+        put: operations["join_board_v1_player_leaderboard_membership_put"];
+        post?: never;
+        /** Leave Board */
+        delete: operations["leave_board_v1_player_leaderboard_membership_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/player/plans": {
         parameters: {
             query?: never;
@@ -776,6 +795,23 @@ export interface paths {
         };
         /** List Games */
         get: operations["list_games_v1_teams__team_id__games_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Team Board */
+        get: operations["team_board_v1_teams__team_id__leaderboard_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1611,6 +1647,58 @@ export interface components {
             verdict: "applied" | "opportunity" | "not_relevant";
             /** Version */
             version: number;
+        };
+        /** Leaderboard */
+        Leaderboard: {
+            /** Entries */
+            entries: components["schemas"]["LeaderboardEntry"][];
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "distance" | "sprints" | "top_speed" | "sessions";
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "week" | "season";
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+        };
+        /**
+         * LeaderboardEntry
+         * @description Nickname and a whole-number total only; never a player id or name.
+         */
+        LeaderboardEntry: {
+            /** Is Me */
+            is_me: boolean;
+            /** Nickname */
+            nickname: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * LeaderboardMembership
+         * @description The caller's own opt-in state; `nickname` is null when not joined.
+         */
+        LeaderboardMembership: {
+            /** Joined At */
+            joined_at: string | null;
+            /** Nickname */
+            nickname: string | null;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+        };
+        /** LeaderboardMembershipUpdate */
+        LeaderboardMembershipUpdate: {
+            /** Nickname */
+            nickname: string;
         };
         /** LinkedPlayer */
         LinkedPlayer: {
@@ -3332,6 +3420,77 @@ export interface operations {
             };
         };
     };
+    read_membership_v1_player_leaderboard_membership_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardMembership"];
+                };
+            };
+        };
+    };
+    join_board_v1_player_leaderboard_membership_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaderboardMembershipUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardMembership"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    leave_board_v1_player_leaderboard_membership_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_own_plans_v1_player_plans_get: {
         parameters: {
             query?: never;
@@ -4276,6 +4435,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GamePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    team_board_v1_teams__team_id__leaderboard_get: {
+        parameters: {
+            query?: {
+                metric?: "distance" | "sprints" | "top_speed" | "sessions";
+                period?: "week" | "season";
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Leaderboard"];
                 };
             };
             /** @description Validation Error */
