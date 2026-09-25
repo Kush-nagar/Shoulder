@@ -74,7 +74,7 @@ mkdir assets
 # 1024x1024 icon source, 2732x2732 splash source, from apps/web/public/pwa-512.png
 # upscaled/padded to size (see @capacitor/assets docs for exact filenames:
 # icon-only.png, icon-foreground.png, icon-background.png, splash.png, splash-dark.png)
-npx capacitor-assets generate
+pnpm --filter @shoulder/mobile assets   # runs @capacitor/assets via npx
 npx cap sync
 ```
 

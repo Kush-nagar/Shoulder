@@ -49,5 +49,16 @@
 	<string>Shoulder uses your location while a training session is running to measure distance, speed and sprints on the field.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Shoulder uses the camera so a coach or player can capture practice photos and video for a development goal.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.shoulder.player</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app.shoulder.player</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { NativeBridge } from "./native-bridge";
 
 const interTight = localFont({
   src: "../node_modules/@fontsource-variable/inter-tight/files/inter-tight-latin-wght-normal.woff2",
@@ -45,7 +46,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${interTight.variable} ${archivo.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <NativeBridge />
+      </body>
     </html>
   );
 }

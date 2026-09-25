@@ -7,7 +7,7 @@
     "sync:android": "cap sync android",
     "open:android": "cap open android",
     "open:ios": "cap open ios",
-    "assets": "capacitor-assets generate"
+    "assets": "npx --yes @capacitor/assets@3.0.5 generate"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
@@ -22,7 +22,6 @@
     "@capacitor-community/keep-awake": "^7.0.0"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^7.0.0"
   }
 }
