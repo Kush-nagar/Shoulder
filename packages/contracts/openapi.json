@@ -1,6 +1,125 @@
 {
   "components": {
     "schemas": {
+      "AdminDocument": {
+        "properties": {
+          "content_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "background_check",
+              "id",
+              "certification"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "ready"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded At"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "url_expires_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url Expires In Seconds"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "content_type",
+          "size_bytes",
+          "status",
+          "uploaded_at",
+          "url",
+          "url_expires_in_seconds"
+        ],
+        "title": "AdminDocument",
+        "type": "object"
+      },
+      "AgeAttestation": {
+        "properties": {
+          "adult": {
+            "title": "Adult",
+            "type": "boolean"
+          },
+          "birth_year": {
+            "title": "Birth Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "birth_year",
+          "adult"
+        ],
+        "title": "AgeAttestation",
+        "type": "object"
+      },
+      "AgeAttestationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "birth_year": {
+            "maximum": 2100.0,
+            "minimum": 1900.0,
+            "title": "Birth Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "birth_year"
+        ],
+        "title": "AgeAttestationUpdate",
+        "type": "object"
+      },
       "AiCoachFeedback": {
         "description": "An AI suggestion, never a `judgment`; labelled as such in the UI.",
         "properties": {
@@ -101,6 +220,52 @@
           "user_id"
         ],
         "title": "AuthIdentity",
+        "type": "object"
+      },
+      "BookingCheckout": {
+        "properties": {
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "checkout_url": {
+            "title": "Checkout Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "booking_id",
+          "checkout_url"
+        ],
+        "title": "BookingCheckout",
+        "type": "object"
+      },
+      "BookingCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 280,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "slot_id": {
+            "format": "uuid",
+            "title": "Slot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_id"
+        ],
+        "title": "BookingCreate",
         "type": "object"
       },
       "BulkRequest": {
@@ -281,6 +446,299 @@
         "title": "ClipUrlRequest",
         "type": "object"
       },
+      "CoachBooking": {
+        "properties": {
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "in_person",
+              "online"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "hold_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "platform_fee_cents": {
+            "title": "Platform Fee Cents",
+            "type": "integer"
+          },
+          "player_first_name": {
+            "title": "Player First Name",
+            "type": "string"
+          },
+          "price_cents": {
+            "title": "Price Cents",
+            "type": "integer"
+          },
+          "refund_cents": {
+            "title": "Refund Cents",
+            "type": "integer"
+          },
+          "slot_id": {
+            "format": "uuid",
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending_payment",
+              "confirmed",
+              "cancelled_by_player",
+              "cancelled_by_coach",
+              "expired",
+              "completed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          }
+        },
+        "required": [
+          "id",
+          "slot_id",
+          "status",
+          "price_cents",
+          "platform_fee_cents",
+          "refund_cents",
+          "note",
+          "hold_expires_at",
+          "created_at",
+          "cancelled_at",
+          "starts_at",
+          "ends_at",
+          "format",
+          "venue",
+          "player_first_name"
+        ],
+        "title": "CoachBooking",
+        "type": "object"
+      },
+      "CoachDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject",
+              "suspend",
+              "reinstate"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "CoachDecisionRequest",
+        "type": "object"
+      },
+      "CoachDocument": {
+        "properties": {
+          "content_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "background_check",
+              "id",
+              "certification"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "ready"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded At"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "content_type",
+          "size_bytes",
+          "status",
+          "uploaded_at"
+        ],
+        "title": "CoachDocument",
+        "type": "object"
+      },
+      "CoachDocumentCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "background_check",
+              "id",
+              "certification"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 10485760.0,
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "CoachDocumentCreate",
+        "type": "object"
+      },
+      "CoachDocumentUpload": {
+        "properties": {
+          "content_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "upload_url",
+          "content_type",
+          "expires_in_seconds"
+        ],
+        "title": "CoachDocumentUpload",
+        "type": "object"
+      },
       "CoachEvidenceSet": {
         "properties": {
           "game_id": {
@@ -318,6 +776,467 @@
           "items"
         ],
         "title": "CoachEvidenceSet",
+        "type": "object"
+      },
+      "CoachProfile": {
+        "description": "The coach's own view. Stripe ids stay server-side.",
+        "properties": {
+          "bio": {
+            "title": "Bio",
+            "type": "string"
+          },
+          "charges_enabled": {
+            "title": "Charges Enabled",
+            "type": "boolean"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/CoachDocument"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "formats": {
+            "items": {
+              "enum": [
+                "in_person",
+                "online"
+              ],
+              "type": "string"
+            },
+            "title": "Formats",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "rate_cents": {
+            "title": "Rate Cents",
+            "type": "integer"
+          },
+          "review_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Note"
+          },
+          "specialties": {
+            "items": {
+              "enum": [
+                "scanning",
+                "first_touch",
+                "passing",
+                "finishing",
+                "dribbling",
+                "defending",
+                "goalkeeping",
+                "fitness",
+                "tactics"
+              ],
+              "type": "string"
+            },
+            "title": "Specialties",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "pending_review",
+              "verified",
+              "suspended",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stripe_connected": {
+            "title": "Stripe Connected",
+            "type": "boolean"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "bio",
+          "specialties",
+          "city",
+          "formats",
+          "rate_cents",
+          "status",
+          "review_note",
+          "verified_at",
+          "stripe_connected",
+          "charges_enabled",
+          "documents"
+        ],
+        "title": "CoachProfile",
+        "type": "object"
+      },
+      "CoachProfileUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "bio": {
+            "default": "",
+            "maxLength": 600,
+            "title": "Bio",
+            "type": "string"
+          },
+          "city": {
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "City",
+            "type": "string"
+          },
+          "display_name": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "formats": {
+            "items": {
+              "enum": [
+                "in_person",
+                "online"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Formats",
+            "type": "array"
+          },
+          "rate_cents": {
+            "maximum": 50000.0,
+            "minimum": 1000.0,
+            "title": "Rate Cents",
+            "type": "integer"
+          },
+          "specialties": {
+            "items": {
+              "enum": [
+                "scanning",
+                "first_touch",
+                "passing",
+                "finishing",
+                "dribbling",
+                "defending",
+                "goalkeeping",
+                "fitness",
+                "tactics"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Specialties",
+            "type": "array"
+          }
+        },
+        "required": [
+          "display_name",
+          "specialties",
+          "city",
+          "formats",
+          "rate_cents"
+        ],
+        "title": "CoachProfileUpdate",
+        "type": "object"
+      },
+      "CoachReview": {
+        "properties": {
+          "bio": {
+            "title": "Bio",
+            "type": "string"
+          },
+          "charges_enabled": {
+            "title": "Charges Enabled",
+            "type": "boolean"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDocument"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "formats": {
+            "items": {
+              "enum": [
+                "in_person",
+                "online"
+              ],
+              "type": "string"
+            },
+            "title": "Formats",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "open_reports": {
+            "title": "Open Reports",
+            "type": "integer"
+          },
+          "rate_cents": {
+            "title": "Rate Cents",
+            "type": "integer"
+          },
+          "review_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Note"
+          },
+          "specialties": {
+            "items": {
+              "enum": [
+                "scanning",
+                "first_touch",
+                "passing",
+                "finishing",
+                "dribbling",
+                "defending",
+                "goalkeeping",
+                "fitness",
+                "tactics"
+              ],
+              "type": "string"
+            },
+            "title": "Specialties",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "pending_review",
+              "verified",
+              "suspended",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "bio",
+          "specialties",
+          "city",
+          "formats",
+          "rate_cents",
+          "status",
+          "review_note",
+          "verified_at",
+          "charges_enabled",
+          "open_reports",
+          "documents"
+        ],
+        "title": "CoachReview",
+        "type": "object"
+      },
+      "CoachReviewSummary": {
+        "properties": {
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "pending_review",
+              "verified",
+              "suspended",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "city",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CoachReviewSummary",
+        "type": "object"
+      },
+      "CoachSlot": {
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "in_person",
+              "online"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "held",
+              "booked",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "format",
+          "venue",
+          "status"
+        ],
+        "title": "CoachSlot",
+        "type": "object"
+      },
+      "CoachSlotCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "in_person",
+              "online"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at",
+          "format"
+        ],
+        "title": "CoachSlotCreate",
         "type": "object"
       },
       "DeletionStatus": {
@@ -1457,6 +2376,242 @@
         "title": "LinkedPlayer",
         "type": "object"
       },
+      "MarketplaceCoach": {
+        "description": "Public columns only; `verified` means an admin checked the background check.",
+        "properties": {
+          "background_check_verified": {
+            "default": true,
+            "title": "Background Check Verified",
+            "type": "boolean"
+          },
+          "bio": {
+            "title": "Bio",
+            "type": "string"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "formats": {
+            "items": {
+              "enum": [
+                "in_person",
+                "online"
+              ],
+              "type": "string"
+            },
+            "title": "Formats",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "rate_cents": {
+            "title": "Rate Cents",
+            "type": "integer"
+          },
+          "specialties": {
+            "items": {
+              "enum": [
+                "scanning",
+                "first_touch",
+                "passing",
+                "finishing",
+                "dribbling",
+                "defending",
+                "goalkeeping",
+                "fitness",
+                "tactics"
+              ],
+              "type": "string"
+            },
+            "title": "Specialties",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "bio",
+          "specialties",
+          "city",
+          "formats",
+          "rate_cents"
+        ],
+        "title": "MarketplaceCoach",
+        "type": "object"
+      },
+      "MarketplaceCoachDetail": {
+        "properties": {
+          "background_check_verified": {
+            "default": true,
+            "title": "Background Check Verified",
+            "type": "boolean"
+          },
+          "bio": {
+            "title": "Bio",
+            "type": "string"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "formats": {
+            "items": {
+              "enum": [
+                "in_person",
+                "online"
+              ],
+              "type": "string"
+            },
+            "title": "Formats",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "rate_cents": {
+            "title": "Rate Cents",
+            "type": "integer"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/PublicSlot"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "specialties": {
+            "items": {
+              "enum": [
+                "scanning",
+                "first_touch",
+                "passing",
+                "finishing",
+                "dribbling",
+                "defending",
+                "goalkeeping",
+                "fitness",
+                "tactics"
+              ],
+              "type": "string"
+            },
+            "title": "Specialties",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "bio",
+          "specialties",
+          "city",
+          "formats",
+          "rate_cents",
+          "slots"
+        ],
+        "title": "MarketplaceCoachDetail",
+        "type": "object"
+      },
+      "MarketplaceReport": {
+        "properties": {
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "coach_profile_id": {
+            "format": "uuid",
+            "title": "Coach Profile Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "coach_profile_id",
+          "booking_id",
+          "reason",
+          "status",
+          "created_at"
+        ],
+        "title": "MarketplaceReport",
+        "type": "object"
+      },
+      "MarketplaceReportCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "coach_profile_id": {
+            "format": "uuid",
+            "title": "Coach Profile Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coach_profile_id",
+          "reason"
+        ],
+        "title": "MarketplaceReportCreate",
+        "type": "object"
+      },
       "Me": {
         "description": "Database-derived identity. An unlinked account has empty roles/teams.",
         "properties": {
@@ -1733,6 +2888,142 @@
           "height"
         ],
         "title": "PlaybackUrl",
+        "type": "object"
+      },
+      "PlayerBooking": {
+        "properties": {
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "coach_display_name": {
+            "title": "Coach Display Name",
+            "type": "string"
+          },
+          "coach_profile_id": {
+            "format": "uuid",
+            "title": "Coach Profile Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "in_person",
+              "online"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "hold_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "platform_fee_cents": {
+            "title": "Platform Fee Cents",
+            "type": "integer"
+          },
+          "price_cents": {
+            "title": "Price Cents",
+            "type": "integer"
+          },
+          "refund_cents": {
+            "title": "Refund Cents",
+            "type": "integer"
+          },
+          "slot_id": {
+            "format": "uuid",
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending_payment",
+              "confirmed",
+              "cancelled_by_player",
+              "cancelled_by_coach",
+              "expired",
+              "completed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          }
+        },
+        "required": [
+          "id",
+          "slot_id",
+          "status",
+          "price_cents",
+          "platform_fee_cents",
+          "refund_cents",
+          "note",
+          "hold_expires_at",
+          "created_at",
+          "cancelled_at",
+          "starts_at",
+          "ends_at",
+          "format",
+          "venue",
+          "coach_profile_id",
+          "coach_display_name"
+        ],
+        "title": "PlayerBooking",
         "type": "object"
       },
       "PlayerCreate": {
@@ -2363,6 +3654,53 @@
           "playback_expires_in_seconds"
         ],
         "title": "PracticeVideoDetail",
+        "type": "object"
+      },
+      "PublicSlot": {
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "in_person",
+              "online"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "format",
+          "venue"
+        ],
+        "title": "PublicSlot",
         "type": "object"
       },
       "ReflectionDeleteRequest": {
@@ -3073,6 +4411,19 @@
           "p50"
         ],
         "title": "StanceWidth",
+        "type": "object"
+      },
+      "StripeOnboarding": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "StripeOnboarding",
         "type": "object"
       },
       "TeamBootstrap": {
@@ -4062,6 +5413,260 @@
         "summary": "Health"
       }
     },
+    "/v1/admin/coach-reviews": {
+      "get": {
+        "operationId": "admin_review_queue_v1_admin_coach_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "pending_review",
+              "enum": [
+                "draft",
+                "pending_review",
+                "verified",
+                "suspended",
+                "rejected"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CoachReviewSummary"
+                  },
+                  "title": "Response Admin Review Queue V1 Admin Coach Reviews Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Review Queue"
+      }
+    },
+    "/v1/admin/coach-reviews/{profile_id}": {
+      "get": {
+        "operationId": "admin_review_detail_v1_admin_coach_reviews__profile_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Review Detail"
+      }
+    },
+    "/v1/admin/coach-reviews/{profile_id}/decision": {
+      "post": {
+        "operationId": "admin_decide_v1_admin_coach_reviews__profile_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachReviewSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Decide"
+      }
+    },
+    "/v1/admin/reports": {
+      "get": {
+        "operationId": "admin_list_reports_v1_admin_reports_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "resolved"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MarketplaceReport"
+                  },
+                  "title": "Response Admin List Reports V1 Admin Reports Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin List Reports"
+      }
+    },
+    "/v1/admin/reports/{report_id}/resolve": {
+      "post": {
+        "operationId": "admin_resolve_report_v1_admin_reports__report_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Resolve Report"
+      }
+    },
     "/v1/auth/identity": {
       "get": {
         "operationId": "identity_v1_auth_identity_get",
@@ -4083,6 +5688,337 @@
           }
         ],
         "summary": "Identity"
+      }
+    },
+    "/v1/coach-profile": {
+      "get": {
+        "operationId": "read_coach_profile_v1_coach_profile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Coach Profile"
+      },
+      "put": {
+        "operationId": "put_coach_profile_v1_coach_profile_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Coach Profile"
+      }
+    },
+    "/v1/coach-profile/bookings": {
+      "get": {
+        "operationId": "list_coach_bookings_v1_coach_profile_bookings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CoachBooking"
+                  },
+                  "title": "Response List Coach Bookings V1 Coach Profile Bookings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Coach Bookings"
+      }
+    },
+    "/v1/coach-profile/documents": {
+      "post": {
+        "operationId": "create_coach_document_v1_coach_profile_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachDocumentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachDocumentUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Coach Document"
+      }
+    },
+    "/v1/coach-profile/documents/{document_id}/complete": {
+      "post": {
+        "operationId": "complete_coach_document_v1_coach_profile_documents__document_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Complete Coach Document"
+      }
+    },
+    "/v1/coach-profile/slots": {
+      "get": {
+        "operationId": "list_coach_slots_v1_coach_profile_slots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CoachSlot"
+                  },
+                  "title": "Response List Coach Slots V1 Coach Profile Slots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Coach Slots"
+      },
+      "post": {
+        "operationId": "create_coach_slot_v1_coach_profile_slots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachSlotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachSlot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Coach Slot"
+      }
+    },
+    "/v1/coach-profile/slots/{slot_id}": {
+      "delete": {
+        "operationId": "delete_coach_slot_v1_coach_profile_slots__slot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Slot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Coach Slot"
+      }
+    },
+    "/v1/coach-profile/stripe/onboarding": {
+      "post": {
+        "operationId": "coach_stripe_onboarding_v1_coach_profile_stripe_onboarding_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripeOnboarding"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Coach Stripe Onboarding"
+      }
+    },
+    "/v1/coach-profile/submit": {
+      "post": {
+        "operationId": "submit_coach_profile_v1_coach_profile_submit_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Coach Profile"
       }
     },
     "/v1/deletions/{manifest_id}": {
@@ -4549,6 +6485,221 @@
         "summary": "Withdraw"
       }
     },
+    "/v1/marketplace/bookings": {
+      "post": {
+        "operationId": "create_booking_v1_marketplace_bookings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingCheckout"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Booking"
+      }
+    },
+    "/v1/marketplace/coaches": {
+      "get": {
+        "operationId": "browse_coaches_v1_marketplace_coaches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "specialty",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "scanning",
+                    "first_touch",
+                    "passing",
+                    "finishing",
+                    "dribbling",
+                    "defending",
+                    "goalkeeping",
+                    "fitness",
+                    "tactics"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Specialty"
+            }
+          },
+          {
+            "in": "query",
+            "name": "city",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "City"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MarketplaceCoach"
+                  },
+                  "title": "Response Browse Coaches V1 Marketplace Coaches Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Browse Coaches"
+      }
+    },
+    "/v1/marketplace/coaches/{profile_id}": {
+      "get": {
+        "operationId": "read_marketplace_coach_v1_marketplace_coaches__profile_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCoachDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Marketplace Coach"
+      }
+    },
+    "/v1/marketplace/reports": {
+      "post": {
+        "operationId": "create_report_v1_marketplace_reports_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketplaceReportCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Report"
+      }
+    },
     "/v1/me": {
       "get": {
         "operationId": "me_v1_me_get",
@@ -4570,6 +6721,142 @@
           }
         ],
         "summary": "Me"
+      }
+    },
+    "/v1/me/age-attestation": {
+      "get": {
+        "operationId": "read_age_v1_me_age_attestation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeAttestation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Age"
+      },
+      "put": {
+        "operationId": "put_age_v1_me_age_attestation_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgeAttestationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeAttestation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Age"
+      }
+    },
+    "/v1/me/bookings": {
+      "get": {
+        "operationId": "list_my_bookings_v1_me_bookings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerBooking"
+                  },
+                  "title": "Response List My Bookings V1 Me Bookings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List My Bookings"
+      }
+    },
+    "/v1/me/bookings/{booking_id}/cancel": {
+      "post": {
+        "operationId": "cancel_my_booking_v1_me_bookings__booking_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerBooking"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel My Booking"
       }
     },
     "/v1/me/goals/{goal_id}/evidence": {

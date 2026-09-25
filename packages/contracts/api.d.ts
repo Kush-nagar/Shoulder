@@ -21,6 +21,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/coach-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Review Queue */
+        get: operations["admin_review_queue_v1_admin_coach_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/coach-reviews/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Review Detail */
+        get: operations["admin_review_detail_v1_admin_coach_reviews__profile_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/coach-reviews/{profile_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Decide */
+        post: operations["admin_decide_v1_admin_coach_reviews__profile_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin List Reports */
+        get: operations["admin_list_reports_v1_admin_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/reports/{report_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Resolve Report */
+        post: operations["admin_resolve_report_v1_admin_reports__report_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/identity": {
         parameters: {
             query?: never;
@@ -32,6 +117,144 @@ export interface paths {
         get: operations["identity_v1_auth_identity_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Coach Profile */
+        get: operations["read_coach_profile_v1_coach_profile_get"];
+        /** Put Coach Profile */
+        put: operations["put_coach_profile_v1_coach_profile_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Coach Bookings */
+        get: operations["list_coach_bookings_v1_coach_profile_bookings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Coach Document */
+        post: operations["create_coach_document_v1_coach_profile_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/documents/{document_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Coach Document */
+        post: operations["complete_coach_document_v1_coach_profile_documents__document_id__complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Coach Slots */
+        get: operations["list_coach_slots_v1_coach_profile_slots_get"];
+        put?: never;
+        /** Create Coach Slot */
+        post: operations["create_coach_slot_v1_coach_profile_slots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/slots/{slot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Coach Slot */
+        delete: operations["delete_coach_slot_v1_coach_profile_slots__slot_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/stripe/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coach Stripe Onboarding */
+        post: operations["coach_stripe_onboarding_v1_coach_profile_stripe_onboarding_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coach-profile/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Coach Profile */
+        post: operations["submit_coach_profile_v1_coach_profile_submit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -219,6 +442,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/marketplace/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Booking */
+        post: operations["create_booking_v1_marketplace_bookings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/marketplace/coaches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Browse Coaches */
+        get: operations["browse_coaches_v1_marketplace_coaches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/marketplace/coaches/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Marketplace Coach */
+        get: operations["read_marketplace_coach_v1_marketplace_coaches__profile_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/marketplace/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Report */
+        post: operations["create_report_v1_marketplace_reports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me": {
         parameters: {
             query?: never;
@@ -230,6 +521,58 @@ export interface paths {
         get: operations["me_v1_me_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/age-attestation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Age */
+        get: operations["read_age_v1_me_age_attestation_get"];
+        /** Put Age */
+        put: operations["put_age_v1_me_age_attestation_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List My Bookings */
+        get: operations["list_my_bookings_v1_me_bookings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/bookings/{booking_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel My Booking */
+        post: operations["cancel_my_booking_v1_me_bookings__booking_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1095,6 +1438,49 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminDocument */
+        AdminDocument: {
+            /**
+             * Content Type
+             * @enum {string}
+             */
+            content_type: "application/pdf" | "image/jpeg" | "image/png";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "background_check" | "id" | "certification";
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploading" | "ready";
+            /** Uploaded At */
+            uploaded_at: string | null;
+            /** Url */
+            url: string | null;
+            /** Url Expires In Seconds */
+            url_expires_in_seconds: number | null;
+        };
+        /** AgeAttestation */
+        AgeAttestation: {
+            /** Adult */
+            adult: boolean;
+            /** Birth Year */
+            birth_year: number;
+        };
+        /** AgeAttestationUpdate */
+        AgeAttestationUpdate: {
+            /** Birth Year */
+            birth_year: number;
+        };
         /**
          * AiCoachFeedback
          * @description An AI suggestion, never a `judgment`; labelled as such in the UI.
@@ -1140,6 +1526,26 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /** BookingCheckout */
+        BookingCheckout: {
+            /**
+             * Booking Id
+             * Format: uuid
+             */
+            booking_id: string;
+            /** Checkout Url */
+            checkout_url: string;
+        };
+        /** BookingCreate */
+        BookingCreate: {
+            /** Note */
+            note?: string | null;
+            /**
+             * Slot Id
+             * Format: uuid
+             */
+            slot_id: string;
         };
         /** BulkRequest */
         BulkRequest: {
@@ -1205,6 +1611,129 @@ export interface components {
              */
             expected_published_revision_id: string;
         };
+        /** CoachBooking */
+        CoachBooking: {
+            /** Cancelled At */
+            cancelled_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "in_person" | "online";
+            /** Hold Expires At */
+            hold_expires_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note */
+            note: string | null;
+            /** Platform Fee Cents */
+            platform_fee_cents: number;
+            /** Player First Name */
+            player_first_name: string;
+            /** Price Cents */
+            price_cents: number;
+            /** Refund Cents */
+            refund_cents: number;
+            /**
+             * Slot Id
+             * Format: uuid
+             */
+            slot_id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending_payment" | "confirmed" | "cancelled_by_player" | "cancelled_by_coach" | "expired" | "completed";
+            /** Venue */
+            venue: string | null;
+        };
+        /** CoachDecisionRequest */
+        CoachDecisionRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject" | "suspend" | "reinstate";
+            /** Note */
+            note?: string | null;
+        };
+        /** CoachDocument */
+        CoachDocument: {
+            /**
+             * Content Type
+             * @enum {string}
+             */
+            content_type: "application/pdf" | "image/jpeg" | "image/png";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "background_check" | "id" | "certification";
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "uploading" | "ready";
+            /** Uploaded At */
+            uploaded_at: string | null;
+        };
+        /** CoachDocumentCreate */
+        CoachDocumentCreate: {
+            /**
+             * Content Type
+             * @enum {string}
+             */
+            content_type: "application/pdf" | "image/jpeg" | "image/png";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "background_check" | "id" | "certification";
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** CoachDocumentUpload */
+        CoachDocumentUpload: {
+            /**
+             * Content Type
+             * @enum {string}
+             */
+            content_type: "application/pdf" | "image/jpeg" | "image/png";
+            /** Expires In Seconds */
+            expires_in_seconds: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Upload Url */
+            upload_url: string;
+        };
         /** CoachEvidenceSet */
         CoachEvidenceSet: {
             /**
@@ -1226,6 +1755,174 @@ export interface components {
              * Format: date-time
              */
             published_at: string;
+        };
+        /**
+         * CoachProfile
+         * @description The coach's own view. Stripe ids stay server-side.
+         */
+        CoachProfile: {
+            /** Bio */
+            bio: string;
+            /** Charges Enabled */
+            charges_enabled: boolean;
+            /** City */
+            city: string;
+            /** Display Name */
+            display_name: string;
+            /** Documents */
+            documents: components["schemas"]["CoachDocument"][];
+            /** Formats */
+            formats: ("in_person" | "online")[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Rate Cents */
+            rate_cents: number;
+            /** Review Note */
+            review_note: string | null;
+            /** Specialties */
+            specialties: ("scanning" | "first_touch" | "passing" | "finishing" | "dribbling" | "defending" | "goalkeeping" | "fitness" | "tactics")[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "pending_review" | "verified" | "suspended" | "rejected";
+            /** Stripe Connected */
+            stripe_connected: boolean;
+            /** Verified At */
+            verified_at: string | null;
+        };
+        /** CoachProfileUpdate */
+        CoachProfileUpdate: {
+            /**
+             * Bio
+             * @default
+             */
+            bio: string;
+            /** City */
+            city: string;
+            /** Display Name */
+            display_name: string;
+            /** Formats */
+            formats: ("in_person" | "online")[];
+            /** Rate Cents */
+            rate_cents: number;
+            /** Specialties */
+            specialties: ("scanning" | "first_touch" | "passing" | "finishing" | "dribbling" | "defending" | "goalkeeping" | "fitness" | "tactics")[];
+        };
+        /** CoachReview */
+        CoachReview: {
+            /** Bio */
+            bio: string;
+            /** Charges Enabled */
+            charges_enabled: boolean;
+            /** City */
+            city: string;
+            /** Display Name */
+            display_name: string;
+            /** Documents */
+            documents: components["schemas"]["AdminDocument"][];
+            /** Formats */
+            formats: ("in_person" | "online")[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Open Reports */
+            open_reports: number;
+            /** Rate Cents */
+            rate_cents: number;
+            /** Review Note */
+            review_note: string | null;
+            /** Specialties */
+            specialties: ("scanning" | "first_touch" | "passing" | "finishing" | "dribbling" | "defending" | "goalkeeping" | "fitness" | "tactics")[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "pending_review" | "verified" | "suspended" | "rejected";
+            /** Verified At */
+            verified_at: string | null;
+        };
+        /** CoachReviewSummary */
+        CoachReviewSummary: {
+            /** City */
+            city: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "pending_review" | "verified" | "suspended" | "rejected";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CoachSlot */
+        CoachSlot: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "in_person" | "online";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "held" | "booked" | "cancelled";
+            /** Venue */
+            venue: string | null;
+        };
+        /** CoachSlotCreate */
+        CoachSlotCreate: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "in_person" | "online";
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /** Venue */
+            venue?: string | null;
         };
         /** DeletionStatus */
         DeletionStatus: {
@@ -1714,6 +2411,100 @@ export interface components {
             team_id: string;
         };
         /**
+         * MarketplaceCoach
+         * @description Public columns only; `verified` means an admin checked the background check.
+         */
+        MarketplaceCoach: {
+            /**
+             * Background Check Verified
+             * @default true
+             */
+            background_check_verified: boolean;
+            /** Bio */
+            bio: string;
+            /** City */
+            city: string;
+            /** Display Name */
+            display_name: string;
+            /** Formats */
+            formats: ("in_person" | "online")[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Rate Cents */
+            rate_cents: number;
+            /** Specialties */
+            specialties: ("scanning" | "first_touch" | "passing" | "finishing" | "dribbling" | "defending" | "goalkeeping" | "fitness" | "tactics")[];
+        };
+        /** MarketplaceCoachDetail */
+        MarketplaceCoachDetail: {
+            /**
+             * Background Check Verified
+             * @default true
+             */
+            background_check_verified: boolean;
+            /** Bio */
+            bio: string;
+            /** City */
+            city: string;
+            /** Display Name */
+            display_name: string;
+            /** Formats */
+            formats: ("in_person" | "online")[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Rate Cents */
+            rate_cents: number;
+            /** Slots */
+            slots: components["schemas"]["PublicSlot"][];
+            /** Specialties */
+            specialties: ("scanning" | "first_touch" | "passing" | "finishing" | "dribbling" | "defending" | "goalkeeping" | "fitness" | "tactics")[];
+        };
+        /** MarketplaceReport */
+        MarketplaceReport: {
+            /** Booking Id */
+            booking_id: string | null;
+            /**
+             * Coach Profile Id
+             * Format: uuid
+             */
+            coach_profile_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "resolved";
+        };
+        /** MarketplaceReportCreate */
+        MarketplaceReportCreate: {
+            /** Booking Id */
+            booking_id?: string | null;
+            /**
+             * Coach Profile Id
+             * Format: uuid
+             */
+            coach_profile_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * Me
          * @description Database-derived identity. An unlinked account has empty roles/teams.
          */
@@ -1835,6 +2626,65 @@ export interface components {
             video_id: string;
             /** Width */
             width: number;
+        };
+        /** PlayerBooking */
+        PlayerBooking: {
+            /** Cancelled At */
+            cancelled_at: string | null;
+            /** Coach Display Name */
+            coach_display_name: string;
+            /**
+             * Coach Profile Id
+             * Format: uuid
+             */
+            coach_profile_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "in_person" | "online";
+            /** Hold Expires At */
+            hold_expires_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note */
+            note: string | null;
+            /** Platform Fee Cents */
+            platform_fee_cents: number;
+            /** Price Cents */
+            price_cents: number;
+            /** Refund Cents */
+            refund_cents: number;
+            /**
+             * Slot Id
+             * Format: uuid
+             */
+            slot_id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending_payment" | "confirmed" | "cancelled_by_player" | "cancelled_by_coach" | "expired" | "completed";
+            /** Venue */
+            venue: string | null;
         };
         /** PlayerCreate */
         PlayerCreate: {
@@ -2068,6 +2918,31 @@ export interface components {
             title: string | null;
             /** Upload Completed At */
             upload_completed_at: string | null;
+        };
+        /** PublicSlot */
+        PublicSlot: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "in_person" | "online";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /** Venue */
+            venue: string | null;
         };
         /** ReflectionDeleteRequest */
         ReflectionDeleteRequest: {
@@ -2359,6 +3234,11 @@ export interface components {
         StanceWidth: {
             /** P50 */
             p50: number;
+        };
+        /** StripeOnboarding */
+        StripeOnboarding: {
+            /** Url */
+            url: string;
         };
         /** TeamBootstrap */
         TeamBootstrap: {
@@ -2776,6 +3656,165 @@ export interface operations {
             };
         };
     };
+    admin_review_queue_v1_admin_coach_reviews_get: {
+        parameters: {
+            query?: {
+                status?: "draft" | "pending_review" | "verified" | "suspended" | "rejected";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachReviewSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_review_detail_v1_admin_coach_reviews__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachReview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_decide_v1_admin_coach_reviews__profile_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoachDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachReviewSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_list_reports_v1_admin_reports_get: {
+        parameters: {
+            query?: {
+                status?: "open" | "resolved";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketplaceReport"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_resolve_report_v1_admin_reports__report_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketplaceReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     identity_v1_auth_identity_get: {
         parameters: {
             query?: never;
@@ -2792,6 +3831,265 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthIdentity"];
+                };
+            };
+        };
+    };
+    read_coach_profile_v1_coach_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachProfile"];
+                };
+            };
+        };
+    };
+    put_coach_profile_v1_coach_profile_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoachProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachProfile"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_coach_bookings_v1_coach_profile_bookings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachBooking"][];
+                };
+            };
+        };
+    };
+    create_coach_document_v1_coach_profile_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoachDocumentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachDocumentUpload"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_coach_document_v1_coach_profile_documents__document_id__complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_coach_slots_v1_coach_profile_slots_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachSlot"][];
+                };
+            };
+        };
+    };
+    create_coach_slot_v1_coach_profile_slots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoachSlotCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachSlot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_coach_slot_v1_coach_profile_slots__slot_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    coach_stripe_onboarding_v1_coach_profile_stripe_onboarding_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StripeOnboarding"];
+                };
+            };
+        };
+    };
+    submit_coach_profile_v1_coach_profile_submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachProfile"];
                 };
             };
         };
@@ -3110,6 +4408,135 @@ export interface operations {
             };
         };
     };
+    create_booking_v1_marketplace_bookings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingCheckout"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browse_coaches_v1_marketplace_coaches_get: {
+        parameters: {
+            query?: {
+                specialty?: ("scanning" | "first_touch" | "passing" | "finishing" | "dribbling" | "defending" | "goalkeeping" | "fitness" | "tactics") | null;
+                city?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketplaceCoach"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_marketplace_coach_v1_marketplace_coaches__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketplaceCoachDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_report_v1_marketplace_reports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketplaceReportCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketplaceReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_v1_me_get: {
         parameters: {
             query?: never;
@@ -3126,6 +4553,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    read_age_v1_me_age_attestation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgeAttestation"];
+                };
+            };
+        };
+    };
+    put_age_v1_me_age_attestation_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgeAttestationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgeAttestation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_bookings_v1_me_bookings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerBooking"][];
+                };
+            };
+        };
+    };
+    cancel_my_booking_v1_me_bookings__booking_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerBooking"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
