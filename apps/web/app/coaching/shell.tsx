@@ -61,3 +61,24 @@ export async function MarketplaceShell({
     </div>
   );
 }
+
+/** Pilot note and section links when `/coaching` sits in the player shell. */
+export function CoachingSubheader() {
+  return (
+    <div className="-mt-2 mb-6 md:-mt-4 md:mb-8">
+      <p className="flex items-start gap-2 text-[14px] leading-5 text-muted">
+        <Info
+          size={16}
+          strokeWidth={2}
+          aria-hidden="true"
+          className="mt-0.5 shrink-0"
+        />
+        Adults-only pilot. Payments run in Stripe test mode, so no real money
+        moves.
+      </p>
+      <div className="-mx-4 mt-2 border-b border-line min-[375px]:-mx-5 md:-mx-6">
+        <SectionNav set="coaching" />
+      </div>
+    </div>
+  );
+}

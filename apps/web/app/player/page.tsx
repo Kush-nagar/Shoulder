@@ -1,4 +1,10 @@
-import { ArrowRight, ChevronRight, Footprints, Timer } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronRight,
+  Footprints,
+  Handshake,
+  Timer,
+} from "lucide-react";
 import Link from "next/link";
 import { type CSSProperties, type ReactNode, Suspense } from "react";
 import { drillOfTheDay, drillsForGoal } from "../../content/drills";
@@ -11,6 +17,7 @@ import {
   type Goal,
   type PlayerReflection,
 } from "../../lib/api";
+import { marketplaceEnabled } from "../../lib/marketplace";
 import { mondayOf } from "../../lib/plans";
 import { DrillTile } from "./drills/drill-tile";
 import { HowItWorks, PracticePoster } from "./home-client";
@@ -516,6 +523,30 @@ function ThisWeek({
   );
 }
 
+/** Block 10M pilot entry, shown only while the marketplace flag is on. */
+function TrainWithCoach({ index }: { index: number }) {
+  return (
+    <Section
+      id="coaching-title"
+      title="Train with a coach"
+      index={index}
+      className="lg:col-span-12"
+    >
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl border border-line bg-surface p-4 md:p-5">
+        <p className="max-w-[60ch] text-[16px] leading-6 text-ink-2">
+          Book a 1:1 session with an independent coach whose background check
+          Shoulder has verified. An 18+ pilot: payments run in test mode, so no
+          real money moves.
+        </p>
+        <Link href="/coaching" className={secondaryButton}>
+          <Handshake size={20} strokeWidth={2} aria-hidden="true" />
+          Find a coach
+        </Link>
+      </div>
+    </Section>
+  );
+}
+
 function greetingDate() {
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
@@ -723,6 +754,7 @@ export default async function PlayerHome() {
             <HowItWorks className="lg:col-span-12" />
           </>
         )}
+        {marketplaceEnabled() ? <TrainWithCoach index={6} /> : null}
       </div>
     </div>
   );

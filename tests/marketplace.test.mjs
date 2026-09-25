@@ -6,6 +6,24 @@ import {
   refundIfCancelled,
   stripeUrl,
 } from "../apps/web/app/coaching/format.ts";
+import { birthYearFrom } from "../apps/web/lib/google-birthday.ts";
+
+test("Google birthday gives only a plausible year, primary first", () => {
+  const today = new Date("2026-09-25T00:00:00Z");
+  const entry = (year, primary) => ({
+    metadata: primary ? { primary: true } : {},
+    date:
+      year === undefined ? { month: 3, day: 4 } : { year, month: 3, day: 4 },
+  });
+  const from = (list) => birthYearFrom({ birthdays: list }, today);
+  assert.equal(from([entry(1990), entry(1985, true)]), 1985);
+  assert.equal(from([entry(undefined, true), entry(1990)]), 1990);
+  assert.equal(from([entry(undefined, true)]), null);
+  assert.equal(from([entry(1899), entry(2027)]), null);
+  assert.equal(from([entry("1990")]), null);
+  assert.equal(birthYearFrom({}, today), null);
+  assert.equal(birthYearFrom(null, today), null);
+});
 
 const now = Date.parse("2026-09-24T12:00:00Z");
 const hour = 60 * 60 * 1000;

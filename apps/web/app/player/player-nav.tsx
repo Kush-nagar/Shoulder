@@ -1,6 +1,13 @@
 "use client";
 
-import { Footprints, House, ListChecks, Route, Timer } from "lucide-react";
+import {
+  Footprints,
+  Handshake,
+  House,
+  ListChecks,
+  Route,
+  Timer,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -38,6 +45,20 @@ const tabs = [
     match: (path: string) => path.startsWith("/player/progress"),
   },
 ];
+
+// Rail and sidebar only; on phones it sits in the account menu (≤5 tabs).
+const sideTabs =
+  process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === "on"
+    ? [
+        ...tabs,
+        {
+          href: "/coaching",
+          label: "Coaching",
+          Icon: Handshake,
+          match: (path: string) => path.startsWith("/coaching"),
+        },
+      ]
+    : tabs;
 
 const ring =
   "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
@@ -87,7 +108,7 @@ export function SideNav() {
   return (
     <nav aria-label="Player navigation">
       <ul className="space-y-1 px-2 lg:px-3">
-        {tabs.map(({ href, label, Icon, match }) => {
+        {sideTabs.map(({ href, label, Icon, match }) => {
           const current = match(path);
           return (
             <li key={href}>
@@ -128,6 +149,7 @@ const titles: [string, string][] = [
   ["/player/profile", "Profile"],
   ["/player/goals", "Your clips"],
   ["/player/plans", "Plans"],
+  ["/coaching", "Coaching"],
 ];
 
 /** Phone top bar title; Home shows none because its greeting is the title. */

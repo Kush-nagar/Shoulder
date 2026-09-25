@@ -157,3 +157,8 @@ body {
     transition-duration: 0.01ms;
   }
 }
+
+/* Set by the Capacitor bridge: web-only controls stay hidden in the app. */
+html[data-native] [data-web-only] {
+  display: none;
+}
