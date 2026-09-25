@@ -6,7 +6,9 @@
       "**",
       "!packages/contracts",
       "!apps/web/next-env.d.ts",
-      "!ops/state"
+      "!ops/state",
+      "!apps/mobile/android",
+      "!apps/mobile/ios"
     ]
   },
   "formatter": { "indentStyle": "space" },
