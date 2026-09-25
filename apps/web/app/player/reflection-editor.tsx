@@ -13,7 +13,7 @@ import {
 
 const focus =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
-const action = `inline-flex min-h-11 items-center justify-center rounded-lg border border-line-strong px-4 text-[16px] font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${focus}`;
+const action = `inline-flex min-h-11 items-center justify-center rounded-lg border border-control-border px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 ${focus}`;
 
 function newSave(
   text: string,
@@ -212,7 +212,7 @@ export function ReflectionEditor({
   return (
     <section
       aria-label="Your reflection"
-      className="mt-6 rounded-[14px] border border-line bg-surface p-4"
+      className="mt-6 rounded-xl border border-line bg-surface p-4 md:p-5"
     >
       {!evidenceAvailable ? (
         <p className="mb-3 text-[14px] font-semibold text-muted">
@@ -238,14 +238,14 @@ export function ReflectionEditor({
         rows={4}
         disabled={!reflection && !evidenceAvailable}
         onChange={(event) => changeText(event.target.value)}
-        className={`mt-2 block w-full resize-y rounded-lg border border-line-strong bg-paper p-3 text-[16px] leading-6 transition-colors duration-150 hover:border-ink-2 disabled:opacity-60 ${focus}`}
+        className={`mt-2 block w-full resize-y rounded-lg border border-control-border bg-paper p-3 text-[16px] leading-6 transition-colors duration-150 hover:border-ink-2 disabled:opacity-60 ${focus}`}
       />
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => void save()}
           disabled={saving || !draft.trim() || draft.length > 1000}
-          className={`${action} bg-action text-white hover:bg-action-hover`}
+          className={`${action} bg-action text-on-action hover:bg-action-hover`}
         >
           Save reflection
         </button>
@@ -288,7 +288,7 @@ export function ReflectionEditor({
               type="button"
               onClick={() => void remove()}
               disabled={saving}
-              className={`${action} bg-error text-white`}
+              className={`${action} bg-error text-paper`}
             >
               Delete permanently
             </button>

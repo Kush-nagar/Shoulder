@@ -1,7 +1,10 @@
 "use client";
 
+import { Check, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { chip, errorBox, sectionTitle, textLink } from "../../ui";
 import { focus, practiceDate, primaryButton, secondaryButton } from "../format";
 import type {
   AiCoachFeedback,
@@ -20,57 +23,183 @@ type Analysis =
   | { state: "done"; features: PracticeFeatures }
   | { state: "failed" };
 
-const AI_LABEL = "AI suggestion — your coach's notes come from your coach";
-
 function feedbackError(status: number) {
   if (status === 429)
-    return "You've asked for training ideas a lot today. Try again tomorrow.";
+    return "You've asked for ideas 10 times today. Try again tomorrow.";
   if (status === 422)
     return "The movement summary couldn't be used. Analyze the video again.";
-  return "Training ideas aren't available right now. Try again in a moment.";
+  return "Training ideas didn't load. Try again.";
+}
+
+/** Numbered steps only when the text splits cleanly into sentences. */
+function steps(how: string) {
+  // Model text is either "1. Do this. 2. Then that." or plain sentences.
+  const numbered = how
+    .split(/(?:^|\s)\d+[.)]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const parts =
+    numbered.length >= 2
+      ? numbered
+      : how
+          .split(/(?<=[.!?])\s+(?=[A-Z])/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+  return parts.length >= 2 && parts.length <= 8 ? parts : null;
 }
 
 function FeedbackCard({ feedback }: { feedback: AiCoachFeedback }) {
+  const [more, setMore] = useState(false);
+  const long = feedback.body.length > 160;
   return (
     <article
       aria-label="AI suggestion"
-      className="rounded-[14px] border border-line bg-surface p-5"
+      className="rounded-xl border border-line bg-surface p-4 md:p-5"
     >
-      <p className="text-[13px] font-semibold leading-[1.4] text-muted">
-        {AI_LABEL}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className={chip}>AI suggestion</span>
+        <span className="text-[13px] text-muted tabular-nums">
+          Suggested {practiceDate(feedback.created_at)}
+        </span>
+      </div>
+      <p className="mt-3 text-[13px] leading-[1.4] text-muted">
+        Suggestions from software, based on how you moved. Your coach&apos;s
+        notes come from your coach.
       </p>
-      <p className="mt-3 whitespace-pre-line text-[16px] leading-6">
+      <p
+        className={`mt-3 whitespace-pre-line text-[16px] leading-6 ${more ? "" : "line-clamp-2"}`}
+      >
         {feedback.body}
       </p>
-      {feedback.drills.length ? (
-        <ol className="mt-5 space-y-5 border-t border-line pt-5">
-          {feedback.drills.map((drill) => (
-            <li key={drill.title}>
-              <h3 className="text-[17px] font-semibold leading-[1.35]">
-                {drill.title}
-              </h3>
-              <dl className="mt-2 space-y-2 text-[16px] leading-6">
-                <div>
-                  <dt className="text-[14px] font-semibold text-ink-2">
-                    Why it helps
-                  </dt>
-                  <dd className="text-ink-2">{drill.why}</dd>
-                </div>
-                <div>
-                  <dt className="text-[14px] font-semibold text-ink-2">
-                    How to do it
-                  </dt>
-                  <dd className="text-ink-2">{drill.how}</dd>
-                </div>
-              </dl>
-            </li>
-          ))}
-        </ol>
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setMore((value) => !value)}
+          aria-expanded={more}
+          className={textLink}
+        >
+          {more ? "Show less" : "Read more"}
+        </button>
       ) : null}
-      <p className="mt-5 text-[13px] text-muted tabular-nums">
-        Suggested {practiceDate(feedback.created_at)}
-      </p>
+      {feedback.drills.length ? (
+        <ul className="mt-3 divide-y divide-line border-t border-line">
+          {feedback.drills.map((drill, index) => {
+            const list = steps(drill.how);
+            return (
+              <li key={drill.title}>
+                <details className="group" open={index === 0}>
+                  <summary
+                    className={`flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 rounded-lg py-2 [&::-webkit-details-marker]:hidden ${focus}`}
+                  >
+                    <h3 className="text-[17px] font-semibold leading-[1.35]">
+                      {drill.title}
+                    </h3>
+                    <ChevronDown
+                      size={20}
+                      strokeWidth={2}
+                      aria-hidden="true"
+                      className="shrink-0 text-muted transition-transform duration-150 group-open:rotate-180"
+                    />
+                  </summary>
+                  <div className="pb-4">
+                    <p className="text-[14px] font-semibold text-ink-2">
+                      Why it helps
+                    </p>
+                    <p className="mt-0.5 text-[16px] leading-6 text-ink-2">
+                      {drill.why}
+                    </p>
+                    <p className="mt-3 text-[14px] font-semibold text-ink-2">
+                      How to do it
+                    </p>
+                    {list ? (
+                      <ol className="mt-1 list-decimal space-y-1 pl-5 text-[16px] leading-6 text-ink-2 marker:text-muted">
+                        {list.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="mt-0.5 text-[16px] leading-6 text-ink-2">
+                        {drill.how}
+                      </p>
+                    )}
+                    <Link
+                      href={`/player/practice/new?title=${encodeURIComponent(drill.title)}`}
+                      className={`${textLink} mt-1`}
+                    >
+                      Film this drill
+                      <ChevronRight
+                        size={18}
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      />
+                    </Link>
+                  </div>
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </article>
+  );
+}
+
+function round(value: number, digits = 0) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+/** The literal summary sent for ideas, in plain words. Never compared. */
+function WhatWasSent({ features }: { features: PracticeFeatures }) {
+  const rows: [string, string][] = [
+    ["Video length", `${round(features.duration_ms / 1000, 1)} seconds`],
+    ["Frames looked at", `${features.frames_analyzed}`],
+    ["Head turns seen", `${features.head_turns}`],
+    ["Head turns per minute", `${round(features.head_turns_per_min, 1)}`],
+    [
+      "Knee bend, middle of the video",
+      `${round(features.knee_flexion_deg.p50)} degrees`,
+    ],
+    [
+      "Hip bend, middle of the video",
+      `${round(features.hip_flexion_deg.p50)} degrees`,
+    ],
+    [
+      "Body lean, middle of the video",
+      `${round(features.trunk_lean_deg.p50)} degrees`,
+    ],
+    [
+      "Feet apart, compared with hip width",
+      `${round(features.stance_width_ratio.p50, 1)} times`,
+    ],
+  ];
+  return (
+    <details className="group rounded-xl border border-line">
+      <summary
+        className={`flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 text-[16px] font-semibold [&::-webkit-details-marker]:hidden ${focus}`}
+      >
+        What was sent
+        <ChevronDown
+          size={20}
+          strokeWidth={2}
+          aria-hidden="true"
+          className="shrink-0 text-muted transition-transform duration-150 group-open:rotate-180"
+        />
+      </summary>
+      <div className="border-t border-line px-4 pt-3 pb-4">
+        <p className="text-[14px] leading-5 text-muted">
+          Measurements from this video only. They are not a grade.
+        </p>
+        <dl className="mt-3 space-y-2 text-[15px] leading-6">
+          {rows.map(([label, value]) => (
+            <div key={label} className="flex justify-between gap-4">
+              <dt className="text-ink-2">{label}</dt>
+              <dd className="shrink-0 font-medium tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </details>
   );
 }
 
@@ -96,6 +225,7 @@ export function PracticeDetail({
   );
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
+  const [lines, setLines] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -174,171 +304,194 @@ export function PracticeDetail({
   }
 
   const [latest, ...earlier] = feedback;
+  const analysed = analysis.state !== "idle";
 
   return (
-    <div className="mt-6 space-y-10">
-      <section aria-label="Video">
-        <div
-          className="relative mx-auto overflow-hidden rounded-[14px] bg-ink"
-          style={{
-            aspectRatio: ratio,
-            width: `min(100%, calc(70dvh * ${ratio}))`,
-          }}
-        >
-          {playable ? (
-            <>
-              {/* biome-ignore lint/a11y/useMediaCaption: the player's own practice video has no speech track to caption. */}
-              <video
-                ref={videoRef}
-                src={video.playback_url ?? undefined}
-                // Pose analysis reads frames, which needs a CORS-clean video.
-                crossOrigin="anonymous"
-                controls={!running}
-                playsInline
-                preload="metadata"
-                aria-label="Your practice video"
-                className="size-full object-contain"
-                onLoadedMetadata={(event) => {
-                  const { videoWidth, videoHeight } = event.currentTarget;
-                  if (videoWidth && videoHeight)
-                    setRatio(videoWidth / videoHeight);
-                }}
-                onError={() => setPlayError(true)}
-              />
-              <canvas
-                ref={canvasRef}
-                className="pointer-events-none absolute inset-0 size-full"
-              />
-            </>
-          ) : (
-            <div
-              role="status"
-              className="flex size-full items-center justify-center px-6 text-center text-[16px] leading-6 text-paper"
-            >
-              {video.status === "uploading"
-                ? "This upload didn't finish. Delete it and upload the video again."
-                : "This video couldn't play. Check your connection and reload."}
-            </div>
-          )}
-        </div>
-        {playError ? (
-          <button
-            type="button"
-            onClick={() => {
-              setPlayError(false);
-              router.refresh();
+    <div className="mt-6 grid gap-10 lg:grid-cols-12 lg:gap-8">
+      <div className="min-w-0 space-y-8 lg:col-span-7">
+        <section aria-label="Video">
+          <div
+            className="relative mx-auto overflow-hidden rounded-[14px] bg-night"
+            style={{
+              aspectRatio: ratio,
+              width: `min(100%, calc(70dvh * ${ratio}))`,
             }}
-            className={`${secondaryButton} mt-3`}
           >
-            Reload video
-          </button>
-        ) : null}
-      </section>
-
-      {playable ? (
-        <section aria-labelledby="movement-title" className="space-y-4">
-          <h2
-            id="movement-title"
-            className="text-[21px] font-semibold leading-[1.25]"
-          >
-            Your movement
-          </h2>
-          <p className="max-w-[52ch] text-[16px] leading-6 text-ink-2">
-            Shoulder draws your body position on this phone. The video never
-            leaves it for this step.
-          </p>
-
-          {analysis.state === "running" ? (
-            <div aria-live="polite" className="space-y-2">
-              <div
-                role="progressbar"
-                aria-label="Movement analysis"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(analysis.fraction * 100)}
-                className="h-2 overflow-hidden rounded-full bg-surface-subtle"
-              >
-                <div
-                  className="h-full origin-left rounded-full bg-action transition-transform duration-200 ease-out"
-                  style={{ transform: `scaleX(${analysis.fraction})` }}
+            {playable ? (
+              <>
+                {/* biome-ignore lint/a11y/useMediaCaption: the player's own practice video has no speech track to caption. */}
+                <video
+                  ref={videoRef}
+                  src={video.playback_url ?? undefined}
+                  // Pose analysis reads frames, which needs a CORS-clean video.
+                  crossOrigin="anonymous"
+                  controls={!running}
+                  playsInline
+                  preload="metadata"
+                  aria-label="Your practice video"
+                  className="size-full object-contain"
+                  onLoadedMetadata={(event) => {
+                    const { videoWidth, videoHeight } = event.currentTarget;
+                    if (videoWidth && videoHeight)
+                      setRatio(videoWidth / videoHeight);
+                  }}
+                  onError={() => setPlayError(true)}
                 />
+                <canvas
+                  ref={canvasRef}
+                  className={`pointer-events-none absolute inset-0 size-full ${lines ? "" : "invisible"}`}
+                />
+              </>
+            ) : (
+              <div
+                role="status"
+                className="flex size-full items-center justify-center px-6 text-center text-[16px] leading-6 text-on-night"
+              >
+                {video.status === "uploading"
+                  ? "This upload didn't finish. Delete it and upload the video again."
+                  : "This video couldn't play. Check your connection and reload."}
               </div>
-              <p className="text-[15px] text-ink-2">
-                Watching your movement. Keep this page open.
-              </p>
-            </div>
-          ) : null}
-
-          {analysis.state === "failed" ? (
-            <p
-              role="alert"
-              className="rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
-            >
-              Shoulder couldn't follow your movement in this video. Try one
-              filmed from the side with your whole body in view.
-            </p>
-          ) : null}
-
-          {analysis.state === "done" ? (
-            <p role="status" className="text-[16px] leading-6">
-              Done. Only a short summary of your body angles is sent when you
-              ask for training ideas.
-            </p>
-          ) : null}
-
+            )}
+          </div>
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => void analyze()}
-              disabled={running}
-              className={
-                analysis.state === "done" ? secondaryButton : primaryButton
-              }
-            >
-              {running
-                ? "Analyzing…"
-                : analysis.state === "idle"
-                  ? "Analyze my movement"
-                  : "Analyze again"}
-            </button>
-            {analysis.state === "done" ? (
+            {playError ? (
               <button
                 type="button"
-                onClick={() => void ask()}
-                disabled={asking}
-                className={primaryButton}
+                onClick={() => {
+                  setPlayError(false);
+                  router.refresh();
+                }}
+                className={`${secondaryButton} mt-3`}
               >
-                {asking ? "Getting ideas…" : "Get training ideas"}
+                Reload video
+              </button>
+            ) : null}
+            {playable && analysed ? (
+              <button
+                type="button"
+                aria-pressed={lines}
+                onClick={() => setLines((value) => !value)}
+                className={`${secondaryButton} mt-3`}
+              >
+                {lines ? (
+                  <Check size={18} strokeWidth={2} aria-hidden="true" />
+                ) : null}
+                Show body lines
               </button>
             ) : null}
           </div>
-          {askError ? (
-            <p
-              role="alert"
-              className="rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
-            >
-              {askError}
-            </p>
-          ) : null}
         </section>
-      ) : null}
 
-      <section aria-labelledby="ideas-title" aria-busy={asking}>
-        <h2
-          id="ideas-title"
-          className="text-[21px] font-semibold leading-[1.25]"
-        >
+        {playable ? (
+          <section
+            aria-labelledby="movement-title"
+            className="space-y-4 border-t border-line pt-6"
+          >
+            <h2 id="movement-title" className={sectionTitle}>
+              Your movement
+            </h2>
+            <p className="max-w-[56ch] text-[16px] leading-6 text-ink-2">
+              Shoulder finds your body position on this device. The video never
+              leaves it for this step.
+            </p>
+
+            {analysis.state === "running" ? (
+              <div aria-live="polite" className="space-y-2">
+                <div
+                  role="progressbar"
+                  aria-label="Movement analysis"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(analysis.fraction * 100)}
+                  className="h-1.5 overflow-hidden rounded-full bg-surface-subtle"
+                >
+                  <div
+                    className="h-full origin-left rounded-full bg-action transition-transform duration-200 ease-out"
+                    style={{ transform: `scaleX(${analysis.fraction})` }}
+                  />
+                </div>
+                <p className="text-[15px] text-ink-2">
+                  Finding your body position on this device. Keep this page
+                  open.
+                </p>
+              </div>
+            ) : null}
+
+            {analysis.state === "failed" ? (
+              <p role="alert" className={errorBox}>
+                Couldn&apos;t find a clear view of you. Try a video where your
+                whole body is in frame.
+              </p>
+            ) : null}
+
+            {analysis.state === "done" ? (
+              <p role="status" className="flex gap-2 text-[16px] leading-6">
+                <Check
+                  size={20}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                  className="mt-0.5 shrink-0"
+                />
+                Done. Only a short summary of your body angles is sent when you
+                ask for training ideas.
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void analyze()}
+                disabled={running}
+                className={
+                  analysis.state === "done" ? secondaryButton : primaryButton
+                }
+              >
+                {running
+                  ? "Analyzing…"
+                  : analysis.state === "idle"
+                    ? "Analyze my movement"
+                    : "Analyze again"}
+              </button>
+              {analysis.state === "done" ? (
+                <button
+                  type="button"
+                  onClick={() => void ask()}
+                  disabled={asking}
+                  className={primaryButton}
+                >
+                  {asking ? "Getting ideas…" : "Get training ideas"}
+                </button>
+              ) : null}
+            </div>
+            {askError ? (
+              <p role="alert" className={errorBox}>
+                {askError}
+              </p>
+            ) : null}
+            {analysis.state === "done" ? (
+              <WhatWasSent features={analysis.features} />
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+
+      <section
+        aria-labelledby="ideas-title"
+        aria-busy={asking}
+        className="min-w-0 lg:sticky lg:top-6 lg:col-span-5 lg:self-start"
+      >
+        <h2 id="ideas-title" className={sectionTitle}>
           Training ideas
         </h2>
         {!feedbackLoaded ? (
           <p role="alert" className="mt-3 text-[16px] leading-6 text-error">
-            Earlier training ideas could not be loaded.
+            Earlier training ideas didn&apos;t load. Try again.
           </p>
         ) : null}
         {asking ? (
           <div
             aria-hidden="true"
-            className="mt-4 h-48 rounded-[14px] bg-surface-subtle"
+            className="mt-4 h-72 rounded-xl bg-surface-subtle"
           />
         ) : null}
         {latest ? (
@@ -351,10 +504,16 @@ export function PracticeDetail({
           </p>
         ) : null}
         {earlier.length ? (
-          <details className="group mt-6">
+          <details className="group mt-4">
             <summary
-              className={`flex min-h-11 cursor-pointer list-none items-center rounded-lg text-[16px] font-semibold underline underline-offset-4 [&::-webkit-details-marker]:hidden ${focus}`}
+              className={`flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg text-[16px] font-semibold [&::-webkit-details-marker]:hidden ${focus}`}
             >
+              <ChevronRight
+                size={18}
+                strokeWidth={2}
+                aria-hidden="true"
+                className="transition-transform duration-150 group-open:rotate-90"
+              />
               Earlier ideas ({earlier.length})
             </summary>
             <div className="mt-3 space-y-4">
@@ -366,13 +525,16 @@ export function PracticeDetail({
         ) : null}
       </section>
 
-      <section aria-label="Delete video" className="border-t border-line pt-6">
+      <section
+        aria-label="Delete video"
+        className="border-t border-line pt-6 lg:col-span-12"
+      >
         {confirmDelete ? (
           <div
             role="alertdialog"
             aria-labelledby="delete-practice-title"
             aria-describedby="delete-practice-body"
-            className="rounded-xl border border-error bg-error-soft p-4"
+            className="max-w-[560px] rounded-xl border border-error bg-error-soft p-4 md:p-5"
           >
             <h2
               id="delete-practice-title"
@@ -382,9 +544,10 @@ export function PracticeDetail({
             </h2>
             <p
               id="delete-practice-body"
-              className="mt-2 text-[16px] leading-6 text-ink"
+              className="mt-1 text-[16px] leading-6 text-ink"
             >
-              The video and its training ideas are removed for good.
+              It&apos;s removed now, with its training ideas, and can&apos;t be
+              recovered.
             </p>
             {deleteError ? (
               <p role="alert" className="mt-2 text-[16px] text-error">
@@ -396,15 +559,16 @@ export function PracticeDetail({
                 type="button"
                 onClick={() => void remove()}
                 disabled={deleting}
-                className={`inline-flex min-h-11 items-center justify-center rounded-lg bg-error px-4 text-[16px] font-semibold text-white disabled:opacity-45 ${focus}`}
+                className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-error px-4 text-[16px] font-semibold text-paper transition-transform duration-150 active:scale-[0.98] disabled:opacity-45 ${focus}`}
               >
+                <Trash2 size={18} strokeWidth={2} aria-hidden="true" />
                 {deleting ? "Deleting…" : "Delete video"}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
                 disabled={deleting}
-                className={`${secondaryButton} bg-surface`}
+                className={secondaryButton}
                 ref={keepRef}
               >
                 Keep video
@@ -415,8 +579,9 @@ export function PracticeDetail({
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className={`inline-flex min-h-11 items-center rounded-lg px-1 text-[16px] font-semibold text-error underline-offset-4 hover:underline ${focus}`}
+            className={`-ml-1 inline-flex min-h-11 items-center gap-2 rounded-lg px-1 text-[16px] font-semibold text-error underline-offset-4 hover:underline ${focus}`}
           >
+            <Trash2 size={18} strokeWidth={2} aria-hidden="true" />
             Delete this video
           </button>
         )}

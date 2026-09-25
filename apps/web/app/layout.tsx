@@ -10,6 +10,16 @@ const interTight = localFont({
   variable: "--font-inter-tight",
 });
 
+// Display face (ADR 0022): condensed width axis for titles only.
+const archivo = localFont({
+  src: "../node_modules/@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2",
+  weight: "100 900",
+  style: "normal",
+  display: "swap",
+  variable: "--font-archivo",
+  declarations: [{ prop: "font-stretch", value: "62% 125%" }],
+});
+
 export const metadata: Metadata = {
   title: "Shoulder",
   description: "A quiet space for coach-led development.",
@@ -20,7 +30,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#faf9f7",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf9f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#141311" },
+  ],
   // Lets the player shell pad itself with env(safe-area-inset-*).
   viewportFit: "cover",
 };
@@ -31,7 +44,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={interTight.variable}>
+    <html lang="en" className={`${interTight.variable} ${archivo.variable}`}>
       <body>{children}</body>
     </html>
   );

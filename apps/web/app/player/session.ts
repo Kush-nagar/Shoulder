@@ -18,13 +18,18 @@ export const playerSession = cache(async () => {
   }
   if (!token) return null;
   let me = await fetchMe(token);
+  // A waking API can miss the first call; retry before treating it as no access.
+  for (let attempt = 0; !me && attempt < 2; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    me = await fetchMe(token);
+  }
   if (me && !me.roles.length && !me.player && (await joinDemo(token))) {
     me = await fetchMe(token);
   }
   if (!me?.roles.includes("player") || !me.player) {
-    return { token, player: null };
+    return { token, player: null, me: null };
   }
-  return { token, player: me.player };
+  return { token, player: me.player, me };
 });
 
 export async function requirePlayerSession(destination?: string) {
@@ -39,5 +44,6 @@ export async function requirePlayerSession(destination?: string) {
   return {
     token: session.token,
     player: session.player,
+    me: session.me as NonNullable<typeof session.me>,
   };
 }

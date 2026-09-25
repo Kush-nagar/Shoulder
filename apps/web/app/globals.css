@@ -10,12 +10,75 @@
   --sh-muted: #6b6560;
   --sh-line: #e5e2de;
   --sh-line-strong: #cfc9c2;
+  --sh-control-border: #8a837b;
+  --sh-brand: #c4633d;
   --sh-action: #9e472c;
   --sh-action-hover: #843a24;
   --sh-action-soft: #f4e4dd;
+  --sh-on-action: #ffffff;
   --sh-focus: #7c341f;
   --sh-error: #9b2c2c;
   --sh-error-soft: #f9e8e6;
+  /* Night surfaces: the video stage and the goal hero only (ADR 0022). */
+  --sh-night: #171512;
+  --sh-on-night: #faf9f7;
+  --sh-night-muted: #b9b2a9;
+  --sh-action-on-night: #e58b66;
+  --sh-night-line: #3a3530;
+  color-scheme: light;
+}
+
+/*
+ * Reviewed dark palette (ADR 0022), not an inversion. Scoped to pages that
+ * opt in with `.sh-themed` (player routes and sign-in); coach pages stay light
+ * until they are reviewed for it.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:has(.sh-themed):not(:has(.sh-themed[data-theme="light"])) {
+    --sh-paper: #141311;
+    --sh-surface: #1d1b18;
+    --sh-surface-subtle: #26231f;
+    --sh-ink: #f2efea;
+    --sh-ink-2: #cdc7bf;
+    --sh-muted: #a29a91;
+    --sh-line: #2f2b27;
+    --sh-line-strong: #45403a;
+    --sh-control-border: #7a736b;
+    --sh-brand: #c4633d;
+    --sh-action: #e58b66;
+    --sh-action-hover: #f0a585;
+    --sh-action-soft: #3a2219;
+    --sh-on-action: #141311;
+    --sh-focus: #f0a585;
+    --sh-error: #f08a80;
+    --sh-error-soft: #2a1716;
+    --sh-night: #0c0b0a;
+    --sh-night-line: #2f2b27;
+    color-scheme: dark;
+  }
+}
+
+:root:has(.sh-themed[data-theme="dark"]) {
+  --sh-paper: #141311;
+  --sh-surface: #1d1b18;
+  --sh-surface-subtle: #26231f;
+  --sh-ink: #f2efea;
+  --sh-ink-2: #cdc7bf;
+  --sh-muted: #a29a91;
+  --sh-line: #2f2b27;
+  --sh-line-strong: #45403a;
+  --sh-control-border: #7a736b;
+  --sh-brand: #c4633d;
+  --sh-action: #e58b66;
+  --sh-action-hover: #f0a585;
+  --sh-action-soft: #3a2219;
+  --sh-on-action: #141311;
+  --sh-focus: #f0a585;
+  --sh-error: #f08a80;
+  --sh-error-soft: #2a1716;
+  --sh-night: #0c0b0a;
+  --sh-night-line: #2f2b27;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -27,13 +90,23 @@
   --color-muted: var(--sh-muted);
   --color-line: var(--sh-line);
   --color-line-strong: var(--sh-line-strong);
+  --color-control-border: var(--sh-control-border);
+  --color-brand: var(--sh-brand);
   --color-action: var(--sh-action);
   --color-action-hover: var(--sh-action-hover);
   --color-action-soft: var(--sh-action-soft);
+  --color-on-action: var(--sh-on-action);
   --color-focus: var(--sh-focus);
   --color-error: var(--sh-error);
   --color-error-soft: var(--sh-error-soft);
+  --color-night: var(--sh-night);
+  --color-on-night: var(--sh-on-night);
+  --color-night-muted: var(--sh-night-muted);
+  --color-action-on-night: var(--sh-action-on-night);
+  --color-night-line: var(--sh-night-line);
   --font-sans: var(--font-inter-tight), Arial, sans-serif;
+  --font-display:
+    var(--font-archivo), var(--font-inter-tight), Arial, sans-serif;
 }
 
 body {
@@ -43,9 +116,35 @@ body {
   font-family: var(--font-inter-tight), Arial, sans-serif;
 }
 
+/* Condensed matchday voice: page titles, goal hero, drill covers only. */
+.font-display {
+  font-stretch: 75%;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
 ::selection {
   background: var(--sh-action-soft);
   color: var(--sh-ink);
+}
+
+/* One entrance for dashboard sections; `--i` staggers them 40 ms apart. */
+@media (prefers-reduced-motion: no-preference) {
+  .sh-rise {
+    animation: sh-rise 200ms ease-out both;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+}
+
+@keyframes sh-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* docs/09: instant state changes when the viewer asks for less motion. */

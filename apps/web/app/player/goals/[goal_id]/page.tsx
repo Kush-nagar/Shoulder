@@ -5,6 +5,7 @@ import {
   fetchReflections,
 } from "../../../../lib/api";
 import { requirePlayerSession } from "../../session";
+import { errorBox } from "../../ui";
 import { EvidenceSequence } from "./evidence-sequence";
 
 export default async function GoalEvidencePage({
@@ -28,7 +29,9 @@ export default async function GoalEvidencePage({
   const goals = await fetchGoals(token, player.id);
   if (goals === null) {
     return (
-      <p role="alert">Your clips could not be loaded. Try again in a moment.</p>
+      <p role="alert" className={errorBox}>
+        Your clips could not be loaded. Try again in a moment.
+      </p>
     );
   }
   const goal = goals.find((item) => item.id === goalId);
@@ -39,7 +42,9 @@ export default async function GoalEvidencePage({
   ]);
   if (evidence === null) {
     return (
-      <p role="alert">Your clips could not be loaded. Try again in a moment.</p>
+      <p role="alert" className={errorBox}>
+        Your clips could not be loaded. Try again in a moment.
+      </p>
     );
   }
   return (

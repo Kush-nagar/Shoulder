@@ -1,20 +1,14 @@
 "use client";
 
-import { primaryButton } from "./format";
+import { errorBox, pageTitle, primaryButton } from "../ui";
 
 export default function PracticeError({ reset }: { reset: () => void }) {
   return (
-    <section aria-labelledby="practice-error-title">
-      <h1
-        id="practice-error-title"
-        className="text-[32px] font-semibold leading-[1.08]"
-      >
+    <section aria-labelledby="practice-error-title" className="max-w-[680px]">
+      <h1 id="practice-error-title" className={pageTitle}>
         Practice
       </h1>
-      <p
-        role="alert"
-        className="mt-6 rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
-      >
+      <p role="alert" className={`${errorBox} mt-6`}>
         This page could not be loaded. Your videos are unchanged.
       </p>
       <button type="button" onClick={reset} className={`${primaryButton} mt-4`}>

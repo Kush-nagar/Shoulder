@@ -36,3 +36,15 @@ Inter Tight, weights 400/500/600, tabular numeral requirements, and the approved
 visual specification remain unchanged. No external font service is needed.
 Any upgrade must update the exact pins and this record, preserve the included
 license, and rerun font/network checks.
+
+## Display font (ADR 0022)
+
+- Package: `@fontsource-variable/archivo`, exact version **5.3.0**, pinned in
+  `apps/web/package.json` and `pnpm-lock.yaml`.
+- Source WOFF2: `apps/web/node_modules/@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2`
+  (`wdth` 62-125 and `wght` axes).
+- Loader: `apps/web/app/layout.tsx`, `next/font/local`, exposed as
+  `--font-archivo`; used only for player page titles, the goal hero title,
+  and drill cover titles.
+- Included SIL Open Font License: `apps/web/public/licenses/archivo-OFL.txt`,
+  shipped at `/licenses/archivo-OFL.txt`.

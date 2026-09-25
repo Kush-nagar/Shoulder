@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  packages: read
 jobs:
   quality:
     runs-on: ubuntu-24.04
@@ -60,17 +61,17 @@ jobs:
       - name: Start pinned object storage
         # The same digest-pinned images infra/compose.yaml runs locally. MinIO
         # is a step rather than a service container because a service cannot
-        # supply the `server /data` command the image needs. Pulled from
-        # MinIO's own quay.io registry: anonymous Docker Hub pulls of these
-        # images fail from shared CI egress ("pull access denied"). The release
-        # and the manifest digest are unchanged -- quay.io serves the identical
-        # manifest list -- so this is a source change, not a version change.
+        # supply the `server /data` command the image needs. In September 2026
+        # MinIO put both quay.io and Docker Hub behind a login, so CI pulls
+        # private mirrors built FROM the previously pinned digests (same
+        # release, same layers, amd64 only) from this owner's GHCR.
         env:
           MINIO_ROOT_USER: shoulder-ci
           MINIO_ROOT_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-ci-only
-          MINIO_IMAGE: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-          MC_IMAGE: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+          MINIO_IMAGE: ghcr.io/kush-nagar/shoulder-minio:RELEASE.2025-09-07T16-13-09Z@sha256:b1ebc9cbc53676d27c95b81908351035d4f512776c175eef3ee60ad172e05ccc
+          MC_IMAGE: ghcr.io/kush-nagar/shoulder-mc:RELEASE.2025-08-13T08-35-41Z@sha256:56f33d7e7f19f35fa014f9039c90f73bcb552c7dbd0f7e590a81638ebd361108
         run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker run -d --name shoulder-minio --network host -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e MINIO_API_CORS_ALLOW_ORIGIN=http://127.0.0.1:3000 "$MINIO_IMAGE" server /data
           for attempt in $(seq 1 30); do
             curl --fail --silent http://127.0.0.1:9000/minio/health/ready && break

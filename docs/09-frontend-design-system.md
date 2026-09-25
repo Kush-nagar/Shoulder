@@ -41,6 +41,14 @@ Define semantic CSS variables in one global token layer. Tailwind consumes the v
 | `--sh-error-soft` | `#F9E8E6` | Error background |
 | `--sh-warning` | `#7A5412` | Coach-only warning text |
 | `--sh-warning-soft` | `#F7EFD9` | Warning background |
+| `--sh-control-border` | `#8A837B` | Input, chip, and outlined button borders; 3.56:1 on paper |
+| `--sh-on-action` | `#FFFFFF` | Text on filled action controls |
+| `--sh-night` | `#171512` | Video stage and goal hero only |
+| `--sh-on-night` | `#FAF9F7` | Text on night surfaces |
+| `--sh-night-muted` | `#B9B2A9` | Secondary text on night; 8.68:1 |
+| `--sh-action-on-night` | `#E58B66` | Links on night; 7.13:1 |
+
+Dark palette (ADR 0022): the reviewed values in `docs/design/player-redesign-brief.md` section 3.1, applied only to pages marked `.sh-themed` (player routes, sign-in, session fallback), under `prefers-color-scheme: dark` unless the player chose Light, or always when they chose Dark on Profile. In dark, filled action controls use dark text (`--sh-on-action: #141311`).
 
 Contrast baselines on paper: ink 17.32:1, muted 5.46:1, and action 5.88:1. White on action is 6.19:1. The original brand terracotta is decorative because it is only 3.84:1 on paper and white on it is 4.04:1.
 
@@ -64,7 +72,7 @@ The owner-approved Task 1 mark and wordmark are present, as tracked in `assets/R
 | Metadata | 13 px | 13 px | 400 | 1.4 |
 | Timecode | 13 px | 14 px | 500 | 1.2 |
 
-Do not reduce player body copy below 16 px. Use at most three type sizes in one compact component. Titles use sentence case; never all caps for navigation or labels.
+Player display titles (page `h1`, goal hero title, drill covers) use the Archivo display face at `font-stretch: 75%`, weight 600: 28/34 px page titles, 32/44 px greeting and goal hero (ADR 0022). Do not reduce player body copy below 16 px. Use at most three type sizes in one compact component. Titles use sentence case; never all caps for navigation or labels.
 
 ### Spacing, shape, elevation
 
@@ -90,7 +98,7 @@ Do not reduce player body copy below 16 px. Use at most three type sizes in one 
 | `xl` | 1280 px | Review page reaches full three-region layout |
 | `2xl` | 1440 px | Content stops growing; add outer whitespace |
 
-Coach content max width is 1440 px except the review workspace, which may fill the viewport. Reading/form content maxes at 680 px. Player content maxes at 560 px and stays centered on larger screens.
+Coach content max width is 1440 px except the review workspace, which may fill the viewport. Reading/form content maxes at 680 px. Player dashboard content maxes at 1200 px; player reading columns (drill detail, profile, upload form) max at 680 px (ADR 0022).
 
 ## Coach shell
 
@@ -238,10 +246,14 @@ Design from 320–430 px first. It must work at 200% text zoom without horizonta
 
 ### Player shell
 
-- A 52 px top bar contains the mark, page title, and a menu button for sign-out/account actions.
-- Use a two-item bottom navigation only when both destinations exist: “Today” and “Progress.” Each target is at least 44 × 44 px.
+Superseded by ADR 0022:
+
+- Below 768 px: a 56 px top bar (mark to `/player`, page title except on Home, account menu with profile and sign-out) and a fixed four-tab bottom bar (Home, Practice, Drills, Progress), 64 px plus the safe-area inset, icon over label.
+- 768 to 1023 px: an 88 px left rail with the same four destinations; no bottom bar.
+- 1024 px and wider: a 240 px sidebar with the wordmark, labelled rows, a “Film practice” button, and an account block linking to `/player/profile`.
+- The active destination has `aria-current="page"`, ink 600 text, and a 2 px action bar. Each target is at least 44 × 44 px.
 - Respect safe-area insets.
-- Page gutter is 20 px; section gap is 32 px.
+- Page gutter is 16 px below 375, 20 px to 767, 32 px from 768; section gap is 32 px phone and 40 px desktop.
 - Avoid sticky calls to action that cover video captions or reflection controls.
 
 ### Today / current evidence

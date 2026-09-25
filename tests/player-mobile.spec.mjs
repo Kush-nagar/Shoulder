@@ -381,8 +381,9 @@ test("linked player sees only current clips across phone viewports", async ({
       await page.setViewportSize({ width, height });
       await page.goto("/");
       await expect(page).toHaveURL(`${origin}/player`);
+      // ADR 0022: a plain first name greets the player, else "Welcome to Shoulder."
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-        "Your clips.",
+        /^(Hi, \p{L}[\p{L}'’-]*|Welcome to Shoulder)\.$/u,
       );
       await expect(page.getByText("Scan before receiving")).toBeVisible();
       expect(
@@ -427,6 +428,8 @@ test("linked player sees only current clips across phone viewports", async ({
     const homeHtml = await page.content();
     expect(homeHtml).not.toContain(videoId);
     expect(homeHtml).not.toContain("playback/");
+    // The account menu lives in the phone top bar (below 768 px, ADR 0022).
+    await page.setViewportSize({ width: 375, height: 812 });
     const accountMenu = page.locator('summary[aria-label="Account menu"]');
     await accountMenu.focus();
     await expect(accountMenu).toBeFocused();

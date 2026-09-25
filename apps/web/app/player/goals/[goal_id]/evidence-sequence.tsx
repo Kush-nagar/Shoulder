@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -9,12 +10,13 @@ import type {
   PlayerReflection,
 } from "../../../../lib/api";
 import { ReflectionEditor } from "../../reflection-editor";
+import { backLink } from "../../ui";
 
 type SignedClip = ClipUrl & { judgmentId: string };
 
 const focus =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
-const button = `inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong px-4 text-[16px] font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${focus}`;
+const button = `inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg border border-control-border px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100 ${focus}`;
 
 function sharedDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -258,15 +260,13 @@ export function EvidenceSequence({
   if (!selectedSet || !item) {
     return (
       <section aria-labelledby="goal-title">
-        <Link
-          href="/player"
-          className={`inline-flex min-h-11 items-center text-[16px] underline underline-offset-4 ${focus}`}
-        >
-          Back to your clips
+        <Link href="/player" className={backLink}>
+          <ArrowLeft size={20} strokeWidth={2} aria-hidden="true" />
+          Home
         </Link>
         <h1
           id="goal-title"
-          className="mt-6 text-[26px] font-semibold leading-[1.15]"
+          className="mt-4 font-display text-[28px] leading-[1.05] md:text-[34px]"
         >
           {goalTitle}
         </h1>
@@ -289,145 +289,222 @@ export function EvidenceSequence({
       ? nextSigned
       : null;
 
+  const reflectionBlock = reflectionDataAvailable ? (
+    <ReflectionEditor
+      key={item.judgment_id}
+      playerId={playerId}
+      judgmentId={item.judgment_id}
+      initialReflection={reflection}
+      evidenceAvailable
+      onSkip={() => {
+        if (clipIndex < selectedSet.items.length - 1) {
+          setClipIndex((current) => current + 1);
+        } else {
+          window.location.assign("/player");
+        }
+      }}
+      onChange={(changed) =>
+        setReflections((current) => [
+          ...current.filter((value) => value.judgment_id !== item.judgment_id),
+          ...(changed ? [changed] : []),
+        ])
+      }
+    />
+  ) : (
+    <section
+      aria-label="Your reflection"
+      className="mt-6 rounded-xl border border-line bg-surface p-4"
+    >
+      <p role="alert" className="text-[14px] leading-5 text-muted">
+        Your reflection could not be loaded. You can still watch this clip.
+      </p>
+    </section>
+  );
+
   return (
     <article aria-labelledby="goal-title" aria-busy={loading}>
-      <Link
-        href="/player"
-        className={`inline-flex min-h-11 items-center text-[16px] underline underline-offset-4 ${focus}`}
-      >
-        Back to your clips
+      <Link href="/player" className={backLink}>
+        <ArrowLeft size={20} strokeWidth={2} aria-hidden="true" />
+        Home
       </Link>
-      <header className="mt-4 rounded-[14px] bg-ink px-5 py-5 text-paper">
-        <p className="text-[14px] font-semibold leading-[1.35] text-paper/75">
+      <header className="mt-3">
+        <p className="text-[14px] font-semibold text-muted">
           What you’re working on
         </p>
         <h1
           id="goal-title"
-          className="mt-2 text-[24px] font-semibold leading-[1.2] text-balance"
+          className="mt-1 font-display text-[28px] leading-[1.05] text-balance md:text-[34px]"
         >
           {goalTitle}
         </h1>
       </header>
 
-      <section aria-labelledby="clip-title" className="mt-8">
-        <p className="text-[14px] font-semibold leading-[1.35] text-action">
-          {item.verdict_copy}
-        </p>
-        <h2
-          id="clip-title"
-          className="mt-2 text-[21px] font-semibold leading-[1.25]"
-        >
-          {item.comment}
-        </h2>
-        <div className="relative mt-5 aspect-video overflow-hidden rounded-[14px] bg-ink">
-          {usableSigned ? (
-            // biome-ignore lint/a11y/useMediaCaption: show a verified caption track when one exists; never fabricate one.
-            <video
-              ref={videoRef}
-              key={usableSigned.url}
-              src={usableSigned.url}
-              aria-label={`Clip ${clipIndex + 1} of ${selectedSet.items.length}`}
-              className="size-full bg-ink object-contain"
-              controls
-              playsInline
-              preload="metadata"
-              onLoadedMetadata={restorePlayback}
-              onError={handlePlaybackError}
+      {evidence.length > 1 ? (
+        <nav aria-label="Games" className="mt-5">
+          <ul className="flex flex-wrap gap-2">
+            {evidence.map((set) => {
+              const current = set.publication_id === selectedSet.publication_id;
+              return (
+                <li key={set.publication_id}>
+                  <button
+                    type="button"
+                    aria-pressed={current}
+                    onClick={() => {
+                      setPublicationId(set.publication_id);
+                      setClipIndex(0);
+                    }}
+                    className={`inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] font-semibold transition-colors duration-150 ${focus} ${
+                      current
+                        ? "border-ink bg-ink text-paper"
+                        : "border-control-border text-ink-2 hover:bg-surface-subtle"
+                    }`}
+                  >
+                    {set.game_label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      ) : null}
+
+      <section
+        aria-labelledby="clip-title"
+        className="mt-6 grid gap-6 lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:gap-x-8 lg:gap-y-2"
+      >
+        <div className="min-w-0 lg:col-span-5 lg:col-start-8 lg:row-start-1">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[13px] text-muted tabular-nums">
+            <span>
+              {selectedSet.game_label}, shared{" "}
+              {sharedDate(selectedSet.published_at)}
+            </span>
+            <span aria-live="polite" className="font-semibold text-ink-2">
+              Clip {clipIndex + 1} of {selectedSet.items.length}
+            </span>
+          </div>
+          <p className="mt-4 flex items-center gap-2 text-[15px] font-semibold leading-[1.35] text-action">
+            <span
+              aria-hidden="true"
+              className={`inline-block size-3 rounded-full border-2 border-action ${
+                item.verdict === "applied" ? "bg-action" : ""
+              }`}
             />
-          ) : (
-            <div
-              className="flex size-full items-center justify-center px-5 text-center text-[16px] text-paper"
-              role="status"
-            >
-              {loading ? "Loading clip…" : "Clip unavailable."}
-            </div>
-          )}
+            {item.verdict_copy}
+          </p>
+          <h2
+            id="clip-title"
+            className="mt-2 text-[20px] font-semibold leading-[1.3] md:text-[22px]"
+          >
+            {item.comment}
+          </h2>
+          <p className="mt-2 text-[14px] text-muted">
+            {item.coach_display_name}
+          </p>
         </div>
 
-        {!online ? (
-          <p role="status" className="mt-3 text-[16px] leading-6 text-ink-2">
-            You’re offline. This clip needs a connection.
-          </p>
-        ) : null}
-        {error ? (
-          <div
-            role="alert"
-            className="mt-3 rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
-          >
-            <p>{error}</p>
+        <div className="min-w-0 lg:col-span-7 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+          <div className="relative aspect-video overflow-hidden rounded-[14px] bg-night">
+            {usableSigned ? (
+              // biome-ignore lint/a11y/useMediaCaption: show a verified caption track when one exists; never fabricate one.
+              <video
+                ref={videoRef}
+                key={usableSigned.url}
+                src={usableSigned.url}
+                aria-label={`Clip ${clipIndex + 1} of ${selectedSet.items.length}`}
+                className="size-full bg-night object-contain"
+                controls
+                playsInline
+                preload="metadata"
+                onLoadedMetadata={restorePlayback}
+                onError={handlePlaybackError}
+              />
+            ) : (
+              <div
+                className="flex size-full items-center justify-center px-5 text-center text-[16px] text-on-night"
+                role="status"
+              >
+                {loading ? "Loading clip…" : "Clip unavailable."}
+              </div>
+            )}
+          </div>
+
+          {!online ? (
+            <p role="status" className="mt-3 text-[16px] leading-6 text-ink-2">
+              You’re offline. This clip needs a connection.
+            </p>
+          ) : null}
+          {error ? (
+            <div
+              role="alert"
+              className="mt-3 rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
+            >
+              <p>{error}</p>
+              <button
+                type="button"
+                onClick={() => void refreshWholeSet()}
+                className={`mt-2 min-h-11 font-semibold underline underline-offset-4 ${focus}`}
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+
+          <nav aria-label="Clip navigation" className="mt-4 flex gap-3">
             <button
               type="button"
-              onClick={() => void refreshWholeSet()}
-              className={`mt-2 min-h-11 font-semibold underline underline-offset-4 ${focus}`}
+              className={`${button} flex-1`}
+              disabled={clipIndex === 0}
+              onClick={() => setClipIndex((current) => current - 1)}
             >
-              Try again
+              <ChevronLeft size={20} strokeWidth={2} aria-hidden="true" />
+              Previous
             </button>
-          </div>
-        ) : null}
+            <button
+              type="button"
+              className={`${button} flex-1 border-action bg-action text-on-action hover:bg-action-hover`}
+              disabled={clipIndex === selectedSet.items.length - 1}
+              onClick={() => setClipIndex((current) => current + 1)}
+            >
+              Next
+              <ChevronRight size={20} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </nav>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted tabular-nums">
-          <span>
-            {selectedSet.game_label} · Shared{" "}
-            {sharedDate(selectedSet.published_at)}
-          </span>
-          <span aria-live="polite" className="font-semibold text-ink-2">
-            Clip {clipIndex + 1} of {selectedSet.items.length}
-          </span>
+          {selectedSet.items.length > 1 ? (
+            <ol
+              aria-label="Clips in this game"
+              className="mt-3 flex flex-wrap gap-1"
+            >
+              {selectedSet.items.map((clip, index) => (
+                <li key={clip.judgment_id}>
+                  <button
+                    type="button"
+                    aria-current={index === clipIndex ? "true" : undefined}
+                    aria-label={`Clip ${index + 1}, ${clip.verdict_copy}`}
+                    onClick={() => setClipIndex(index)}
+                    className={`flex size-11 flex-col items-center justify-center gap-1 rounded-lg text-[13px] font-semibold tabular-nums transition-colors duration-150 ${focus} ${
+                      index === clipIndex
+                        ? "bg-surface-subtle text-ink"
+                        : "text-muted hover:bg-surface-subtle"
+                    }`}
+                  >
+                    {index + 1}
+                    <span
+                      aria-hidden="true"
+                      className={`size-2 rounded-full border-[1.5px] border-action ${
+                        clip.verdict === "applied" ? "bg-action" : ""
+                      }`}
+                    />
+                  </button>
+                </li>
+              ))}
+            </ol>
+          ) : null}
         </div>
 
-        {reflectionDataAvailable ? (
-          <ReflectionEditor
-            key={item.judgment_id}
-            playerId={playerId}
-            judgmentId={item.judgment_id}
-            initialReflection={reflection}
-            evidenceAvailable
-            onSkip={() => {
-              if (clipIndex < selectedSet.items.length - 1) {
-                setClipIndex((current) => current + 1);
-              } else {
-                window.location.assign("/player");
-              }
-            }}
-            onChange={(changed) =>
-              setReflections((current) => [
-                ...current.filter(
-                  (value) => value.judgment_id !== item.judgment_id,
-                ),
-                ...(changed ? [changed] : []),
-              ])
-            }
-          />
-        ) : (
-          <section
-            aria-label="Your reflection"
-            className="mt-6 rounded-[14px] border border-line bg-surface p-4"
-          >
-            <p role="alert" className="text-[14px] leading-5 text-muted">
-              Your reflection could not be loaded. You can still watch this
-              clip.
-            </p>
-          </section>
-        )}
-
-        <nav aria-label="Clip navigation" className="mt-5 flex gap-3">
-          <button
-            type="button"
-            className={`${button} flex-1`}
-            disabled={clipIndex === 0}
-            onClick={() => setClipIndex((current) => current - 1)}
-          >
-            Previous
-          </button>
-          <button
-            type="button"
-            className={`${button} flex-1 bg-action text-white hover:bg-action-hover`}
-            disabled={clipIndex === selectedSet.items.length - 1}
-            onClick={() => setClipIndex((current) => current + 1)}
-          >
-            Next
-          </button>
-        </nav>
+        <div className="min-w-0 lg:col-span-5 lg:col-start-8 lg:row-start-2">
+          {reflectionBlock}
+        </div>
 
         {usableNext ? (
           <video

@@ -70,6 +70,7 @@ Inter Tight is the interface and editorial family. It has compact proportions wi
 
 - Wordmark: custom vector artwork only.
 - Product UI: Inter Tight.
+- Player display titles (ADR 0022): Archivo, condensed (`font-stretch: 75%`, weight 600), self-hosted from `@fontsource-variable/archivo`. Only for player page titles, the goal hero title, and drill cover titles; never for body, labels, or the wordmark.
 - Timecodes and dense identifiers: Inter Tight with tabular numerals.
 - Long technical/code examples in internal docs only: a system monospace stack.
 - Maximum visible weight: 600. Avoid black/extrabold display text.
