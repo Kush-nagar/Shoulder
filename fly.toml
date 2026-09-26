@@ -1,6 +1,6 @@
 # Shoulder API (demo). Secrets are set with `fly secrets set`, never here.
 app = "shoulder-api-demo"
-primary_region = "ord"
+primary_region = "iad"
 
 [build]
   dockerfile = "infra/api.Dockerfile"
