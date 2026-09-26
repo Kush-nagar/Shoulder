@@ -117,7 +117,7 @@ export function SidebarToggle({
           tabIndex={-1}
           aria-hidden="true"
           onClick={() => setRailOpen(false)}
-          className="fixed inset-0 -z-10 cursor-default bg-ink/30 lg:hidden"
+          className="fixed inset-0 -z-10 cursor-default bg-scrim lg:hidden"
         />
       ) : null}
       <button
@@ -245,9 +245,9 @@ export function AccountSheet({
           tabIndex={-1}
           aria-hidden="true"
           onClick={() => close(true)}
-          className="sh-sheet-scrim fixed inset-0 z-40 cursor-default bg-ink/40"
+          className="sh-sheet-scrim fixed inset-0 z-40 cursor-default bg-scrim"
         />
-        <div className="sh-sheet-panel fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-surface px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-[0_-16px_48px_rgba(23,21,18,.18)]">
+        <div className="sh-sheet-panel fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-popover px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-pop">
           <span
             aria-hidden="true"
             className="mx-auto mb-2 block h-1 w-10 rounded-full bg-line-strong"

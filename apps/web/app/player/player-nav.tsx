@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SideLink } from "../../components/side-link";
 
 const tabs = [
   {
@@ -69,7 +70,7 @@ export function BottomTabs() {
   return (
     <nav
       aria-label="Player navigation"
-      className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
+      className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-rail pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul className="grid h-16 grid-cols-5 px-0.5">
         {tabs.map(({ href, label, Icon, match }) => {
@@ -79,7 +80,7 @@ export function BottomTabs() {
               <Link
                 href={href}
                 aria-current={current ? "page" : undefined}
-                className={`group relative flex h-full flex-col items-center justify-center gap-1 rounded-lg text-[12px] leading-none transition-colors duration-150 ease-out ${ring} ${
+                className={`group relative flex h-full flex-col items-center justify-center gap-1 rounded-lg text-[11px] leading-none transition-colors duration-140 ease-out ${ring} ${
                   current
                     ? "font-semibold text-ink"
                     : "font-medium text-muted hover:text-ink"
@@ -89,14 +90,14 @@ export function BottomTabs() {
                   <span
                     aria-hidden="true"
                     style={{ viewTransitionName: "sh-tab-marker" }}
-                    className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-action"
+                    className="absolute inset-x-5 top-0 h-0.5 rounded-b-sm bg-signal"
                   />
                 ) : null}
                 <Icon
                   size={22}
-                  strokeWidth={current ? 2.25 : 2}
+                  strokeWidth={current ? 2.25 : 1.75}
                   aria-hidden="true"
-                  className="transition-transform duration-150 ease-out group-active:scale-90"
+                  className={`transition-transform duration-140 ease-out group-active:scale-90 ${current ? "text-signal" : ""}`}
                 />
                 {label}
               </Link>
@@ -108,49 +109,22 @@ export function BottomTabs() {
   );
 }
 
-const tip =
-  "sh-sb-tip rounded-md bg-ink px-2.5 py-1.5 text-[13px] font-medium leading-none text-paper shadow-[0_4px_16px_rgba(23,21,18,.18)]";
-
 /** Icon rail with tooltips that opens into the labelled desktop sidebar. */
 export function SideNav() {
   const path = usePathname();
   return (
     <nav aria-label="Player navigation">
-      <ul className="space-y-1 px-3">
-        {sideTabs.map(({ href, label, Icon, match }) => {
-          const current = match(path);
-          return (
-            <li key={href}>
-              <Link
-                href={href}
-                aria-current={current ? "page" : undefined}
-                className={`sh-sb-row group relative flex h-11 items-center justify-center gap-3 rounded-lg text-[15px] transition-colors duration-150 ease-out ${ring} ${
-                  current
-                    ? "bg-surface-subtle font-semibold text-ink"
-                    : "font-medium text-ink-2 hover:bg-surface-subtle hover:text-ink"
-                }`}
-              >
-                {current ? (
-                  <span
-                    aria-hidden="true"
-                    style={{ viewTransitionName: "sh-nav-marker" }}
-                    className="absolute inset-y-2.5 -left-3 w-[3px] rounded-r-full bg-action"
-                  />
-                ) : null}
-                <Icon
-                  size={21}
-                  strokeWidth={current ? 2.25 : 2}
-                  aria-hidden="true"
-                  className="shrink-0 transition-transform duration-150 ease-out group-hover:scale-105 group-active:scale-95"
-                />
-                <span className="sh-sb-label">{label}</span>
-                <span aria-hidden="true" className={tip}>
-                  {label}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
+      <ul className="space-y-0.5 px-2.5">
+        {sideTabs.map(({ href, label, Icon, match }) => (
+          <li key={href}>
+            <SideLink
+              href={href}
+              label={label}
+              Icon={Icon}
+              current={match(path)}
+            />
+          </li>
+        ))}
       </ul>
     </nav>
   );

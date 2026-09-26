@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { sectionTitle } from "./ui";
 
-/** Section title led by a brand-coloured icon (ADR 0024). */
+/** Section title led by a quiet icon (ADR 0024, 0026). */
 export function SectionHeading({
   id,
   Icon,
@@ -23,7 +23,7 @@ export function SectionHeading({
         size={20}
         strokeWidth={2}
         aria-hidden="true"
-        className="shrink-0 text-brand"
+        className="shrink-0 text-muted"
       />
       {children}
     </h2>

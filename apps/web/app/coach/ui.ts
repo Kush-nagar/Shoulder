@@ -1,38 +1,54 @@
-// Shared class strings and the shared form-action result. Only the semantic
-// tokens defined in globals.css are used (ADR 0022 palette, light only on
-// coach pages); no arbitrary hex value is introduced here or in any coach
-// component.
+// Shared coach class strings (ADR 0026). Only the semantic tokens defined in
+// globals.css are used; no arbitrary hex value is introduced here or in any
+// coach component. Coach pages are dense desktop tools: 36 px controls,
+// 13 to 15 px UI type, mono for match data.
 
 /** Result of a coach form action: one plain sentence plus a success flag. */
 export type ActionState = { message: string; ok?: boolean };
 
 export const focus =
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export const primary = `inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-action px-4 text-[15px] font-semibold text-on-action transition-[background-color,transform] duration-140 hover:bg-action-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100 ${focus}`;
+/** Focus ring drawn inside the element, for rows in clipped panels. */
+export const focusInset =
+  "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
-export const secondary = `inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-control-border bg-surface px-4 text-[15px] font-semibold text-ink transition-colors duration-140 hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-45 ${focus}`;
+const press =
+  "transition-[background-color,border-color,color,transform] duration-140 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100";
 
-export const tertiary = `rounded-sm text-[15px] text-ink underline decoration-line-strong underline-offset-2 hover:text-action hover:decoration-action ${focus}`;
+export const primary = `inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-3.5 text-[14px] font-semibold text-on-action hover:bg-action-hover ${press} ${focus}`;
+
+export const secondary = `inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line-strong bg-surface-subtle px-3.5 text-[14px] font-medium text-ink hover:border-control-border hover:bg-popover ${press} ${focus}`;
+
+/** Icon-only control; pair with an accessible name and an `.sh-tip`. */
+export const iconButton = `relative inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-2 hover:bg-surface-subtle hover:text-ink ${press} ${focus}`;
+
+export const tertiary = `rounded-sm text-[14px] text-ink underline decoration-line-strong underline-offset-4 hover:decoration-signal ${focus}`;
 
 /** Destructive controls read as destructive in words, never by color alone. */
-export const destructive = `rounded-sm text-[15px] font-medium text-ink underline decoration-dotted underline-offset-2 hover:text-error ${focus}`;
+export const destructive = `rounded-sm text-[14px] font-medium text-ink-2 underline decoration-dotted underline-offset-4 hover:text-error ${focus}`;
 
-export const field = `h-10 w-full rounded-lg border border-control-border bg-surface px-3 text-[15px] text-ink placeholder:text-muted hover:border-ink-2 ${focus}`;
+export const field = `h-9 w-full rounded-md border border-control-border bg-surface px-3 text-[14px] text-ink placeholder:text-muted hover:border-ink-2 ${focus}`;
 
-export const label = "block text-[13px] font-semibold leading-[1.35] text-ink";
+export const label = "block text-[13px] font-medium leading-[1.35] text-ink";
 
 export const metadata = "text-[13px] leading-[1.4] text-muted";
+
+/** Match data: timestamps, halves, shirt numbers (Geist Mono). */
+export const data = "font-mono text-[12px] leading-4 text-muted";
 
 export const panel = "rounded-xl border border-line bg-surface";
 
 export const pageTitle =
-  "font-display text-[30px] leading-[1.05] text-balance md:text-[36px]";
+  "font-display text-[26px] leading-[1.05] text-balance md:text-[30px]";
 
-export const sectionTitle = "text-[22px] font-semibold leading-[1.25]";
+export const sectionTitle = "text-[16px] font-semibold leading-[1.3]";
 
-export const componentTitle = "text-[17px] font-semibold leading-[1.35]";
+export const componentTitle = "text-[15px] font-semibold leading-[1.35]";
 
-/** The one approved floating-dialog shadow from the design system. */
+/** Dense list row: hover lifts contrast, never adds a shadow. */
+export const row = `flex min-h-11 items-center gap-4 px-4 py-2 transition-colors duration-140 hover:bg-surface-subtle ${focusInset}`;
+
+/** The one approved floating-dialog treatment. */
 export const dialog =
-  "w-[min(560px,calc(100vw-2.5rem))] rounded-xl border border-line bg-surface p-0 text-ink shadow-[0_16px_48px_rgba(23,21,18,0.14)] backdrop:bg-ink/40";
+  "sh-dialog w-[min(520px,calc(100vw-2.5rem))] rounded-2xl border-0 bg-popover p-0 text-ink shadow-pop backdrop:bg-scrim";
