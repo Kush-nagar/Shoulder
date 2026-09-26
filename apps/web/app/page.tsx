@@ -16,10 +16,11 @@ export const metadata: Metadata = {
 
 export default async function Home() {
   const store = await cookies();
-  // Proxy owns refresh writes before this read-only server component.
-  const client = createAuthClient({ getAll: () => store.getAll() });
   let token: string | null = null;
   try {
+    // Proxy owns refresh writes before this read-only server component. Auth
+    // misconfiguration must not take down the public homepage.
+    const client = createAuthClient({ getAll: () => store.getAll() });
     token = await verifiedToken(client);
   } catch {
     token = null;
