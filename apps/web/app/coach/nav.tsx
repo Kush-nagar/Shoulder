@@ -75,7 +75,7 @@ export function CoachNav({ variant }: { variant: "side" | "bar" }) {
         ))}
       </ul>
       <div className="mt-3 border-t border-line pt-3">
-        <p className="sh-sb-wide px-2.5 pb-1.5 text-[12px] text-muted">
+        <p className="sh-sb-label block px-2.5 pb-1.5 text-[12px] text-muted">
           Match footage
         </p>
         <ul className="space-y-0.5">

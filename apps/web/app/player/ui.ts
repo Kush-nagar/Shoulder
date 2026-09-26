@@ -4,12 +4,15 @@ export const focus =
   "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 const press =
-  "transition-[background-color,border-color,color,transform] duration-140 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100";
+  "transition-[background-color,border-color,color,transform] duration-140 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:active:scale-100";
 
-/** Signal lime in dark, ink in light: the one "do this next" per screen. */
-export const primaryButton = `inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-5 text-[15px] font-semibold text-on-action hover:bg-action-hover ${press} ${focus}`;
+/**
+ * Signal lime in dark, ink in light: the one "do this next" per screen.
+ * Disabled goes neutral, since dimmed lime reads as olive.
+ */
+export const primaryButton = `inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-5 text-[15px] font-semibold text-on-action hover:bg-action-hover ${press} disabled:bg-surface-subtle disabled:text-muted ${focus}`;
 
-export const secondaryButton = `inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line-strong bg-surface-subtle px-4 text-[15px] font-medium text-ink hover:border-control-border hover:bg-popover ${press} ${focus}`;
+export const secondaryButton = `inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line-strong bg-surface-subtle px-4 text-[15px] font-medium text-ink hover:border-control-border hover:bg-popover ${press} disabled:opacity-40 ${focus}`;
 
 export const textLink = `sh-nudge inline-flex min-h-11 items-center gap-1 rounded-md text-[15px] font-medium text-ink underline decoration-line-strong decoration-1 underline-offset-4 hover:decoration-signal ${focus}`;
 

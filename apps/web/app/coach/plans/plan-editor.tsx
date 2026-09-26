@@ -63,7 +63,7 @@ export function PlanEditor({
   return (
     <form action={submit} className="space-y-5">
       {plan ? <input type="hidden" name="plan_id" value={plan.id} /> : null}
-      <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1.6fr)_minmax(9.5rem,1fr)_minmax(0,1.2fr)]">
         <div>
           <label htmlFor={`${id}-title`} className={label}>
             Title (required)

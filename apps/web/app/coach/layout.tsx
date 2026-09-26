@@ -28,7 +28,7 @@ async function TeamLabel({
   // A landmark, not a bare paragraph: below the labelled sidebar this is the
   // only place the current team and season appear.
   return variant === "side" ? (
-    <div className="sh-sb-wide px-2.5 pt-1 pb-3">
+    <div className="sh-sb-label px-2.5 pt-1 pb-3">
       <p className="truncate text-[13px] font-medium text-ink">{team.name}</p>
       <p className="truncate text-[12px] text-muted">{team.season_label}</p>
     </div>

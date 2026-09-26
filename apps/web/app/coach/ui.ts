@@ -14,14 +14,12 @@ export const focusInset =
   "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
 const press =
-  "transition-[background-color,border-color,color,transform] duration-140 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100";
+  "transition-[background-color,border-color,color,transform] duration-140 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:active:scale-100";
 
-export const primary = `inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-3.5 text-[14px] font-semibold text-on-action hover:bg-action-hover ${press} ${focus}`;
+/** Disabled primaries go neutral: a dimmed lime reads as olive, not "off". */
+export const primary = `inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-3.5 text-[14px] font-semibold text-on-action hover:bg-action-hover ${press} disabled:bg-surface-subtle disabled:text-muted ${focus}`;
 
-export const secondary = `inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line-strong bg-surface-subtle px-3.5 text-[14px] font-medium text-ink hover:border-control-border hover:bg-popover ${press} ${focus}`;
-
-/** Icon-only control; pair with an accessible name and an `.sh-tip`. */
-export const iconButton = `relative inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-2 hover:bg-surface-subtle hover:text-ink ${press} ${focus}`;
+export const secondary = `inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line-strong bg-surface-subtle px-3.5 text-[14px] font-medium text-ink hover:border-control-border hover:bg-popover ${press} disabled:opacity-40 ${focus}`;
 
 export const tertiary = `rounded-sm text-[14px] text-ink underline decoration-line-strong underline-offset-4 hover:decoration-signal ${focus}`;
 
