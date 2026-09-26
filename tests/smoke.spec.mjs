@@ -98,3 +98,52 @@ test("local health, approved vectors, self-hosted font, and accessible shell", a
   );
   expect(errors).toEqual([]);
 });
+
+test("public soccer homepage works across widths and reduced motion", async ({
+  page,
+}) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  for (const [width, height] of [
+    [390, 844],
+    [768, 1024],
+    [1440, 900],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "SEE THE GAME TAKE SHAPE.",
+    );
+    await expect(
+      page.getByRole("link", { name: /Open Shoulder/ }).first(),
+    ).toHaveAttribute("href", "/auth/sign-in");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".mk-mobile-menu summary").click();
+  await expect(
+    page.getByRole("navigation", { name: "Mobile navigation" }),
+  ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Mobile navigation" })
+    .getByRole("link", { name: "Product" })
+    .click();
+  await expect(
+    page.getByRole("navigation", { name: "Mobile navigation" }),
+  ).toBeHidden();
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  expect(
+    await page
+      .locator(".mk-route-one")
+      .evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe("none");
+  expect(errors).toEqual([]);
+});

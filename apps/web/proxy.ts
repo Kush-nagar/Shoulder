@@ -3,7 +3,14 @@ import { authError, routeAuth } from "./lib/auth/route";
 import { verifiedToken } from "./lib/auth/server";
 
 export async function proxy(request: NextRequest) {
-  const auth = routeAuth(request);
+  let auth: ReturnType<typeof routeAuth>;
+  try {
+    auth = routeAuth(request);
+  } catch {
+    // Auth is not configured (e.g. the CI smoke server): no session can exist,
+    // so there is nothing to refresh. Pages still enforce their own access.
+    return NextResponse.next();
+  }
   try {
     const token = await verifiedToken(auth.client);
     if (!token) auth.clear();
