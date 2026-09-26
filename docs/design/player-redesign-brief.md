@@ -503,3 +503,30 @@ Rules kept: one accent, no gradients for decoration, no emoji, no badges,
 streaks, nudges or scores. Changed from section 3.5: skeleton shimmer is the
 single allowed loop (loading placeholders only), and rail items may be
 icon-only when they carry an accessible name and a tooltip.
+
+---
+
+## Coach marketplace, 2026-09-26
+
+Visual pass on the Block 10M pilot screens (`/coaching/**`, `/admin/coaches/**`)
+in the ADR 0022/0024 system: same tokens, Archivo for names and titles, lucide
+icons, skeletons, motion behind `prefers-reduced-motion`, both themes. No
+photos of people and no external images: coaches get an initials tile.
+Patterns adopted:
+
+| # | Pattern | Where it lands | Source |
+|---|---|---|---|
+| 1 | Day and time chosen on one screen, not a multi-step wizard | Coach page booking panel: day strip, then that day's times, then summary | https://calendly.com/blog/new-scheduling-page-ui |
+| 2 | Column view that hides days with no open times | Day strip lists only days that have open slots; each tile is weekday, date, month | https://cal.com/blog/v-3-3 , https://cal.com/blog/enhanced-flexibility-take-advantage-of-cal-com-s-multiple-booking-layouts |
+| 3 | Sticky reservation card on desktop that becomes a sticky bottom bar on phones, with the price and one action | Booking panel sticks beside the profile from 1024 px; below it the price, chosen time and "Book and pay" pin to the bottom (above the phone tabs) | https://getdesign.md/design-md/airbnb/preview |
+| 4 | Fee breakdown beside the pay button, before checkout | "No booking fee for you. The coach receives $X after Shoulder's 10%." and the exact refund deadline for the chosen time | https://www.airbnb.com/help/article/3640 |
+| 5 | A verification badge on the profile once the team has checked documents | "Background check verified" pill on every card and profile hero | https://www.superprof.ca/blog/private-tutors-guarantees/ |
+| 6 | Upcoming vs past bookings as separate tabs; the cancellation window stated up front | Bookings page tabs with counts; cancel opens an inline refund preview that defaults focus to "Keep it" | https://help.classpass.com/hc/en-us/articles/26002263289741-How-do-I-know-if-my-booking-cancellation-processed , https://blog.classpass.com/how-the-classpass-late-cancellation-policy-works/ |
+| 7 | Skeletons shaped like the final cards, sharing one moving gradient; empty states that say what to do next | New `loading.tsx` for browse, coach and bookings; empty filter result offers "Clear filters" | https://carbondesignsystem.com/patterns/loading-pattern/ |
+| 8 | One quiet search bar plus a horizontally scrollable row of pill filters | Browse filter bar: city field and specialty pills (scroll on phones, wrap on desktop); results counted and marked "In no particular order" | https://superdesign.dev/blog/airbnb-design-system , https://github.com/kwakseongjae/oh-my-design/blob/main/design-md/airbnb/DESIGN.md |
+
+Rules kept: no ratings, rankings or "top coach" surfaces (ADR 0023), one
+accent, no stock photos. Demo profiles (bio starts "Demo coach profile.") show
+a dashed "Demo" tag instead of the "(demo)" name suffix. When Stripe is not
+configured the booking API answers 503 `payments-unavailable` and the panel
+shows "Booking opens soon — payments are being set up." instead of an error.
