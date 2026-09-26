@@ -134,6 +134,7 @@ test("font manifest pins and distributed licenses match the installed packages",
   for (const [name, license] of [
     ["inter-tight", "inter-tight-OFL.txt"],
     ["archivo", "archivo-OFL.txt"],
+    ["geist-mono", "geist-mono-OFL.txt"],
   ]) {
     const root = `apps/web/node_modules/@fontsource-variable/${name}`;
     const installed = JSON.parse(readFileSync(`${root}/package.json`, "utf8"));

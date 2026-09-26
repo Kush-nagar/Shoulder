@@ -1,90 +1,143 @@
 @import "tailwindcss";
 
-/* Values and contrast baselines: docs/09-frontend-design-system.md. */
+/*
+ * Tokens (ADR 0026, docs/09-frontend-design-system.md). The authenticated app
+ * is designed dark first: floodlit pitch at night, chalk-white type, one
+ * signal-lime accent that means "look here". Components use the semantic
+ * Tailwind names below, never raw hex.
+ *
+ * `:root` holds the warm-light values so unthemed pages (root not-found)
+ * render sanely. Every app shell carries `.sh-themed`; it is dark unless the
+ * viewer chose Light, or chose System on a light-mode device.
+ */
 :root {
-  --sh-paper: #faf9f7;
-  --sh-surface: #ffffff;
-  --sh-surface-subtle: #f3f0ec;
-  --sh-ink: #171512;
-  --sh-ink-2: #4e4944;
-  --sh-muted: #6b6560;
-  --sh-line: #e5e2de;
-  --sh-line-strong: #cfc9c2;
-  --sh-control-border: #8a837b;
-  --sh-brand: #c4633d;
-  --sh-action: #9e472c;
-  --sh-action-hover: #843a24;
-  --sh-action-soft: #f4e4dd;
-  --sh-on-action: #ffffff;
-  --sh-focus: #7c341f;
-  --sh-error: #9b2c2c;
-  --sh-error-soft: #f9e8e6;
-  /* Night surfaces: the video stage and the goal hero only (ADR 0022). */
-  --sh-night: #171512;
-  --sh-on-night: #faf9f7;
-  --sh-night-muted: #b9b2a9;
-  --sh-action-on-night: #e58b66;
-  --sh-night-line: #3a3530;
+  --sh-paper: #f2f0e9;
+  --sh-rail: #ebe8df;
+  --sh-surface: #f8f7f2;
+  --sh-surface-subtle: #e9e6dd;
+  --sh-popover: #fdfcf8;
+  --sh-ink: #11110f;
+  --sh-ink-2: #45433e;
+  --sh-muted: #68665f;
+  --sh-line: rgba(17, 17, 15, 0.1);
+  --sh-line-strong: rgba(17, 17, 15, 0.18);
+  --sh-control-border: #8c897f;
+  --sh-brand: #11110f;
+  --sh-signal: #11110f;
+  --sh-signal-soft: #e8f3a8;
+  --sh-on-signal: #11110f;
+  --sh-action: #11110f;
+  --sh-action-hover: #2b2a26;
+  --sh-action-soft: #e8f3a8;
+  --sh-on-action: #f8f7f2;
+  --sh-focus: #11110f;
+  --sh-error: #b42318;
+  --sh-error-soft: #f8e3df;
+  --sh-warning: #7a5412;
+  --sh-warning-soft: #f4e8c8;
+  --sh-coral: #c2410c;
+  --sh-shadow: rgba(17, 17, 15, 0.16);
+  --sh-scrim: rgba(17, 17, 15, 0.4);
+  /* Night: the video stage, in both themes. */
+  --sh-night: #070706;
+  --sh-on-night: #f5f5f0;
+  --sh-night-muted: #a4a198;
+  --sh-action-on-night: #dfff3f;
+  --sh-night-line: rgba(255, 255, 255, 0.1);
   color-scheme: light;
 }
 
-/*
- * Reviewed dark palette (ADR 0022), not an inversion. Scoped to pages that
- * opt in with `.sh-themed` (player routes and sign-in); coach pages stay light
- * until they are reviewed for it.
- */
-@media (prefers-color-scheme: dark) {
-  :root:has(.sh-themed):not(:has(.sh-themed[data-theme="light"])) {
-    --sh-paper: #141311;
-    --sh-surface: #1d1b18;
-    --sh-surface-subtle: #26231f;
-    --sh-ink: #f2efea;
-    --sh-ink-2: #cdc7bf;
-    --sh-muted: #a29a91;
-    --sh-line: #2f2b27;
-    --sh-line-strong: #45403a;
-    --sh-control-border: #7a736b;
-    --sh-brand: #c4633d;
-    --sh-action: #e58b66;
-    --sh-action-hover: #f0a585;
-    --sh-action-soft: #3a2219;
-    --sh-on-action: #141311;
-    --sh-focus: #f0a585;
-    --sh-error: #f08a80;
-    --sh-error-soft: #2a1716;
-    --sh-night: #0c0b0a;
-    --sh-night-line: #2f2b27;
-    color-scheme: dark;
+:root:has(.sh-themed:not([data-theme="light"])) {
+  --sh-paper: #0a0a09;
+  --sh-rail: #0e0e0c;
+  --sh-surface: #11110f;
+  --sh-surface-subtle: #171714;
+  --sh-popover: #1d1d19;
+  --sh-ink: #f5f5f0;
+  --sh-ink-2: #a4a198;
+  /* 5.0:1 on panel, 4.7:1 on popover; the brief's #77756F measured 4.1. */
+  --sh-muted: #8a877f;
+  --sh-line: rgba(255, 255, 255, 0.08);
+  --sh-line-strong: rgba(255, 255, 255, 0.12);
+  /* 3.2:1 against the panel for input boundaries (WCAG 1.4.11). */
+  --sh-control-border: #66635c;
+  --sh-brand: #dfff3f;
+  --sh-signal: #dfff3f;
+  --sh-signal-soft: rgba(223, 255, 63, 0.08);
+  --sh-on-signal: #0a0a09;
+  --sh-action: #dfff3f;
+  --sh-action-hover: #ebff85;
+  --sh-action-soft: rgba(223, 255, 63, 0.08);
+  --sh-on-action: #0a0a09;
+  --sh-focus: #dfff3f;
+  --sh-error: #ff6262;
+  --sh-error-soft: rgba(255, 98, 98, 0.1);
+  --sh-warning: #f4c95d;
+  --sh-warning-soft: rgba(244, 201, 93, 0.1);
+  --sh-coral: #ff805c;
+  --sh-shadow: rgba(0, 0, 0, 0.55);
+  --sh-scrim: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+/* "System" on a light-mode device: the warm-light values again. */
+@media (prefers-color-scheme: light) {
+  :root:has(.sh-themed[data-theme="system"]) {
+    --sh-paper: #f2f0e9;
+    --sh-rail: #ebe8df;
+    --sh-surface: #f8f7f2;
+    --sh-surface-subtle: #e9e6dd;
+    --sh-popover: #fdfcf8;
+    --sh-ink: #11110f;
+    --sh-ink-2: #45433e;
+    --sh-muted: #68665f;
+    --sh-line: rgba(17, 17, 15, 0.1);
+    --sh-line-strong: rgba(17, 17, 15, 0.18);
+    --sh-control-border: #8c897f;
+    --sh-brand: #11110f;
+    --sh-signal: #11110f;
+    --sh-signal-soft: #e8f3a8;
+    --sh-on-signal: #11110f;
+    --sh-action: #11110f;
+    --sh-action-hover: #2b2a26;
+    --sh-action-soft: #e8f3a8;
+    --sh-on-action: #f8f7f2;
+    --sh-focus: #11110f;
+    --sh-error: #b42318;
+    --sh-error-soft: #f8e3df;
+    --sh-warning: #7a5412;
+    --sh-warning-soft: #f4e8c8;
+    --sh-coral: #c2410c;
+    --sh-shadow: rgba(17, 17, 15, 0.16);
+    --sh-scrim: rgba(17, 17, 15, 0.4);
+    color-scheme: light;
   }
 }
 
-:root:has(.sh-themed[data-theme="dark"]) {
-  --sh-paper: #141311;
-  --sh-surface: #1d1b18;
-  --sh-surface-subtle: #26231f;
-  --sh-ink: #f2efea;
-  --sh-ink-2: #cdc7bf;
-  --sh-muted: #a29a91;
-  --sh-line: #2f2b27;
-  --sh-line-strong: #45403a;
-  --sh-control-border: #7a736b;
-  --sh-brand: #c4633d;
-  --sh-action: #e58b66;
-  --sh-action-hover: #f0a585;
-  --sh-action-soft: #3a2219;
-  --sh-on-action: #141311;
-  --sh-focus: #f0a585;
-  --sh-error: #f08a80;
-  --sh-error-soft: #2a1716;
-  --sh-night: #0c0b0a;
-  --sh-night-line: #2f2b27;
-  color-scheme: dark;
+:root {
+  /* Motion (ADR 0026): entries ease out, exits leave faster. */
+  --sh-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --sh-ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --sh-dur-press: 100ms;
+  --sh-dur-hover: 140ms;
+  --sh-dur-micro: 160ms;
+  --sh-dur-menu: 170ms;
+  --sh-dur-sidebar: 210ms;
+  --sh-dur-modal: 220ms;
+  --sh-dur-panel: 240ms;
+  --sh-dur-page: 280ms;
+  /* Layers: shell chrome, tooltips/overlays, sheets and dialogs. */
+  --sh-z-shell: 30;
+  --sh-z-overlay: 40;
+  --sh-z-sheet: 50;
 }
 
 @theme inline {
   --color-paper: var(--sh-paper);
+  --color-rail: var(--sh-rail);
   --color-surface: var(--sh-surface);
   --color-surface-subtle: var(--sh-surface-subtle);
+  --color-popover: var(--sh-popover);
   --color-ink: var(--sh-ink);
   --color-ink-2: var(--sh-ink-2);
   --color-muted: var(--sh-muted);
@@ -92,6 +145,9 @@
   --color-line-strong: var(--sh-line-strong);
   --color-control-border: var(--sh-control-border);
   --color-brand: var(--sh-brand);
+  --color-signal: var(--sh-signal);
+  --color-signal-soft: var(--sh-signal-soft);
+  --color-on-signal: var(--sh-on-signal);
   --color-action: var(--sh-action);
   --color-action-hover: var(--sh-action-hover);
   --color-action-soft: var(--sh-action-soft);
@@ -99,14 +155,28 @@
   --color-focus: var(--sh-focus);
   --color-error: var(--sh-error);
   --color-error-soft: var(--sh-error-soft);
+  --color-warning: var(--sh-warning);
+  --color-warning-soft: var(--sh-warning-soft);
+  --color-coral: var(--sh-coral);
+  --color-scrim: var(--sh-scrim);
   --color-night: var(--sh-night);
   --color-on-night: var(--sh-on-night);
   --color-night-muted: var(--sh-night-muted);
   --color-action-on-night: var(--sh-action-on-night);
   --color-night-line: var(--sh-night-line);
+  --color-lime: #dfff3f;
   --font-sans: var(--font-inter-tight), Arial, sans-serif;
   --font-display:
     var(--font-archivo), var(--font-inter-tight), Arial, sans-serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+  /* Precise, not soft: controls 6, buttons 8, panels 10, media 12. */
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --shadow-pop:
+    0 0 0 1px var(--sh-line-strong), 0 18px 48px -12px var(--sh-shadow);
 }
 
 body {
@@ -114,6 +184,7 @@ body {
   background: var(--sh-paper);
   color: var(--sh-ink);
   font-family: var(--font-inter-tight), Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Condensed matchday voice: page titles, goal hero, drill covers only. */
@@ -123,47 +194,42 @@ body {
   letter-spacing: -0.005em;
 }
 
+/* Match data: timestamps, 1H/2H, shirt numbers, counts (ADR 0026). */
+.font-mono {
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: 0;
+}
+
 ::selection {
-  background: var(--sh-action-soft);
-  color: var(--sh-ink);
+  background: var(--sh-signal);
+  color: var(--sh-on-signal);
 }
 
-/* ---- Motion (ADR 0024). Every rule below sits behind no-preference. ---- */
-:root {
-  --sh-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --sh-ease-in: cubic-bezier(0.4, 0, 1, 1);
-}
-
+/* ---- Motion (ADR 0024, 0026). Every rule below sits behind no-preference. */
 @media (prefers-reduced-motion: no-preference) {
-  /* One entrance per section; `--i` staggers them 45 ms apart. */
+  /* One entrance per section; `--i` staggers them 40 ms apart. */
   .sh-rise {
-    animation: sh-rise 320ms var(--sh-ease) both;
-    animation-delay: calc(var(--i, 0) * 45ms);
+    animation: sh-rise var(--sh-dur-page) var(--sh-ease) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
   }
-  /* Card lists: children rise in sequence, capped at the eighth. */
+  /* Card lists: children rise in sequence, capped at the sixth. */
   .sh-stagger > * {
-    animation: sh-rise 320ms var(--sh-ease) both;
+    animation: sh-rise var(--sh-dur-page) var(--sh-ease) both;
   }
   .sh-stagger > :nth-child(2) {
-    animation-delay: 40ms;
+    animation-delay: 30ms;
   }
   .sh-stagger > :nth-child(3) {
-    animation-delay: 80ms;
+    animation-delay: 60ms;
   }
   .sh-stagger > :nth-child(4) {
-    animation-delay: 120ms;
+    animation-delay: 90ms;
   }
   .sh-stagger > :nth-child(5) {
-    animation-delay: 160ms;
+    animation-delay: 120ms;
   }
-  .sh-stagger > :nth-child(6) {
-    animation-delay: 200ms;
-  }
-  .sh-stagger > :nth-child(7) {
-    animation-delay: 240ms;
-  }
-  .sh-stagger > :nth-child(n + 8) {
-    animation-delay: 280ms;
+  .sh-stagger > :nth-child(n + 6) {
+    animation-delay: 150ms;
   }
 
   /* Skeleton shimmer: one slow, steady sweep; static under reduced motion. */
@@ -171,7 +237,7 @@ body {
     background-image: linear-gradient(
       100deg,
       transparent 30%,
-      color-mix(in oklab, var(--sh-paper) 55%, transparent) 50%,
+      color-mix(in oklab, var(--sh-ink) 5%, transparent) 50%,
       transparent 70%
     );
     background-size: 220% 100%;
@@ -179,7 +245,12 @@ body {
     animation: sh-shimmer 1.6s linear infinite;
   }
 
-  /* Route change: the content region cross-fades up; the shell holds still. */
+  /* Processing: a playhead crosses a match line; stages stay literal text. */
+  .sh-scan {
+    animation: sh-scan 2.4s var(--sh-ease) infinite;
+  }
+
+  /* Route change: the content region cross-fades; the shell holds still. */
   ::view-transition-old(root),
   ::view-transition-new(root) {
     animation: none;
@@ -188,17 +259,39 @@ body {
     animation: sh-page-out 120ms var(--sh-ease-in) both;
   }
   ::view-transition-new(.sh-page) {
-    animation: sh-page-in 260ms var(--sh-ease) both;
+    animation: sh-page-in var(--sh-dur-page) var(--sh-ease) both;
   }
   ::view-transition-group(.sh-page) {
-    animation-duration: 260ms;
+    animation-duration: var(--sh-dur-page);
   }
-  /* Active nav marker glides to the new tab during a navigation. */
+  /* Active nav marker slides to the new item during a navigation. */
   ::view-transition-group(sh-nav-marker),
   ::view-transition-group(sh-tab-marker),
   ::view-transition-group(sh-section-marker) {
-    animation-duration: 280ms;
+    animation-duration: var(--sh-dur-sidebar);
     animation-timing-function: var(--sh-ease);
+  }
+
+  /* Dialogs: fade and settle from 0.98. */
+  dialog[open].sh-dialog {
+    animation: sh-dialog-in var(--sh-dur-modal) var(--sh-ease) both;
+  }
+  dialog[open].sh-dialog::backdrop {
+    animation: sh-fade-in var(--sh-dur-modal) ease-out both;
+  }
+
+  /* Inspector panels enter from their own edge. */
+  .sh-inspector-in {
+    animation: sh-inspector-in var(--sh-dur-panel) var(--sh-ease) both;
+  }
+
+  /* Trailing arrow nudges toward where the link goes. */
+  .sh-nudge svg:last-child {
+    transition: transform var(--sh-dur-hover) var(--sh-ease);
+  }
+  .sh-nudge:hover svg:last-child,
+  .sh-nudge:focus-visible svg:last-child {
+    transform: translateX(3px);
   }
 }
 
@@ -213,7 +306,7 @@ body {
 @keyframes sh-rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -230,10 +323,20 @@ body {
   }
 }
 
+@keyframes sh-scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    /* The moving segment is a quarter of its track. */
+    transform: translateX(400%);
+  }
+}
+
 @keyframes sh-page-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
 }
 
@@ -243,11 +346,45 @@ body {
   }
 }
 
+@keyframes sh-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes sh-inspector-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
 .sh-skel {
   background-color: var(--sh-surface-subtle);
 }
 
-/* ---- App shell sidebar (player and coach) ------------------------------ */
+/*
+ * Pitch geometry for empty states: a halfway line and centre circle drawn in
+ * the line colour. Decoration only; the words carry the meaning.
+ */
+.sh-pitch {
+  background-image:
+    radial-gradient(
+      circle at 50% 50%,
+      transparent 0 47px,
+      var(--sh-line-strong) 47px 48px,
+      transparent 48px
+    ),
+    linear-gradient(
+      90deg,
+      transparent calc(50% - 0.5px),
+      var(--sh-line-strong) calc(50% - 0.5px) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px)
+    );
+}
+
+/* ---- App shell sidebar (player, coach, coaching) ----------------------- */
 /*
  * `--rail` is the sidebar column. Rail (icon only) from 768 px; full
  * sidebar from 1024 px unless the `sh-sidebar` cookie collapsed it. The
@@ -255,11 +392,11 @@ body {
  * page, like Material 3's modal navigation rail.
  */
 .sh-shell {
-  --rail: 76px;
+  --rail: 64px;
 }
 @media (min-width: 1024px) {
   .sh-shell:not([data-sidebar="collapsed"]) {
-    --rail: 248px;
+    --rail: 232px;
   }
 }
 @media (min-width: 768px) {
@@ -272,22 +409,34 @@ body {
   }
   .sh-shell[data-rail="open"] .sh-side-panel {
     overflow-x: clip;
-    width: 248px;
-    box-shadow: 0 16px 48px rgba(23, 21, 18, 0.14);
+    width: 232px;
+    box-shadow: 16px 0 48px var(--sh-shadow);
   }
 }
 @media (prefers-reduced-motion: no-preference) {
   .sh-shell.sh-animate {
-    transition: grid-template-columns 260ms var(--sh-ease);
+    transition: grid-template-columns var(--sh-dur-sidebar) var(--sh-ease);
   }
   .sh-shell.sh-animate .sh-side-panel {
     transition:
-      width 260ms var(--sh-ease),
-      box-shadow 260ms var(--sh-ease);
+      width var(--sh-dur-sidebar) var(--sh-ease),
+      box-shadow var(--sh-dur-sidebar) var(--sh-ease);
   }
   /* Replays each time the sidebar opens (display none to block). */
   .sh-sb-wide {
-    animation: sh-fade-in 220ms var(--sh-ease) 90ms both;
+    animation: sh-fade-in 180ms var(--sh-ease) 60ms both;
+  }
+}
+
+/* The review workspace owns the whole screen: no global navigation. */
+.sh-shell:has(.sh-review) > aside,
+.sh-shell:has(.sh-review) > div > header,
+.sh-shell:has(.sh-review) > div > section {
+  display: none;
+}
+@media (min-width: 768px) {
+  .sh-shell:has(.sh-review) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -324,7 +473,7 @@ body {
   }
   .sh-shell[data-rail="open"] .sh-sb-row {
     justify-content: flex-start;
-    padding-inline: 12px;
+    padding-inline: 10px;
   }
   /* Tooltips name icon-only rail controls on hover and keyboard focus. */
   .sh-shell:not([data-rail="open"]) .sh-sb-tip {
@@ -332,7 +481,7 @@ body {
     position: absolute;
     left: calc(100% + 10px);
     top: 50%;
-    z-index: 40;
+    z-index: var(--sh-z-overlay);
     translate: 0 -50%;
     white-space: nowrap;
     pointer-events: none;
@@ -347,7 +496,7 @@ body {
     > .sh-sb-tip {
     opacity: 1;
     scale: 1;
-    transition-delay: 250ms;
+    transition-delay: 200ms;
   }
 }
 @media (min-width: 1024px) {
@@ -368,9 +517,35 @@ body {
   }
   .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-row {
     justify-content: flex-start;
-    padding-inline: 12px;
+    padding-inline: 10px;
   }
   .sh-shell:not([data-sidebar="collapsed"]) .sh-sb-tip {
+    display: none;
+  }
+}
+
+/* Generic tooltip for icon buttons outside the rail (video transport). */
+.sh-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: var(--sh-z-overlay);
+  translate: -50% 0;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  scale: 0.96;
+  transition:
+    opacity 120ms ease-out,
+    scale 120ms ease-out;
+}
+:is(a, button, label):is(:hover, :focus-visible) > .sh-tip {
+  opacity: 1;
+  scale: 1;
+  transition-delay: 250ms;
+}
+@media (hover: none) {
+  .sh-tip {
     display: none;
   }
 }
@@ -378,10 +553,10 @@ body {
 /* ---- Phone account sheet ------------------------------------------------ */
 @media (prefers-reduced-motion: no-preference) {
   details[open] > .sh-sheet .sh-sheet-panel {
-    animation: sh-sheet-in 220ms var(--sh-ease) both;
+    animation: sh-sheet-in var(--sh-dur-modal) var(--sh-ease) both;
   }
   details[open] > .sh-sheet .sh-sheet-scrim {
-    animation: sh-fade-in 220ms ease-out both;
+    animation: sh-fade-in var(--sh-dur-modal) ease-out both;
   }
   details[data-closing] > .sh-sheet .sh-sheet-panel {
     animation: sh-sheet-out 160ms var(--sh-ease-in) both;
