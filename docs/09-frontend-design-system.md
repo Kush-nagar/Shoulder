@@ -22,37 +22,32 @@ Define semantic CSS variables in one global token layer. Tailwind consumes the v
 
 ### Color
 
-| Token | Value | Intended use |
-|---|---:|---|
-| `--sh-paper` | `#FAF9F7` | Page background |
-| `--sh-surface` | `#FFFFFF` | Dialog, input, player clip surface |
-| `--sh-surface-subtle` | `#F3F0EC` | Hover rows, grouped regions, skeletons |
-| `--sh-ink` | `#171512` | Primary text and dark controls |
-| `--sh-ink-2` | `#4E4944` | Secondary text |
-| `--sh-muted` | `#6B6560` | Metadata; 5.46:1 on paper |
-| `--sh-line` | `#E5E2DE` | Default dividers and borders |
-| `--sh-line-strong` | `#CFC9C2` | Input and selected dividers |
-| `--sh-brand` | `#C4633D` | Decorative brand accent; not normal text |
-| `--sh-action` | `#9E472C` | Accessible action text/fill |
-| `--sh-action-hover` | `#843A24` | Hover/pressed progression |
-| `--sh-action-soft` | `#F4E4DD` | Selected moment background |
-| `--sh-focus` | `#7C341F` | Keyboard focus outline |
-| `--sh-error` | `#9B2C2C` | Operational errors |
-| `--sh-error-soft` | `#F9E8E6` | Error background |
-| `--sh-warning` | `#7A5412` | Coach-only warning text |
-| `--sh-warning-soft` | `#F7EFD9` | Warning background |
-| `--sh-control-border` | `#8A837B` | Input, chip, and outlined button borders; 3.56:1 on paper |
-| `--sh-on-action` | `#FFFFFF` | Text on filled action controls |
-| `--sh-night` | `#171512` | Video stage and goal hero only |
-| `--sh-on-night` | `#FAF9F7` | Text on night surfaces |
-| `--sh-night-muted` | `#B9B2A9` | Secondary text on night; 8.68:1 |
-| `--sh-action-on-night` | `#E58B66` | Links on night; 7.13:1 |
+The app is dark first (ADR 0026). Values live in `apps/web/app/globals.css`; `:root` holds the warm-light set and `:root:has(.sh-themed:not([data-theme="light"]))` the dark set. Tailwind reads them as `bg-paper`, `text-ink`, `bg-signal`, and so on.
 
-Dark palette (ADR 0022): the reviewed values in `docs/design/player-redesign-brief.md` section 3.1, applied only to pages marked `.sh-themed` (player routes, sign-in, session fallback), under `prefers-color-scheme: dark` unless the player chose Light, or always when they chose Dark on Profile. In dark, filled action controls use dark text (`--sh-on-action: #141311`).
+| Token | Dark | Warm light | Intended use |
+|---|---:|---:|---|
+| `--sh-paper` | `#0A0A09` | `#F2F0E9` | Page background |
+| `--sh-rail` | `#0E0E0C` | `#EBE8DF` | Sidebar, top bars, bottom tabs |
+| `--sh-surface` | `#11110F` | `#F8F7F2` | Panels, inputs, list containers |
+| `--sh-surface-subtle` | `#171714` | `#E9E6DD` | Raised rows, hover, skeletons |
+| `--sh-popover` | `#1D1D19` | `#FDFCF8` | Tooltips, menus, dialogs, selected segment |
+| `--sh-ink` | `#F5F5F0` | `#11110F` | Primary text |
+| `--sh-ink-2` | `#A4A198` | `#45433E` | Secondary text |
+| `--sh-muted` | `#8A877F` | `#68665F` | Metadata; 5.0:1 on the dark panel |
+| `--sh-line` / `--sh-line-strong` | white 8% / 12% | ink 10% / 18% | Dividers; prefer spacing or a surface step first |
+| `--sh-control-border` | `#66635C` | `#8C897F` | Input boundary, 3:1 or better |
+| `--sh-signal` | `#DFFF3F` | `#11110F` | "Look here": nav marker, playhead, selected clip, active filter |
+| `--sh-signal-soft` | lime 8% | `#E8F3A8` | Selected row and nav tint |
+| `--sh-action` / `--sh-on-action` | `#DFFF3F` / `#0A0A09` | `#11110F` / `#F8F7F2` | The one primary button per screen |
+| `--sh-focus` | `#DFFF3F` | `#11110F` | Focus ring |
+| `--sh-warning` | `#F4C95D` | `#7A5412` | Pending, processing, unsaved |
+| `--sh-error` | `#FF6262` | `#B42318` | Operational errors, destructive words |
+| `--sh-coral` | `#FF805C` | `#C2410C` | Secondary comparison only; unused by default |
+| `--sh-night` family | `#070706` stage, `#F5F5F0` text, `#A4A198` muted, lime links | same | Video stage in both themes |
 
-Contrast baselines on paper: ink 17.32:1, muted 5.46:1, and action 5.88:1. White on action is 6.19:1. The original brand terracotta is decorative because it is only 3.84:1 on paper and white on it is 4.04:1.
+Signal lime covers roughly 5 to 10 percent of any screen. It never colours headings, section icons, badges, or decoration, and never glows. Status uses a small dot plus literal text: lime ready, amber pending, red failed, grey neutral.
 
-Do not add green success banners to the player experience. Completion is communicated through plain copy and a check icon in ink. Error and warning colors are reserved for a real state, never decorative category coding.
+Do not add green success banners to the player experience. Completion is communicated through plain copy and a check icon. Error and warning colors are reserved for a real state, never decorative category coding.
 
 ### Typography
 
@@ -72,6 +67,8 @@ The owner-approved Task 1 mark and wordmark are present, as tracked in `assets/R
 | Metadata | 13 px | 13 px | 400 | 1.4 |
 | Timecode | 13 px | 14 px | 500 | 1.2 |
 
+Match data (timestamps such as `73:42`, halves, shirt numbers, dates in dense lists, counts) uses **Geist Mono** through `font-mono` (ADR 0026), self-hosted from `@fontsource-variable/geist-mono`. Coach UI runs at 13 to 15 px; coach page titles are 26/30 px.
+
 Player display titles (page `h1`, goal hero title, drill covers) use the Archivo display face at `font-stretch: 75%`, weight 600: 28/34 px page titles, 32/44 px greeting and goal hero (ADR 0022). Do not reduce player body copy below 16 px. Use at most three type sizes in one compact component. Titles use sentence case; never all caps for navigation or labels.
 
 ### Spacing, shape, elevation
@@ -80,12 +77,12 @@ Player display titles (page `h1`, goal hero title, drill covers) use the Archivo
 - Common spacing: 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, and 80 px.
 - Page gutter: 20 px mobile, 24 px tablet, 32 px desktop.
 - Control height: 40 px desktop; 44 px for all player/mobile controls.
-- Input radius: 8 px.
-- Button radius: 8 px.
-- Panel radius: 12 px.
-- Player video surface radius: 14 px.
+- Control and input radius: 6 px (`rounded-md`).
+- Button radius: 8 px (`rounded-lg`).
+- Panel radius: 10 px (`rounded-xl`).
+- Video stage, media, and dialog radius: 12 px (`rounded-2xl`).
 - Pills are reserved for short statuses and filters, never general containers.
-- Default shadow: none. Floating dialog only: `0 16px 48px rgba(23,21,18,.14)`.
+- Default shadow: none. Popovers, tooltips, and dialogs only: `shadow-pop` (hairline plus a soft drop).
 - Use one-pixel borders. Do not simulate hierarchy with nested shadows.
 
 ### Layout widths and breakpoints
@@ -101,6 +98,8 @@ Player display titles (page `h1`, goal hero title, drill covers) use the Archivo
 Coach content max width is 1440 px except the review workspace, which may fill the viewport. Reading/form content maxes at 680 px. Player dashboard content maxes at 1200 px; player reading columns (drill detail, profile, upload form) max at 680 px (ADR 0022).
 
 ## Coach shell
+
+As built (ADR 0024, 0026): the shared app sidebar on the rail colour, the wordmark centred at 128 px (mark alone on the rail), a Dashboard / Players / Plans group and a "Match footage" group with Upload match, the team and season at the foot, and the collapse control. The active item has a lime edge marker, a faint lime tint, and a lime icon. Content headers carry an optional back crumb, the display-face title, one line of context, and the Upload match action. The notes below are the original specification.
 
 ### Desktop, 1024 px and wider
 
@@ -175,6 +174,8 @@ Coach upload status and basic list/detail pages remain usable. Full match review
 ## Review workspace
 
 This is the signature desktop screen. It should resemble a focused editing bench, not a broadcast-analysis cockpit.
+
+As built (ADR 0026): a full-screen workspace (`.sh-review` hides global navigation) with a 56 px context bar (Back to match, shirt number and name, match in mono, active goal). The video sits on a night stage with the match timeline and transport attached; the clip inspector (save state, marked clips, verdict segments, coach comment) sits beside it from 1280 px and below it on smaller screens. The timeline shows a mono ruler, each marked clip as a range with a leading edge, the open in point, a hover time with the sprite preview, and the lime playhead; a native range input on top does the seeking. Transport: back 10 s, back 1 s, play/pause, forward 1 s, forward 10 s, time in mono, Set clip in / out, speed (0.5x to 2x), full screen. A "Keyboard shortcuts" disclosure lists the keymap.
 
 There is no global navigation rail at any viewport. At 1024–1279px the editor is 320px wide; below 1024px it follows the video. Below 768px use the limited behavior in `docs/05-ui.md`. Back to match is the only navigation out of the workspace.
 
@@ -337,8 +338,8 @@ Superseded by ADR 0022:
 
 ## Interaction and motion
 
-- Default transition: 140 ms ease-out for color, opacity, and small transforms.
-- Dialog enter: 180 ms; exit: 120 ms.
+- Tokens (ADR 0026): press 100 ms, hover 140, micro 160, menus 170, sidebar 210, modal 220 (fade plus scale 0.98 to 1), panels 240, page 280. Entry easing `cubic-bezier(0.22, 1, 0.36, 1)`; exits use the faster ease-in.
+- Only transform and opacity animate. The nav marker slides between items and inspector panels enter from their edge.
 - Do not animate layout during review or shift the video/timeline when saving.
 - No parallax, scroll-jacking, animated gradients, count-up metrics, or logo choreography.
 - Under `prefers-reduced-motion: reduce`, remove nonessential movement and use instant state changes.
