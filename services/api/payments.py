@@ -23,6 +23,10 @@ class PaymentsUnavailable(Exception):
     """Stripe is not configured, refused, or failed. Never carries its message."""
 
 
+class PaymentsNotConfigured(PaymentsUnavailable):
+    """No usable Stripe key or app origin: payments are not set up here yet."""
+
+
 class InvalidWebhook(Exception):
     """The payload or its signature did not verify."""
 
@@ -37,13 +41,13 @@ def secret_key() -> str:
     live = os.environ.get("MARKETPLACE_LIVE", "").strip().lower() == "on"
     if key.startswith("sk_test_") or (live and key.startswith("sk_live_")):
         return key
-    raise PaymentsUnavailable("stripe key missing or not allowed")
+    raise PaymentsNotConfigured("stripe key missing or not allowed")
 
 
 def origin() -> str:
     value = os.environ.get("APP_ORIGIN", "").strip().rstrip("/")
     if not value.startswith(("https://", "http://")):
-        raise PaymentsUnavailable("APP_ORIGIN is not configured")
+        raise PaymentsNotConfigured("APP_ORIGIN is not configured")
     return value
 
 

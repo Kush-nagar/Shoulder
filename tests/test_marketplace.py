@@ -317,6 +317,38 @@ class RouteTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MARKETPLACE_ENABLED": ""}):
             self.assertEqual(self.client.get("/v1/coach-profile").status_code, 404)
 
+    def test_booking_without_stripe_configured_is_a_503_problem(self) -> None:
+        # No key (or a live key while live mode is off): the slot hold rolls
+        # back and the client gets a slug it can branch on.
+        app.dependency_overrides[authenticated_identity] = lambda: str(UUID(int=1))
+        connection = mock.MagicMock()
+        transaction = mock.MagicMock()
+        transaction.__enter__.return_value = connection
+        for key in ("", "sk_live_1"):
+            env = {**ON, "STRIPE_SECRET_KEY": key, "MARKETPLACE_LIVE": ""}
+            with (
+                self.subTest(key=key),
+                mock.patch.dict(os.environ, env),
+                mock.patch.object(
+                    marketplace_routes, "user_transaction", return_value=transaction
+                ),
+                mock.patch.object(
+                    marketplace_service,
+                    "book",
+                    side_effect=lambda _c, _b: payments.secret_key(),
+                ),
+            ):
+                response = self.client.post(
+                    "/v1/marketplace/bookings", json={"slot_id": str(uuid4())}
+                )
+            self.assertEqual(response.status_code, 503, response.text)
+            body = response.json()
+            self.assertTrue(body["type"].endswith("/payments-unavailable"))
+            self.assertEqual(
+                body["detail"], "Booking opens soon. Payments are being set up."
+            )
+            self.assertNotIn("sk_", response.text)
+
     def test_webhook_signature_failure_is_400(self) -> None:
         payload = json.dumps({"id": "evt_1", "type": "account.updated"}).encode()
         env = {**ON, "STRIPE_WEBHOOK_SECRET": WEBHOOK_SECRET}

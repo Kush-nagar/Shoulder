@@ -75,6 +75,14 @@ def run(user_id: str, work: Callable[[Connection], T]) -> T:
             return work(connection)
     except storage.StorageError:
         raise storage_unavailable() from None
+    except payments.PaymentsNotConfigured:
+        # A deployment without Stripe set up yet: a clear, branchable slug.
+        raise Problem(
+            503,
+            "Booking opens soon. Payments are being set up.",
+            slug="payments-unavailable",
+            title="Payments unavailable",
+        ) from None
     except payments.PaymentsUnavailable:
         raise Problem(
             502, "Payments are unavailable right now. Try again later."
