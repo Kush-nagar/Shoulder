@@ -1,5 +1,15 @@
 # Brand asset workspace
 
+## Public homepage photograph
+
+`apps/web/public/marketing-pitch.jpg` is a 1920 × 1080, 451 KB compressed
+photograph of a floodlit soccer match. Photographer: Tom Fisk. Source:
+[Pexels photo 3459633](https://www.pexels.com/photo/aerial-photo-of-soccer-field-3459633/).
+The [Pexels License](https://www.pexels.com/license/) permits website use and
+modification. The image is illustrative: it is not Shoulder footage, a customer,
+or an endorsement. Players are too small to identify; no club mark or broadcast
+overlay is visible. The homepage uses this one photograph in several crops.
+
 The PNG is reference artwork only. Task 1 uses the two owner-approved vector
 sources in `brand/`, as authorized in ADR 0012. Other production variants in
 `docs/08-brand.md` remain required before their placements ship.
