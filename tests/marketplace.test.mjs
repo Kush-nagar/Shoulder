@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   dollars,
   minutesBetween,
+  problemSlug,
   refundIfCancelled,
   stripeUrl,
 } from "../apps/web/app/coaching/format.ts";
@@ -71,4 +72,17 @@ test("only https Stripe pages receive the browser", () => {
   ]) {
     assert.equal(stripeUrl(bad), null, String(bad));
   }
+});
+
+test("problem slug lets the booking form spot unconfigured payments", () => {
+  assert.equal(
+    problemSlug({
+      type: "https://shoulder.local/problems/payments-unavailable",
+      status: 503,
+    }),
+    "payments-unavailable",
+  );
+  assert.equal(problemSlug({ type: 7 }), null);
+  assert.equal(problemSlug(null), null);
+  assert.equal(problemSlug("oops"), null);
 });

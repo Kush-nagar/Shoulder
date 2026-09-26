@@ -50,6 +50,12 @@ export function refundIfCancelled(
   return Date.parse(booking.starts_at) - now > DAY ? booking.price_cents : 0;
 }
 
+/** The RFC 9457 `type` slug of an API problem body, e.g. "payments-unavailable". */
+export function problemSlug(body: unknown): string | null {
+  const type = (body as { type?: unknown } | null)?.type;
+  return typeof type === "string" ? (type.split("/").pop() ?? null) : null;
+}
+
 /**
  * Checkout and Connect onboarding links come from the API; only an https
  * Stripe page may receive the browser.

@@ -29,6 +29,17 @@ export const meta = "text-[13px] leading-[1.4] text-muted tabular-nums";
 /** Checkbox/radio styled as a pill; the input stays real and focusable. */
 export const toggleChip = `relative inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-control-border px-4 text-[15px] font-semibold text-ink-2 transition-colors duration-150 ease-out hover:bg-surface-subtle has-[:checked]:border-ink has-[:checked]:bg-ink has-[:checked]:text-paper has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-45 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus`;
 
+/** Link-based filter pill (browse specialties, admin status). */
+export const filterChip = (on: boolean) =>
+  `inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[15px] font-semibold transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.97] ${focus} ${
+    on
+      ? "border-ink bg-ink text-paper"
+      : "border-line-strong bg-surface text-ink-2 hover:border-control-border hover:text-ink"
+  }`;
+
+/** Small uppercase-free field caption used in cards and summaries. */
+export const caption = "text-[13px] leading-[1.35] text-muted";
+
 export const successBox =
   "rounded-xl border border-line-strong bg-action-soft p-4 text-[16px] leading-6 text-ink";
 
