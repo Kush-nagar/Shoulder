@@ -30,7 +30,7 @@ if (!(Test-Path .env.local) -or !(Test-Path apps/web/.env.local)) {
 $container = 'supabase_db_shoulder-local'
 $password = New-Secret 32
 $env:MIGRATION_DATABASE_URL = 'postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres'
-& ./.tools/uv.exe run --locked alembic upgrade head
+& ./.tools/uv.exe run --locked python -m alembic upgrade head
 if ($LASTEXITCODE) { throw 'Migration upgrade failed' }
 $env:MIGRATION_DATABASE_URL = $null
 foreach ($role in @('shoulder_api', 'shoulder_operator', 'shoulder_worker')) {
