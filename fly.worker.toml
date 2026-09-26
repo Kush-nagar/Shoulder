@@ -1,0 +1,17 @@
+# Shoulder CPU worker (demo): durable job queue, media processing, retention
+# sweeps. No HTTP service. Secrets via `fly secrets import`, never here.
+# Deploy: fly deploy -c fly.worker.toml --remote-only
+app = "shoulder-worker-demo"
+primary_region = "iad"
+
+[build]
+  dockerfile = "infra/worker.Dockerfile"
+
+[env]
+  R2_REGION = "auto"
+  WORKER_LOG_LEVEL = "INFO"
+  APP_ORIGIN = "https://shoulder-demo.vercel.app"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

@@ -8,3 +8,6 @@
 !services/timeline.py
 !infra/
 !infra/api.Dockerfile
+!services/worker/
+!services/worker/*.py
+!infra/worker.Dockerfile
