@@ -365,17 +365,21 @@ body {
 }
 
 /*
- * Pitch geometry for empty states: a halfway line and centre circle drawn in
+ * Pitch mark for empty states: a centre circle on the halfway line, drawn in
  * the line colour. Decoration only; the words carry the meaning.
  */
 .sh-pitch {
+  display: block;
+  width: 72px;
+  height: 44px;
   background-image:
     radial-gradient(
       circle at 50% 50%,
-      transparent 0 47px,
-      var(--sh-line-strong) 47px 48px,
-      transparent 48px
+      transparent 0 13px,
+      var(--sh-line-strong) 13px 14px,
+      transparent 14px
     ),
+    radial-gradient(circle at 50% 50%, var(--sh-muted) 0 1.5px, transparent 2px),
     linear-gradient(
       90deg,
       transparent calc(50% - 0.5px),

@@ -1,23 +1,23 @@
 import { Bone, Loading } from "../../../../skeletons";
 
-/** The marking workspace: player bar, video stage, clip column. */
+/** The marking workspace: context bar, night stage, clip inspector. */
 export default function ReviewLoading() {
   return (
-    <Loading label="Loading review">
-      <div className="flex items-center gap-3 border-b border-line px-5 py-3 md:px-6">
-        <Bone className="h-6 w-24" />
-        <Bone className="h-6 w-40" />
+    <Loading
+      label="Loading review"
+      className="sh-review fixed inset-0 z-30 overflow-y-auto bg-paper"
+    >
+      <div className="flex min-h-14 items-center gap-4 border-b border-line bg-rail px-4 md:px-5">
+        <Bone className="h-5 w-28 rounded-sm" />
+        <Bone className="h-5 w-44 rounded-sm" />
       </div>
-      <div className="grid gap-6 px-5 py-6 md:px-6 lg:grid-cols-12">
-        <div className="lg:col-span-8">
-          <Bone className="aspect-video rounded-[14px]" />
-          <Bone className="mt-3 h-12" />
+      <div className="mx-auto grid max-w-[1680px] gap-4 p-4 md:p-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] xl:gap-5 xl:p-6">
+        <div>
+          <Bone className="mb-2 h-4 w-24 rounded-sm" />
+          <Bone className="aspect-video rounded-2xl" />
+          <Bone className="mt-px h-24 rounded-2xl" />
         </div>
-        <div className="space-y-3 lg:col-span-4">
-          {[0, 1, 2, 3, 4].map((key) => (
-            <Bone key={key} className="h-16 rounded-xl" />
-          ))}
-        </div>
+        <Bone className="h-[420px] rounded-2xl" />
       </div>
     </Loading>
   );

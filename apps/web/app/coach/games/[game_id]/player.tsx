@@ -1293,7 +1293,8 @@ export function CoachPlayer({
               })}
             </ul>
           ) : (
-            <div className="sh-pitch m-4 flex flex-1 flex-col items-center justify-center rounded-xl border border-line px-5 py-10 text-center">
+            <div className="m-4 flex flex-1 flex-col items-center justify-center rounded-xl border border-line px-5 py-10 text-center">
+              <span aria-hidden="true" className="sh-pitch mb-4" />
               <p className="font-mono text-[12px] text-muted uppercase">
                 No clips yet
               </p>

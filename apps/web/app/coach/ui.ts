@@ -51,4 +51,4 @@ export const row = `flex min-h-11 items-center gap-4 px-4 py-2 transition-colors
 
 /** The one approved floating-dialog treatment. */
 export const dialog =
-  "sh-dialog w-[min(520px,calc(100vw-2.5rem))] rounded-2xl border-0 bg-popover p-0 text-ink shadow-pop backdrop:bg-scrim";
+  "sh-dialog m-auto w-[min(520px,calc(100vw-2.5rem))] rounded-2xl border-0 bg-popover p-0 text-ink shadow-pop backdrop:bg-scrim";
