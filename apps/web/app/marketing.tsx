@@ -78,6 +78,26 @@ function Arrow() {
 export function MarketingPage() {
   const heroRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  const poseRef = useRef<HTMLDivElement>(null);
+
+  // Draw the movement skeleton once, when its card scrolls into view. Without
+  // JS or with reduced motion the finished pose is simply shown.
+  useEffect(() => {
+    const pose = poseRef.current;
+    if (!pose || !("IntersectionObserver" in window)) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    pose.dataset.draw = "pending";
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        pose.dataset.draw = "go";
+        observer.disconnect();
+      },
+      { threshold: 0.4 },
+    );
+    observer.observe(pose);
+    return () => observer.disconnect();
+  }, []);
   const menuRef = useRef<HTMLDetailsElement>(null);
   const closeMenu = () => {
     if (menuRef.current) menuRef.current.open = false;
@@ -582,46 +602,84 @@ export function MarketingPage() {
             </article>
             <article className="mk-training-card mk-training-card-pose">
               <span className="mk-detail-index">02 / MOVEMENT</span>
-              <div className="mk-pose-graphic" aria-hidden="true">
+              <div ref={poseRef} className="mk-pose-graphic" aria-hidden="true">
+                {/* A landscape phone filming practice: pitch lines on the
+                    video, one striking skeleton over it, ball at the foot. */}
                 <svg
-                  viewBox="95 0 310 190"
+                  viewBox="0 0 320 190"
                   fill="none"
                   preserveAspectRatio="xMidYMid meet"
                   aria-hidden="true"
                 >
-                  <title>Illustrative on-device pose view</title>
-                  <path
-                    className="mk-pose-guide"
-                    d="M105 38V16h22m244 0h22v22M105 152v22h22m244 0h22v-22M95 95h35m240 0h35"
+                  <rect
+                    className="mk-pose-phone"
+                    x="6"
+                    y="5"
+                    width="308"
+                    height="180"
+                    rx="24"
+                  />
+                  <rect
+                    className="mk-pose-camera"
+                    x="13"
+                    y="80"
+                    width="4"
+                    height="30"
+                    rx="2"
+                  />
+                  <rect
+                    className="mk-pose-screen"
+                    x="24"
+                    y="15"
+                    width="280"
+                    height="160"
+                    rx="13"
                   />
                   <path
-                    className="mk-pose-shadow"
-                    d="M247 43v12m-53 9 53-9 55 8m-108 1-32 27-28-22m168-6 27 28 32-15M247 55v52m-36 4 36-4 37 3m-73 1-23 36-31 26m127-63 32 35 38 28"
+                    className="mk-pose-pitch"
+                    d="M24 162h280M236 162l28-40h40M60 162l18-24"
+                  />
+                  <text className="mk-pose-ui" x="38" y="34">
+                    ON-DEVICE VIEW
+                  </text>
+                  <text
+                    className="mk-pose-ui mk-pose-ui-meta"
+                    x="290"
+                    y="34"
+                    textAnchor="end"
+                  >
+                    POSE / LOCAL
+                  </text>
+                  <path
+                    className="mk-pose-swing"
+                    d="M178 150c14 4 26 -2 34 -16"
                   />
                   <path
                     className="mk-pose-bones"
-                    d="M247 43v12m-53 9 53-9 55 8m-108 1-32 27-28-22m168-6 27 28 32-15M247 55v52m-36 4 36-4 37 3m-73 1-23 36-31 26m127-63 32 35 38 28"
+                    pathLength={1}
+                    d="M160 53l5 44M148 59l24-2M158 98l14-2M148 59l-22 8-18-7M172 57l18 13 9 16M158 98l-8 28 2 30 11 2M172 96l18 22 22 12"
                   />
-                  <circle className="mk-pose-head" cx="247" cy="25" r="11" />
+                  <circle className="mk-pose-head" cx="158" cy="42" r="9" />
                   <g className="mk-pose-joints">
-                    <circle cx="194" cy="64" r="4.5" />
-                    <circle cx="302" cy="63" r="4.5" />
-                    <circle cx="162" cy="91" r="4.5" />
-                    <circle cx="329" cy="91" r="4.5" />
-                    <circle cx="211" cy="111" r="4.5" />
-                    <circle cx="284" cy="110" r="4.5" />
-                    <circle cx="188" cy="147" r="4.5" />
-                    <circle cx="316" cy="145" r="4.5" />
+                    <circle cx="160" cy="53" r="3.6" />
+                    <circle cx="148" cy="59" r="3.6" />
+                    <circle cx="172" cy="57" r="3.6" />
+                    <circle cx="126" cy="67" r="3.6" />
+                    <circle cx="190" cy="70" r="3.6" />
+                    <circle cx="158" cy="98" r="3.6" />
+                    <circle cx="172" cy="96" r="3.6" />
+                    <circle cx="150" cy="126" r="3.6" />
+                    <circle cx="190" cy="118" r="3.6" />
+                    <circle cx="152" cy="156" r="3.6" />
                   </g>
                   <g className="mk-pose-endpoints">
-                    <circle cx="134" cy="69" r="4" />
-                    <circle cx="361" cy="76" r="4" />
-                    <circle cx="157" cy="173" r="4" />
-                    <circle cx="354" cy="173" r="4" />
+                    <circle cx="108" cy="60" r="3.4" />
+                    <circle cx="199" cy="86" r="3.4" />
+                    <circle cx="163" cy="158" r="3.4" />
+                    <circle cx="212" cy="130" r="3.4" />
                   </g>
+                  <circle className="mk-pose-ball" cx="224" cy="137" r="6.5" />
                 </svg>
-                <span>ON-DEVICE VIEW</span>
-                <span className="mk-pose-frame-label">POSE / LOCAL</span>
               </div>
               <h3>See the movement.</h3>
               <p>

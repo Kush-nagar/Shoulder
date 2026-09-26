@@ -1108,13 +1108,6 @@
   bottom: auto;
 }
 .mk-pose-graphic {
-  overflow: hidden;
-  border: 1px solid rgba(223, 255, 63, 0.28);
-  background:
-    linear-gradient(rgba(223, 255, 63, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(223, 255, 63, 0.045) 1px, transparent 1px),
-    #192a21;
-  background-size: 38px 38px;
   color: var(--mk-signal);
 }
 .mk-pose-graphic svg {
@@ -1122,47 +1115,109 @@
   width: 100%;
   display: block;
 }
-.mk-pose-graphic > span:not(.mk-pose-frame-label) {
-  top: 1rem;
-  bottom: auto;
-}
-.mk-pose-guide {
-  stroke: rgba(223, 255, 63, 0.28);
+.mk-pose-phone {
+  fill: #1a2b1f;
+  stroke: rgba(255, 255, 255, 0.34);
   stroke-width: 1;
 }
-.mk-pose-shadow {
-  stroke: rgba(223, 255, 63, 0.11);
-  stroke-width: 11;
+.mk-pose-camera {
+  fill: rgba(255, 255, 255, 0.16);
+}
+.mk-pose-screen {
+  fill: #192a21;
+  stroke: rgba(223, 255, 63, 0.22);
+  stroke-width: 1;
+}
+.mk-pose-pitch {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1;
   stroke-linecap: round;
-  stroke-linejoin: round;
+}
+.mk-pose-ui {
+  fill: var(--mk-signal);
+  font-size: 7.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+.mk-pose-ui-meta {
+  fill: rgba(223, 255, 63, 0.62);
+}
+.mk-pose-swing {
+  stroke: rgba(223, 255, 63, 0.38);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 4;
+  stroke-linecap: round;
 }
 .mk-pose-bones {
   stroke: var(--mk-signal);
-  stroke-width: 2.5;
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 .mk-pose-head {
   fill: #192a21;
   stroke: var(--mk-signal);
-  stroke-width: 2.5;
+  stroke-width: 2.4;
 }
 .mk-pose-joints circle {
   fill: var(--mk-signal);
   stroke: #192a21;
-  stroke-width: 2;
+  stroke-width: 1.6;
 }
 .mk-pose-endpoints circle {
   fill: #192a21;
   stroke: var(--mk-signal);
-  stroke-width: 2;
+  stroke-width: 1.6;
 }
-.mk-pose-graphic .mk-pose-frame-label {
-  top: 1rem;
-  right: 1rem;
-  bottom: auto;
-  left: auto;
-  color: rgba(223, 255, 63, 0.72);
+.mk-pose-ball {
+  fill: rgba(223, 255, 63, 0.16);
+  stroke: var(--mk-signal);
+  stroke-width: 1.6;
+}
+/* Set by marketing.tsx only when motion is allowed; absent = finished pose. */
+.mk-pose-graphic[data-draw="pending"] .mk-pose-bones {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.mk-pose-graphic[data-draw="pending"]
+  :is(
+    .mk-pose-head,
+    .mk-pose-joints,
+    .mk-pose-endpoints,
+    .mk-pose-ball,
+    .mk-pose-swing
+  ) {
+  opacity: 0;
+}
+.mk-pose-graphic[data-draw="go"] .mk-pose-bones {
+  stroke-dasharray: 1;
+  animation: mk-pose-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.mk-pose-graphic[data-draw="go"]
+  :is(
+    .mk-pose-head,
+    .mk-pose-joints,
+    .mk-pose-endpoints,
+    .mk-pose-ball,
+    .mk-pose-swing
+  ) {
+  animation: mk-pose-fade 260ms 460ms ease-out both;
+}
+@keyframes mk-pose-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes mk-pose-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .mk-drill-graphic {
   align-content: center;
