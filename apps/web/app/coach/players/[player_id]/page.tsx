@@ -108,18 +108,15 @@ export default async function Player({
 
   return (
     <>
-      <PageHeader title={player.display_name} />
-      <section className="px-5 py-6 md:px-6 lg:px-8">
-        <p className={metadata}>
-          <Link href="/coach/roster" className={tertiary}>
-            Players
-          </Link>
-        </p>
-
-        <dl className="mt-4 flex flex-wrap gap-x-10 gap-y-3">
+      <PageHeader
+        title={player.display_name}
+        crumb={{ href: "/coach/roster", label: "Players" }}
+      />
+      <section className="px-5 pb-10 md:px-6 lg:px-8">
+        <dl className="flex flex-wrap gap-x-10 gap-y-3 border-y border-line py-4">
           <div>
             <dt className={metadata}>Number</dt>
-            <dd className="text-[15px] tabular-nums">
+            <dd className="font-mono text-[15px]">
               {player.jersey_number ?? "Not set"}
             </dd>
           </div>

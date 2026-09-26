@@ -1,21 +1,26 @@
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ChevronRight, Upload } from "lucide-react";
 import Link from "next/link";
+import { EmptyState } from "../../components/empty-state";
+import { Status } from "../../components/status";
 import {
   fetchCoachEvidence,
+  fetchGames,
   fetchRoster,
   fetchTeamPlans,
   fetchTeams,
+  type Game,
 } from "../../lib/api";
 import { mondayOf, weekLabel } from "../../lib/plans";
+import { mainVideo, matchDate, videoState, videoTone } from "./match";
 import { PlanCard } from "./plans/plan-list";
 import { requireCoach } from "./session";
 import { PageHeader } from "./shell";
 import {
-  componentTitle,
-  focus,
+  focusInset,
   metadata,
   panel,
   primary,
+  row,
   sectionTitle,
   tertiary,
 } from "./ui";
@@ -30,13 +35,90 @@ function shortDate(value: string) {
   }).format(new Date(value));
 }
 
-const more = `inline-flex min-h-10 items-center gap-1 rounded-sm text-[15px] font-semibold text-action hover:underline underline-offset-4 ${focus}`;
+const more = `sh-nudge inline-flex min-h-9 items-center gap-1 rounded-sm text-[13px] font-medium text-ink-2 hover:text-ink ${focusInset}`;
 
 function Unavailable({ what }: { what: string }) {
   return (
-    <p role="alert" className="mt-3 text-[15px] leading-[1.5] text-error">
+    <p role="alert" className="mt-3 text-[14px] leading-[1.5] text-error">
       {what} could not be loaded. Reload the page to try again.
     </p>
+  );
+}
+
+function SectionHead({
+  id,
+  title,
+  href,
+  link,
+}: {
+  id: string;
+  title: string;
+  href?: string;
+  link?: string;
+}) {
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-3">
+      <h2 id={id} className={sectionTitle}>
+        {title}
+      </h2>
+      {href ? (
+        <Link href={href} className={more}>
+          {link}
+          <ArrowRight size={14} strokeWidth={1.75} aria-hidden="true" />
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+/** One match row: where the footage stands and the one next step. */
+function MatchRow({ game }: { game: Game }) {
+  const video = mainVideo(game);
+  const ready = video?.status === "ready";
+  const href =
+    ready || video
+      ? `/coach/games/${game.id}`
+      : `/coach/upload?game=${game.id}`;
+  return (
+    <li>
+      <Link href={href} className={`${row} group`}>
+        <span className="hidden w-24 shrink-0 whitespace-nowrap font-mono text-[12px] text-muted sm:block">
+          {matchDate(game)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] font-medium text-ink">
+            {game.opponent ? `vs ${game.opponent}` : "No opponent recorded"}
+            {game.kind === "scrimmage" ? (
+              <span className="ml-2 font-normal text-muted">Scrimmage</span>
+            ) : null}
+          </span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-3 sm:hidden">
+            <span className="font-mono text-[12px] text-muted">
+              {matchDate(game)}
+            </span>
+            <Status tone={videoTone(video)}>
+              {video ? videoState(video) : "No video yet"}
+            </Status>
+          </span>
+        </span>
+        <span className="hidden w-[190px] shrink-0 sm:block">
+          <Status tone={videoTone(video)} className="max-w-full">
+            <span className="truncate">
+              {video ? videoState(video) : "No video yet"}
+            </span>
+          </Status>
+        </span>
+        <span className="hidden w-[92px] shrink-0 text-right text-[13px] text-ink-2 group-hover:text-ink md:block">
+          {ready ? "Review" : video ? "Open" : "Upload video"}
+        </span>
+        <ChevronRight
+          size={16}
+          strokeWidth={1.75}
+          aria-hidden="true"
+          className="shrink-0 text-muted transition-transform duration-140 group-hover:translate-x-0.5 group-hover:text-ink"
+        />
+      </Link>
+    </li>
   );
 }
 
@@ -48,22 +130,23 @@ export default async function CoachDashboard() {
     return (
       <>
         <PageHeader title="This week" />
-        <section className="px-5 py-6 md:px-6 lg:px-8">
+        <section className="px-5 pb-8 md:px-6 lg:px-8">
           {teams === null ? (
             <Unavailable what="Your team" />
           ) : (
-            <p className="max-w-170 text-[15px] leading-[1.5] text-muted">
+            <EmptyState label="No team yet">
               Your account is not attached to a team yet. Ask whoever set up
               Shoulder for your club to add you.
-            </p>
+            </EmptyState>
           )}
         </section>
       </>
     );
   }
-  const [roster, plans] = await Promise.all([
+  const [roster, plans, games] = await Promise.all([
     fetchRoster(token, team.team_id),
     fetchTeamPlans(token, team.team_id),
+    fetchGames(token, team.team_id),
   ]);
   const players = roster ?? [];
   const withGoal = players.flatMap((player) =>
@@ -89,99 +172,138 @@ export default async function CoachDashboard() {
     players.map((player) => [player.id, player.display_name]),
   );
   const noGoal = players.length - withGoal.length;
+  const matches = (games ?? []).slice(0, 6);
 
   return (
     <>
       <PageHeader title="This week" description={weekLabel(thisWeek)} />
-      <div className="grid gap-8 px-5 py-6 md:px-6 lg:grid-cols-12 lg:px-8">
-        <section
-          aria-labelledby="squad-title"
-          className="min-w-0 lg:col-span-7"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 id="squad-title" className={sectionTitle}>
-              Players
-            </h2>
-            <Link href="/coach/roster" className={more}>
-              Roster
-              <ArrowRight size={16} strokeWidth={2} aria-hidden="true" />
-            </Link>
-          </div>
-          {roster === null ? (
-            <Unavailable what="Your roster" />
-          ) : players.length === 0 ? (
-            <p className="mt-3 text-[15px] leading-[1.5] text-muted">
-              No players yet.{" "}
-              <Link href="/coach/roster" className={tertiary}>
-                Build your roster
-              </Link>{" "}
-              to start.
-            </p>
-          ) : (
-            <>
-              <p className={`${metadata} mt-1`}>
-                {players.length} on the roster
-                {noGoal ? `, ${noGoal} without a goal yet` : ""}
-              </p>
-              <ul className={`${panel} mt-3 divide-y divide-line`}>
-                {players.map((player) => (
-                  <li key={player.id}>
-                    <Link
-                      href={`/coach/players/${player.id}`}
-                      className={`flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 hover:bg-surface-subtle ${focus}`}
-                    >
-                      <span className="font-medium">
-                        {player.display_name}
-                        {player.jersey_number !== null &&
-                        player.jersey_number !== undefined ? (
-                          <span className={`${metadata} ml-2 tabular-nums`}>
-                            #{player.jersey_number}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span
-                        className={`text-[14px] ${player.active_goal ? "text-ink-2" : "text-muted"}`}
-                      >
-                        {player.active_goal?.title ?? "Set a goal"}
-                      </span>
-                    </Link>
-                  </li>
+      <div className="grid gap-x-10 gap-y-10 px-5 pb-12 md:px-6 lg:grid-cols-12 lg:px-8">
+        <div className="min-w-0 space-y-10 lg:col-span-7">
+          <section aria-labelledby="matches-title">
+            <SectionHead
+              id="matches-title"
+              title="Matches"
+              href={matches.length ? "/coach/upload" : undefined}
+              link="All matches"
+            />
+            {games === null ? (
+              <Unavailable what="Your matches" />
+            ) : matches.length === 0 ? (
+              <EmptyState
+                label="No matches yet"
+                className="mt-3"
+                action={
+                  <Link href="/coach/upload" className={primary}>
+                    <Upload size={16} strokeWidth={2} aria-hidden="true" />
+                    Upload match
+                  </Link>
+                }
+              >
+                Upload your first game to start a review.
+              </EmptyState>
+            ) : (
+              <ul
+                className={`${panel} mt-3 divide-y divide-line overflow-hidden`}
+              >
+                {matches.map((game) => (
+                  <MatchRow key={game.id} game={game} />
                 ))}
               </ul>
-            </>
-          )}
-        </section>
+            )}
+          </section>
 
-        <div className="min-w-0 space-y-8 lg:col-span-5">
+          <section aria-labelledby="squad-title">
+            <SectionHead
+              id="squad-title"
+              title="Players"
+              href="/coach/roster"
+              link="Roster"
+            />
+            {roster === null ? (
+              <Unavailable what="Your roster" />
+            ) : players.length === 0 ? (
+              <EmptyState
+                label="No players yet"
+                className="mt-3"
+                action={
+                  <Link href="/coach/roster" className={primary}>
+                    Build your roster
+                  </Link>
+                }
+              >
+                Add your squad to set goals and mark clips for each player.
+              </EmptyState>
+            ) : (
+              <>
+                <p className={`${metadata} mt-0.5`}>
+                  {players.length} on the roster
+                  {noGoal ? `, ${noGoal} without a goal yet` : ""}
+                </p>
+                <ul
+                  className={`${panel} mt-3 divide-y divide-line overflow-hidden`}
+                >
+                  {players.map((player) => (
+                    <li key={player.id}>
+                      <Link
+                        href={`/coach/players/${player.id}`}
+                        className={`${row} group`}
+                      >
+                        <span className="w-7 shrink-0 font-mono text-[12px] text-muted">
+                          {player.jersey_number ?? ""}
+                        </span>
+                        <span className="w-[34%] min-w-0 shrink-0 truncate text-[14px] font-medium">
+                          {player.display_name}
+                        </span>
+                        <span
+                          className={`min-w-0 flex-1 truncate text-[13px] ${player.active_goal ? "text-ink-2" : "text-muted"}`}
+                        >
+                          {player.active_goal?.title ?? "Set a goal"}
+                        </span>
+                        <ChevronRight
+                          size={16}
+                          strokeWidth={1.75}
+                          aria-hidden="true"
+                          className="shrink-0 text-muted transition-transform duration-140 group-hover:translate-x-0.5 group-hover:text-ink"
+                        />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        </div>
+
+        <div className="min-w-0 space-y-10 lg:col-span-5">
           <section aria-labelledby="published-title">
-            <h2 id="published-title" className={sectionTitle}>
-              Recently shared clips
-            </h2>
+            <SectionHead id="published-title" title="Recently shared clips" />
             {evidenceFailed ? (
               <Unavailable what="Shared clips" />
             ) : recent.length === 0 ? (
-              <p className="mt-3 text-[15px] leading-[1.5] text-muted">
+              <p className="mt-2 text-[14px] leading-[1.5] text-muted">
                 Clips you publish to a player show up here.
               </p>
             ) : (
-              <ul className="mt-3 space-y-2">
+              <ul
+                className={`${panel} mt-3 divide-y divide-line overflow-hidden`}
+              >
                 {recent.map(({ player, set }) => (
                   <li key={set.publication_id}>
                     <Link
                       href={`/coach/players/${player.id}`}
-                      className={`${panel} flex items-center justify-between gap-4 px-4 py-3 hover:bg-surface-subtle ${focus}`}
+                      className={`${row} justify-between py-2.5`}
                     >
                       <span className="min-w-0">
-                        <span className="block font-medium">
+                        <span className="block text-[14px] font-medium">
                           {player.display_name}
                         </span>
                         <span className={`${metadata} block truncate`}>
                           {set.game_label}
                         </span>
                       </span>
-                      <span className={`${metadata} shrink-0 tabular-nums`}>
+                      <span className="shrink-0 font-mono text-[12px] text-muted">
                         {set.items.length}{" "}
-                        {set.items.length === 1 ? "clip" : "clips"},{" "}
+                        {set.items.length === 1 ? "clip" : "clips"} ·{" "}
                         {shortDate(set.published_at)}
                       </span>
                     </Link>
@@ -192,27 +314,22 @@ export default async function CoachDashboard() {
           </section>
 
           <section aria-labelledby="week-plans-title">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 id="week-plans-title" className={sectionTitle}>
-                Plans this week
-              </h2>
-              <Link href="/coach/plans" className={more}>
-                All plans
-                <ArrowRight size={16} strokeWidth={2} aria-hidden="true" />
-              </Link>
-            </div>
+            <SectionHead
+              id="week-plans-title"
+              title="Plans this week"
+              href="/coach/plans"
+              link="All plans"
+            />
             {plans === null ? (
               <Unavailable what="Plans" />
             ) : weekPlans.length === 0 ? (
-              <div className={`${panel} mt-3 p-5`}>
-                <p className={componentTitle}>No plan for this week yet</p>
-                <p className="mt-1 text-[15px] leading-[1.5] text-muted">
-                  Give the team or one player a few drills to work on.
-                </p>
-                <Link href="/coach/plans" className={`${primary} mt-4`}>
+              <p className="mt-2 text-[14px] leading-[1.5] text-muted">
+                No plan for this week yet.{" "}
+                <Link href="/coach/plans" className={tertiary}>
                   Make a plan
-                </Link>
-              </div>
+                </Link>{" "}
+                with a few drills for the team or one player.
+              </p>
             ) : (
               <div className="mt-3 space-y-3">
                 {weekPlans.map((plan) => (

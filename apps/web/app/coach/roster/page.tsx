@@ -20,8 +20,8 @@ import { RosterSearch } from "./search";
 
 export const dynamic = "force-dynamic";
 
-const cell = "px-3 py-3 align-top";
-const head = "px-3 py-2 text-[13px] font-semibold";
+const cell = "px-3 py-2.5 align-top";
+const head = "px-3 py-2 text-[12px] font-medium text-muted";
 
 /** `account_name` is hidden for archived rows, but the link itself is not. */
 function accountState(player: RosterPlayer): string {
@@ -41,7 +41,7 @@ function Row({ player }: { player: RosterPlayer }) {
   return (
     <tr
       data-player={`${player.display_name} ${player.jersey_number ?? ""} ${player.position ?? ""}`.toLowerCase()}
-      className="border-b border-line last:border-b-0 hover:bg-line/30"
+      className="border-b border-line transition-colors duration-140 last:border-b-0 hover:bg-surface-subtle"
     >
       <td className={cell}>
         <Link href={href} className={`font-medium ${tertiary}`}>
@@ -52,7 +52,9 @@ function Row({ player }: { player: RosterPlayer }) {
           {player.position ?? "No position"} · {accountState(player)}
         </span>
       </td>
-      <td className={`${cell} tabular-nums`}>{player.jersey_number ?? "—"}</td>
+      <td className={`${cell} font-mono text-[13px] text-ink-2`}>
+        {player.jersey_number ?? ""}
+      </td>
       <td className={`${cell} hidden md:table-cell`}>
         {player.position ?? "—"}
       </td>
@@ -91,7 +93,7 @@ function Row({ player }: { player: RosterPlayer }) {
 function Table({ players }: { players: RosterPlayer[] }) {
   return (
     <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
-      <table className="w-full border-collapse text-left text-[15px]">
+      <table className="w-full border-collapse text-left text-[14px]">
         <caption className="sr-only">Roster</caption>
         <thead>
           <tr className="border-b border-line bg-surface">
