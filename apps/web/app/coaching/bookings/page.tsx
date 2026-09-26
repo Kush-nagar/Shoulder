@@ -106,7 +106,9 @@ export default async function BookingsPage({
   const count = (n: number, on: boolean) => (
     <span
       className={`inline-flex min-w-6 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold tabular-nums ${
-        on ? "bg-ink text-paper" : "bg-surface-subtle text-ink-2"
+        on
+          ? "bg-signal-soft text-ink ring-1 ring-signal/40"
+          : "bg-surface-subtle text-ink-2"
       }`}
     >
       {n}
@@ -126,7 +128,7 @@ export default async function BookingsPage({
             size={20}
             strokeWidth={2.5}
             aria-hidden="true"
-            className="mt-0.5 shrink-0 text-action"
+            className="mt-0.5 shrink-0 text-muted"
           />
           <span>
             <span className="block font-semibold">Payment received.</span>

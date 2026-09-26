@@ -208,7 +208,7 @@ export function BookForm({
                 <label
                   className={`relative flex w-[68px] cursor-pointer flex-col items-center rounded-xl border py-2.5 transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.97] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${
                     on
-                      ? "border-ink bg-ink text-paper"
+                      ? "border-signal bg-signal-soft text-ink"
                       : "border-line-strong bg-surface hover:border-control-border"
                   }`}
                 >
@@ -337,7 +337,7 @@ export function BookForm({
               size={20}
               strokeWidth={2}
               aria-hidden="true"
-              className="mt-0.5 shrink-0 text-action"
+              className="mt-0.5 shrink-0 text-muted"
             />
           ) : null}
           {error.text}

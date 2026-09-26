@@ -83,7 +83,7 @@ export default async function DrillsPage({
                     scroll={false}
                     className={`${chipBase} ${
                       current
-                        ? "border-ink bg-ink text-paper active:scale-[0.97]"
+                        ? "border-signal bg-signal-soft text-ink active:scale-[0.97]"
                         : "border-control-border text-ink-2 hover:bg-surface-subtle hover:text-ink active:scale-[0.97]"
                     }`}
                   >

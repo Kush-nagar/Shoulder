@@ -29,10 +29,10 @@ const statusName: Record<CoachStatus, string> = {
 
 const statusTone: Record<CoachStatus, string> = {
   draft: "border border-control-border text-ink-2",
-  pending_review: "border border-action text-action",
+  pending_review: "border border-warning/50 text-warning",
   rejected: "bg-error-soft text-error",
   verified: "bg-action-soft text-ink",
-  suspended: "bg-ink text-paper",
+  suspended: "border border-line-strong bg-surface-subtle text-muted",
 };
 
 const kindName = {

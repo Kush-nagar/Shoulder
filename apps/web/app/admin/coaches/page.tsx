@@ -131,7 +131,7 @@ export default async function AdminCoachesPage({
             size={20}
             strokeWidth={2}
             aria-hidden="true"
-            className="text-action"
+            className="text-muted"
           />
           Reports
           {open.length ? (
@@ -149,7 +149,7 @@ export default async function AdminCoachesPage({
             Reports couldn&apos;t load. Try again in a moment.
           </p>
         ) : open.length === 0 ? (
-          <p className="mt-4 rounded-xl border border-dashed border-control-border px-4 py-5 text-[16px] text-ink-2">
+          <p className="mt-4 rounded-xl border border-line bg-surface px-4 py-5 text-[16px] text-ink-2">
             No open reports.
           </p>
         ) : (

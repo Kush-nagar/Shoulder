@@ -323,7 +323,7 @@ export function DocumentUpload() {
   const percent = file ? Math.round((loaded / file.size) * 100) : 0;
   return (
     <form onSubmit={(event) => void upload(event)} className="space-y-4">
-      <div className="rounded-xl border border-dashed border-control-border p-4 md:p-5">
+      <div className="rounded-xl border border-line p-4 md:p-5">
         <label className="relative inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-control-border bg-surface px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 ease-out hover:bg-surface-subtle active:scale-[0.98] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-45 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus">
           <FileUp size={20} strokeWidth={2} aria-hidden="true" />
           Choose a file
@@ -686,7 +686,7 @@ export function SlotAgenda({ slots }: { slots: CoachSlot[] }) {
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   if (!shown.length)
     return (
-      <div className="rounded-xl border border-dashed border-control-border px-5 py-8">
+      <div className="rounded-xl border border-line px-5 py-8">
         <p className="text-[16px] font-semibold">No open times yet.</p>
         <p className="mt-1 text-[16px] leading-6 text-ink-2">
           Add a time above and players can book it.

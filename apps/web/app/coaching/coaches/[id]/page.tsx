@@ -137,7 +137,7 @@ export default async function CoachDetailPage({
                     size={20}
                     strokeWidth={2}
                     aria-hidden="true"
-                    className="mt-0.5 shrink-0 text-action"
+                    className="mt-0.5 shrink-0 text-muted"
                   />
                   <p className="text-[15px] leading-6 text-ink-2">
                     <span className="block font-semibold text-ink">
@@ -152,7 +152,7 @@ export default async function CoachDetailPage({
                     size={20}
                     strokeWidth={2}
                     aria-hidden="true"
-                    className="mt-0.5 shrink-0 text-action"
+                    className="mt-0.5 shrink-0 text-muted"
                   />
                   <p className="text-[15px] leading-6 text-ink-2">
                     <span className="block font-semibold text-ink">
@@ -167,7 +167,7 @@ export default async function CoachDetailPage({
                     size={20}
                     strokeWidth={2}
                     aria-hidden="true"
-                    className="mt-0.5 shrink-0 text-action"
+                    className="mt-0.5 shrink-0 text-muted"
                   />
                   <p className="text-[15px] leading-6 text-ink-2">
                     <span className="block font-semibold text-ink">
@@ -182,7 +182,7 @@ export default async function CoachDetailPage({
 
           <section
             aria-labelledby="book-title"
-            className={`${panel} sh-rise self-start p-5 md:p-6 lg:sticky lg:top-28 lg:shadow-[0_18px_40px_-28px_rgba(23,21,18,.45)]`}
+            className={`${panel} sh-rise self-start p-5 md:p-6 lg:sticky lg:top-28`}
             style={{ "--i": 1 } as React.CSSProperties}
           >
             <h2 id="book-title" className={sectionTitle}>

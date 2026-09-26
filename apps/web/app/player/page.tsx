@@ -116,7 +116,7 @@ function Section({
               size={20}
               strokeWidth={2}
               aria-hidden="true"
-              className="shrink-0 text-brand"
+              className="shrink-0 text-muted"
             />
           ) : null}
           {title}
@@ -757,7 +757,7 @@ async function Feed({
         <div className="mt-3 flex flex-col items-start gap-4 rounded-xl bg-surface-subtle p-5 md:flex-row md:items-center md:p-6">
           <span
             aria-hidden="true"
-            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-surface text-brand"
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-surface text-ink-2"
           >
             <Video size={22} strokeWidth={2} />
           </span>

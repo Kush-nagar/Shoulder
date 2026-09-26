@@ -78,7 +78,7 @@ export function HowItWorks({ className = "" }: { className?: string }) {
               size={22}
               strokeWidth={2}
               aria-hidden="true"
-              className="text-brand"
+              className="text-muted"
             />
             <h3 className="mt-3 text-[17px] font-semibold leading-[1.35]">
               {title}

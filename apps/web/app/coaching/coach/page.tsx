@@ -64,7 +64,7 @@ function Section({
       aria-labelledby={`${id}-title`}
       className={`scroll-mt-40 rounded-2xl border p-5 md:p-6 ${
         state === "current"
-          ? "border-line-strong bg-surface shadow-[0_14px_36px_-28px_rgba(23,21,18,.5)]"
+          ? "border-line-strong bg-surface"
           : "border-line bg-surface"
       }`}
     >
@@ -80,7 +80,7 @@ function Section({
             Done
           </span>
         ) : state === "current" && id !== "bookings" ? (
-          <span className="inline-flex min-h-7 items-center rounded-full border border-action px-2.5 text-[13px] font-semibold text-action">
+          <span className="inline-flex min-h-7 items-center rounded-md border border-signal/50 px-2.5 text-[13px] font-medium text-signal">
             Next step
           </span>
         ) : null}
@@ -96,7 +96,7 @@ function StepDot({ n, state }: { n: number; state: StepState }) {
       aria-hidden="true"
       className={`flex size-8 shrink-0 items-center justify-center rounded-full border text-[14px] font-semibold tabular-nums ${
         state === "done"
-          ? "border-ink bg-ink text-paper"
+          ? "border-signal bg-signal-soft text-ink"
           : state === "current"
             ? "border-action bg-action text-on-action"
             : "border-control-border text-muted"

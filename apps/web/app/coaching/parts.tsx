@@ -26,9 +26,9 @@ export function initials(name: string): string {
 
 // Token pairs only, so every tint follows the theme.
 const TINTS = [
-  "bg-action-soft text-action",
-  "bg-ink text-paper",
   "border border-line-strong bg-surface-subtle text-ink",
+  "border border-line bg-popover text-ink-2",
+  "border border-line-strong bg-surface text-ink",
 ];
 
 /** Initials on a tinted tile: no photos of anyone, no external images. */
@@ -54,7 +54,7 @@ export function Monogram({
 export function VerifiedBadge({ compact = false }: { compact?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full bg-action-soft font-semibold text-ink ${
+      className={`inline-flex items-center gap-1.5 rounded-md border border-line-strong font-medium text-ink-2 ${
         compact ? "min-h-7 px-2.5 text-[13px]" : "min-h-8 px-3 text-[14px]"
       }`}
     >
@@ -62,7 +62,7 @@ export function VerifiedBadge({ compact = false }: { compact?: boolean }) {
         size={compact ? 15 : 16}
         strokeWidth={2.25}
         aria-hidden="true"
-        className="shrink-0 text-action"
+        className="shrink-0 text-ink-2"
       />
       Background check verified
     </span>
@@ -71,7 +71,7 @@ export function VerifiedBadge({ compact = false }: { compact?: boolean }) {
 
 export function DemoTag() {
   return (
-    <span className="inline-flex min-h-6 items-center rounded-md border border-dashed border-control-border px-2 text-[12px] font-semibold leading-none text-muted">
+    <span className="inline-flex min-h-6 items-center rounded-md border border-line-strong px-2 text-[12px] font-semibold leading-none text-muted">
       Demo
     </span>
   );

@@ -236,7 +236,7 @@ export function UploadForm({ initialTitle = "" }: { initialTitle?: string }) {
               disabled={busy}
               onClick={() => setTitle(suggestion)}
               aria-pressed={title === suggestion}
-              className={`${chip} min-h-11 px-4 text-[15px] transition-colors duration-150 hover:bg-surface-subtle aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper ${focus}`}
+              className={`${chip} min-h-11 px-4 text-[15px] transition-colors duration-150 hover:bg-surface-subtle aria-pressed:border-signal aria-pressed:bg-signal-soft aria-pressed:text-ink ${focus}`}
             >
               {suggestion}
             </button>

@@ -121,7 +121,7 @@ function Intro({
       <div className="rounded-2xl border border-line bg-surface p-5 min-[375px]:p-6 md:p-8">
         <span
           aria-hidden="true"
-          className="flex size-12 items-center justify-center rounded-xl bg-action-soft text-action"
+          className="flex size-12 items-center justify-center rounded-xl bg-surface-subtle text-ink-2"
         >
           <UserRoundCheck size={24} strokeWidth={2} />
         </span>

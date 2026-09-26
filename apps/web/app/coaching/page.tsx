@@ -221,7 +221,7 @@ function CoachCard({
   return (
     <Link
       href={`/coaching/coaches/${coach.id}`}
-      className={`group flex h-full flex-col rounded-2xl border border-line bg-surface p-5 transition-[border-color,box-shadow,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-line-strong hover:shadow-[0_10px_30px_-18px_rgba(23,21,18,.35)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${focus}`}
+      className={`group flex h-full flex-col rounded-xl border border-line bg-surface p-5 transition-[border-color,background-color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-line-strong hover:bg-surface-subtle motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${focus}`}
     >
       <span className="flex items-start gap-4">
         <Monogram name={coach.display_name} />
