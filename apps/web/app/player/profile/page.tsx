@@ -65,7 +65,7 @@ export default async function ProfilePage() {
         <div className="flex items-center gap-4">
           <span
             aria-hidden="true"
-            className="flex size-14 shrink-0 items-center justify-center rounded-full bg-ink font-display text-[26px] text-paper"
+            className="flex size-14 shrink-0 items-center justify-center rounded-full bg-surface-subtle font-display text-[26px] text-ink ring-1 ring-line-strong"
           >
             {initial(me.display_name)}
           </span>

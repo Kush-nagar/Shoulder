@@ -355,7 +355,7 @@ export function EvidenceSequence({
                     }}
                     className={`inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] font-semibold transition-colors duration-150 ${focus} ${
                       current
-                        ? "border-ink bg-ink text-paper"
+                        ? "border-signal bg-signal-soft text-ink"
                         : "border-control-border text-ink-2 hover:bg-surface-subtle"
                     }`}
                   >

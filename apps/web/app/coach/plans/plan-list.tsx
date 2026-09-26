@@ -49,11 +49,11 @@ export function PlanCard({
               // Items have no id; position is their identity within a plan.
               // biome-ignore lint/suspicious/noArrayIndexKey: see above
               key={index}
-              className="flex gap-3 text-[15px] leading-[1.45]"
+              className="flex gap-3 text-[14px] leading-[1.45]"
             >
               <span
                 aria-hidden="true"
-                className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-action-soft text-[13px] font-semibold text-ink tabular-nums"
+                className="mt-px inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-surface-subtle font-mono text-[12px] text-ink-2"
               >
                 {index + 1}
               </span>
@@ -78,7 +78,7 @@ export function PlanCard({
         <div className="mt-4 flex flex-wrap items-start gap-x-6 gap-y-3 border-t border-line pt-3">
           <details className="group min-w-0 flex-1 basis-full md:basis-auto">
             <summary
-              className={`inline-flex min-h-10 cursor-pointer items-center rounded-sm text-[15px] font-semibold text-action ${focus}`}
+              className={`inline-flex min-h-10 cursor-pointer items-center rounded-sm text-[14px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-signal ${focus}`}
             >
               Edit plan<span className="sr-only">: {plan.title}</span>
             </summary>

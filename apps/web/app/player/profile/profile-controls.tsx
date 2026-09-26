@@ -19,15 +19,10 @@ export function ThemePicker({ initial }: { initial: ThemeChoice }) {
   function pick(value: ThemeChoice) {
     setChoice(value);
     const root = document.querySelector<HTMLElement>(".sh-themed");
-    if (value === "system") {
-      // biome-ignore lint/suspicious/noDocumentCookie: Cookie Store API is missing in Safari and Firefox; this cookie is a non-sensitive preference.
-      document.cookie = "sh-theme=; path=/; max-age=0; samesite=lax";
-      if (root) delete root.dataset.theme;
-    } else {
-      // biome-ignore lint/suspicious/noDocumentCookie: as above.
-      document.cookie = `sh-theme=${value}; path=/; max-age=31536000; samesite=lax`;
-      if (root) root.dataset.theme = value;
-    }
+    // Dark is the default (ADR 0026), so every choice is stored explicitly.
+    // biome-ignore lint/suspicious/noDocumentCookie: Cookie Store API is missing in Safari and Firefox; this cookie is a non-sensitive preference.
+    document.cookie = `sh-theme=${value}; path=/; max-age=31536000; samesite=lax`;
+    if (root) root.dataset.theme = value;
   }
   return (
     <fieldset>
@@ -38,7 +33,7 @@ export function ThemePicker({ initial }: { initial: ThemeChoice }) {
             key={value}
             className={`flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border text-[15px] font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${
               choice === value
-                ? "border-ink bg-ink text-paper"
+                ? "border-signal bg-signal-soft text-ink"
                 : "border-control-border text-ink-2 hover:bg-surface-subtle"
             }`}
           >

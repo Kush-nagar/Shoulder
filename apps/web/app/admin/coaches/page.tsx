@@ -1,7 +1,8 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Flag } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { When } from "../../coaching/client";
+import { Monogram } from "../../coaching/parts";
 import { read, requireSignedIn } from "../../coaching/server";
 import type {
   CoachReviewSummary,
@@ -11,6 +12,7 @@ import type {
 import {
   emptyBox,
   errorBox,
+  filterChip,
   focus,
   pageTitle,
   sectionTitle,
@@ -23,11 +25,6 @@ const TABS: [CoachStatus, string][] = [
   ["verified", "Verified"],
   ["suspended", "Suspended"],
 ];
-
-const chipBase = `inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] font-semibold transition-colors duration-150 ease-out ${focus}`;
-const chipOn = "border-ink bg-ink text-paper";
-const chipOff =
-  "border-control-border text-ink-2 hover:bg-surface-subtle hover:text-ink";
 
 export default async function AdminCoachesPage({
   searchParams,
@@ -58,15 +55,18 @@ export default async function AdminCoachesPage({
         <h1 id="queue-title" className={pageTitle}>
           Coach reviews
         </h1>
-        <nav aria-label="Review status" className="mt-6">
-          <ul className="flex flex-wrap gap-2">
+        <nav
+          aria-label="Review status"
+          className="-mx-4 mt-6 overflow-x-auto px-4 pb-1 min-[375px]:-mx-5 min-[375px]:px-5 md:mx-0 md:px-0"
+        >
+          <ul className="flex gap-2 md:flex-wrap">
             {TABS.map(([key, name]) => (
               <li key={key}>
                 <Link
                   href={`/admin/coaches?status=${key}`}
                   scroll={false}
                   aria-current={key === status ? "true" : undefined}
-                  className={`${chipBase} ${key === status ? chipOn : chipOff}`}
+                  className={filterChip(key === status)}
                 >
                   {name}
                 </Link>
@@ -86,14 +86,18 @@ export default async function AdminCoachesPage({
             </p>
           </div>
         ) : (
-          <ul className="mt-6 divide-y divide-line border-y border-line">
+          <ul className="sh-stagger mt-6 space-y-2">
             {queue.data.map((coach) => (
               <li key={coach.id}>
                 <Link
                   href={`/admin/coaches/${coach.id}`}
-                  className={`flex min-h-16 items-center justify-between gap-4 rounded-lg px-2 py-3 hover:bg-surface-subtle ${focus}`}
+                  className={`group flex min-h-16 items-center gap-4 rounded-xl border border-line bg-surface p-3 transition-[border-color,background-color] duration-150 hover:border-line-strong hover:bg-surface-subtle md:p-4 ${focus}`}
                 >
-                  <span className="min-w-0">
+                  <Monogram
+                    name={coach.display_name}
+                    size="size-11 text-[18px]"
+                  />
+                  <span className="min-w-0 flex-1">
                     <span className="block truncate text-[17px] font-semibold">
                       {coach.display_name}
                     </span>
@@ -105,7 +109,7 @@ export default async function AdminCoachesPage({
                     size={20}
                     strokeWidth={2}
                     aria-hidden="true"
-                    className="shrink-0 text-muted"
+                    className="shrink-0 text-muted transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none"
                   />
                 </Link>
               </li>
@@ -119,8 +123,22 @@ export default async function AdminCoachesPage({
         aria-labelledby="reports-title"
         className="min-w-0 scroll-mt-40"
       >
-        <h2 id="reports-title" className={sectionTitle}>
+        <h2
+          id="reports-title"
+          className={`${sectionTitle} flex items-center gap-2.5`}
+        >
+          <Flag
+            size={20}
+            strokeWidth={2}
+            aria-hidden="true"
+            className="text-muted"
+          />
           Reports
+          {open.length ? (
+            <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-ink px-1.5 text-[12px] font-semibold text-paper tabular-nums">
+              {open.length}
+            </span>
+          ) : null}
         </h2>
         <p className="mt-1 text-[15px] leading-6 text-ink-2">
           An open report from a player who paid for a session with that coach
@@ -131,7 +149,9 @@ export default async function AdminCoachesPage({
             Reports couldn&apos;t load. Try again in a moment.
           </p>
         ) : open.length === 0 ? (
-          <p className="mt-4 text-[16px] text-muted">No open reports.</p>
+          <p className="mt-4 rounded-xl border border-line bg-surface px-4 py-5 text-[16px] text-ink-2">
+            No open reports.
+          </p>
         ) : (
           <ul className="mt-4 space-y-4">
             {open.map((report) => (

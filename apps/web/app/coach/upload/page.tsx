@@ -1,57 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  fetchGame,
-  fetchGames,
-  fetchTeams,
-  type VideoSummary,
-} from "../../../lib/api";
+import { ArrowUpRight } from "lucide-react";
+import { EmptyState } from "../../../components/empty-state";
+import { Status } from "../../../components/status";
+import { fetchGame, fetchGames, fetchTeams } from "../../../lib/api";
+import { gameLabel, mainVideo, videoState, videoTone } from "../match";
 import { requireCoach } from "../session";
 import { PageHeader } from "../shell";
-import { focus, metadata, panel, sectionTitle } from "../ui";
+import { focusInset, metadata, panel, sectionTitle } from "../ui";
 import { NewMatchForm } from "./new-match";
 import { Uploader } from "./uploader";
 
 export const dynamic = "force-dynamic";
-
-const dateLabel = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
-function gameLabel(game: {
-  opponent: string | null;
-  played_at: string;
-  kind: string;
-}) {
-  const when = dateLabel.format(new Date(game.played_at));
-  const who = game.opponent ? `vs ${game.opponent}` : "No opponent recorded";
-  return `${who} · ${when}${game.kind === "scrimmage" ? " · Scrimmage" : ""}`;
-}
-
-/**
- * Plain stages, never an animated percentage the worker cannot measure
- * (`docs/05-ui.md`). Transcoding itself is Task 11, so a stored file honestly
- * reads as waiting to be prepared.
- */
-function videoState(video: VideoSummary): string {
-  switch (video.status) {
-    case "uploading":
-      return `Upload unfinished — ${video.uploaded_parts} of ${video.part_count} parts stored`;
-    case "uploaded":
-      return "Uploaded · preparing video";
-    case "processing":
-      return "Preparing video";
-    case "ready":
-      return "Ready";
-    case "failed":
-      return "This upload did not finish. Upload the file again.";
-    default:
-      return "Not available";
-  }
-}
 
 export default async function UploadPage({
   searchParams,
@@ -73,10 +33,11 @@ export default async function UploadPage({
       <PageHeader
         title="Upload match"
         description="Send one match video straight to Shoulder's private storage."
+        action={null}
       />
-      <div className="grid gap-6 px-5 py-6 md:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:px-8">
+      <div className="grid gap-6 px-5 pb-8 md:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:px-8">
         <div className="space-y-6">
-          <section className={`${panel} p-5`} aria-labelledby="matches-heading">
+          <section aria-labelledby="matches-heading">
             <h2 id="matches-heading" className={sectionTitle}>
               Matches
             </h2>
@@ -90,29 +51,52 @@ export default async function UploadPage({
                 No match yet. Add the first one to upload its video.
               </p>
             ) : (
-              <ul className="mt-3 space-y-2">
-                {games.map((game) => (
-                  <li key={game.id}>
-                    <Link
-                      href={`/coach/upload?game=${game.id}`}
-                      aria-current={game.id === selectedId ? "page" : undefined}
-                      className={`block rounded-lg border p-3 text-[15px] leading-[1.5] ${focus} ${
-                        game.id === selectedId
-                          ? "border-ink bg-line/40"
-                          : "border-line hover:bg-line/25"
-                      }`}
-                    >
-                      <span className="block font-medium">
-                        {gameLabel(game)}
-                      </span>
-                      <span className={`${metadata} mt-0.5 block`}>
-                        {game.videos.length === 0
-                          ? "No video yet"
-                          : game.videos.map(videoState).join(" · ")}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
+              <ul
+                className={`${panel} mt-3 divide-y divide-line overflow-hidden`}
+              >
+                {games.map((game) => {
+                  const video = mainVideo(game);
+                  const current = game.id === selectedId;
+                  return (
+                    <li key={game.id} className="relative flex items-stretch">
+                      {current ? (
+                        <span
+                          aria-hidden="true"
+                          className="absolute inset-y-2 left-0 w-0.5 rounded-r-sm bg-signal"
+                        />
+                      ) : null}
+                      <Link
+                        href={`/coach/upload?game=${game.id}`}
+                        aria-current={current ? "page" : undefined}
+                        className={`block min-w-0 flex-1 px-4 py-3 text-[14px] leading-[1.45] transition-colors duration-140 ${focusInset} ${
+                          current ? "bg-signal-soft" : "hover:bg-surface-subtle"
+                        }`}
+                      >
+                        <span className="block font-medium text-ink">
+                          {gameLabel(game)}
+                        </span>
+                        <Status tone={videoTone(video)} className="mt-1">
+                          {game.videos.length === 0
+                            ? "No video yet"
+                            : game.videos.map(videoState).join(" · ")}
+                        </Status>
+                      </Link>
+                      {video?.status === "ready" ? (
+                        <Link
+                          href={`/coach/games/${game.id}`}
+                          aria-label={`Open ${gameLabel(game)}`}
+                          className={`flex w-12 shrink-0 items-center justify-center text-muted transition-colors duration-140 hover:bg-surface-subtle hover:text-ink ${focusInset}`}
+                        >
+                          <ArrowUpRight
+                            size={18}
+                            strokeWidth={1.75}
+                            aria-hidden="true"
+                          />
+                        </Link>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -122,13 +106,10 @@ export default async function UploadPage({
         {selected ? (
           <Uploader gameId={selected.id} gameLabel={gameLabel(selected)} />
         ) : (
-          <section className={`${panel} p-5`}>
-            <h2 className={sectionTitle}>Choose a match</h2>
-            <p className={`${metadata} mt-2`}>
-              Pick a match on the left, or add a new one, and Shoulder will ask
-              for its video file.
-            </p>
-          </section>
+          <EmptyState label="No match selected">
+            Pick a match, or add a new one, and Shoulder will ask for its video
+            file.
+          </EmptyState>
         )}
       </div>
     </>

@@ -15,7 +15,7 @@ try {
     if (!(Test-Path apps/web/.env.local)) { & ./scripts/bootstrap-auth.ps1 }
     $password = New-Secret
     $env:MIGRATION_DATABASE_URL = 'postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres'
-    & ./.tools/uv.exe run --locked alembic upgrade head
+    & ./.tools/uv.exe run --locked python -m alembic upgrade head
     if ($LASTEXITCODE) { throw 'Migration upgrade failed' }
     foreach ($role in @('shoulder_api', 'shoulder_operator')) {
         "ALTER ROLE $role PASSWORD '$password';" |

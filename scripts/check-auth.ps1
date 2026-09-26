@@ -9,7 +9,7 @@ try {
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     $password = [BitConverter]::ToString($bytes).Replace('-', '')
     $env:MIGRATION_DATABASE_URL = 'postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres'
-    & ./.tools/uv.exe run --locked alembic upgrade head
+    & ./.tools/uv.exe run --locked python -m alembic upgrade head
     if ($LASTEXITCODE) { throw 'Migration upgrade failed' }
     "ALTER ROLE shoulder_api PASSWORD '$password';" |
         & docker exec -i supabase_db_shoulder-local psql -U postgres -d postgres -q -v ON_ERROR_STOP=1

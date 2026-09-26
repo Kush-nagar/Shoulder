@@ -64,6 +64,10 @@ The supplied terracotta (`#C4633D`) remains the brand accent for marks, rules, s
 
 Do not add a team-color theme in the MVP. Team kits and opponent colors appear only inside match footage.
 
+### In the app (ADR 0026)
+
+The authenticated app is dark first and shares the marketing site's signal lime (`#DFFF3F`) and ivory. Think chalkboard, floodlights, training bib, match film: warm near-black surfaces, chalk-white type, and one lime signal that marks where to look (active nav, playhead, selected clip, primary action, focus). Terracotta is retired from the app UI; it remains only in the historical asset pack. Lime is never a wash, a glow, or a heading colour, and the mark stays ink or paper, never lime on lime.
+
 ## Typography character
 
 Inter Tight is the interface and editorial family. It has compact proportions without feeling mechanical. Use self-hosted WOFF2 variable-font files from `@fontsource-variable/inter-tight` through `next/font/local`; do not make a third-party font request from the browser.
@@ -71,7 +75,7 @@ Inter Tight is the interface and editorial family. It has compact proportions wi
 - Wordmark: custom vector artwork only.
 - Product UI: Inter Tight.
 - Player display titles (ADR 0022): Archivo, condensed (`font-stretch: 75%`, weight 600), self-hosted from `@fontsource-variable/archivo`. Only for player page titles, the goal hero title, and drill cover titles; never for body, labels, or the wordmark.
-- Timecodes and dense identifiers: Inter Tight with tabular numerals.
+- Timecodes and dense identifiers: Geist Mono (ADR 0026), self-hosted from `@fontsource-variable/geist-mono`; timestamps, halves, shirt numbers, dates in dense lists.
 - Long technical/code examples in internal docs only: a system monospace stack.
 - Maximum visible weight: 600. Avoid black/extrabold display text.
 

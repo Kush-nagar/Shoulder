@@ -1,27 +1,24 @@
 import { Check, FileText } from "lucide-react";
 import type { ReactNode } from "react";
 import { When } from "../client";
-import {
-  bookingStatusLabel,
-  dollars,
-  formatLabel,
-  minutesBetween,
-} from "../format";
+import { bookingStatusLabel, dollars, formatLabel } from "../format";
 import { adultOnly } from "../gate";
+import { StatusChip } from "../parts";
 import { read } from "../server";
 import type { CoachBooking, CoachProfile, CoachSlot } from "../types";
 import {
   emptyBox,
   errorBox,
+  focus,
   lead,
   pageTitle,
   panel,
   sectionTitle,
 } from "../ui";
 import {
-  CancelSlot,
   DocumentUpload,
   ProfileForm,
+  SlotAgenda,
   SlotForm,
   StripeButton,
   SubmitForReview,
@@ -50,11 +47,13 @@ function currentStep(profile: CoachProfile | null, hasDoc: boolean): Step {
 
 function Section({
   id,
+  n,
   title,
   state,
   children,
 }: {
   id: Step;
+  n: number;
   title: string;
   state: StepState;
   children: ReactNode;
@@ -63,22 +62,48 @@ function Section({
     <section
       id={id}
       aria-labelledby={`${id}-title`}
-      className="scroll-mt-40 border-t border-line py-8 first:border-t-0 first:pt-0"
+      className={`scroll-mt-40 rounded-2xl border p-5 md:p-6 ${
+        state === "current"
+          ? "border-line-strong bg-surface"
+          : "border-line bg-surface"
+      }`}
     >
       <h2
         id={`${id}-title`}
-        className={`${sectionTitle} flex items-center gap-3`}
+        className={`${sectionTitle} flex flex-wrap items-center gap-3`}
       >
+        <StepDot n={n} state={state} />
         {title}
         {state === "done" ? (
           <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-action-soft px-2.5 text-[13px] font-semibold text-ink">
             <Check size={14} strokeWidth={2.5} aria-hidden="true" />
             Done
           </span>
+        ) : state === "current" && id !== "bookings" ? (
+          <span className="inline-flex min-h-7 items-center rounded-md border border-signal/50 px-2.5 text-[13px] font-medium text-signal">
+            Next step
+          </span>
         ) : null}
       </h2>
-      <div className="mt-4">{children}</div>
+      <div className="mt-4 md:pl-11">{children}</div>
     </section>
+  );
+}
+
+function StepDot({ n, state }: { n: number; state: StepState }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex size-8 shrink-0 items-center justify-center rounded-full border text-[14px] font-semibold tabular-nums ${
+        state === "done"
+          ? "border-signal bg-signal-soft text-ink"
+          : state === "current"
+            ? "border-action bg-action text-on-action"
+            : "border-control-border text-muted"
+      }`}
+    >
+      {state === "done" ? <Check size={15} strokeWidth={2.5} /> : n}
+    </span>
   );
 }
 
@@ -143,6 +168,7 @@ export default async function CoachOnboardingPage() {
     if (key === "bookings" && step === "slots") return "current";
     return at < index ? "done" : at === index ? "current" : "todo";
   };
+  const done = STEPS.slice(0, -1).filter(([k]) => stateOf(k) === "done").length;
   const live = profile?.status === "verified" && profile.charges_enabled;
   const [slots, bookings] = live
     ? await Promise.all([
@@ -165,20 +191,43 @@ export default async function CoachOnboardingPage() {
           Your coach profile couldn&apos;t load. Try again in a moment.
         </p>
       ) : (
-        <div className="mt-10 grid gap-10 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-14">
+        <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-12">
           <nav
             aria-label="Setup steps"
             className="lg:sticky lg:top-40 lg:self-start"
           >
-            <ol className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:gap-0 lg:overflow-visible">
+            <p className="text-[14px] font-semibold text-ink-2 tabular-nums">
+              {done} of {STEPS.length - 1} steps done
+            </p>
+            <ol
+              aria-hidden="true"
+              className="mt-2 grid grid-cols-5 gap-1.5 lg:hidden"
+            >
+              {STEPS.slice(0, -1).map(([key]) => (
+                <li
+                  key={key}
+                  className={`h-1.5 rounded-full ${
+                    stateOf(key) === "done"
+                      ? "bg-ink"
+                      : stateOf(key) === "current"
+                        ? "bg-action"
+                        : "bg-line-strong"
+                  }`}
+                />
+              ))}
+            </ol>
+            <ol className="mt-3 flex gap-1 overflow-x-auto pb-1 lg:mt-4 lg:flex-col lg:gap-0 lg:overflow-visible">
               {STEPS.map(([key, name], i) => {
                 const state = stateOf(key);
                 return (
-                  <li key={key} className="shrink-0">
+                  <li
+                    key={key}
+                    className="relative shrink-0 lg:pb-2 lg:last:pb-0 lg:[&:not(:last-child)]:before:absolute lg:[&:not(:last-child)]:before:top-10 lg:[&:not(:last-child)]:before:bottom-0 lg:[&:not(:last-child)]:before:left-[23px] lg:[&:not(:last-child)]:before:w-px lg:[&:not(:last-child)]:before:bg-line-strong"
+                  >
                     <a
                       href={`#${key}`}
                       aria-current={state === "current" ? "step" : undefined}
-                      className={`flex min-h-11 items-center gap-3 rounded-lg px-2 text-[15px] outline-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
+                      className={`flex min-h-11 items-center gap-3 rounded-lg px-2 text-[15px] hover:bg-surface-subtle ${focus} ${
                         state === "current"
                           ? "font-semibold text-ink"
                           : state === "done"
@@ -186,22 +235,7 @@ export default async function CoachOnboardingPage() {
                             : "text-muted"
                       }`}
                     >
-                      <span
-                        aria-hidden="true"
-                        className={`flex size-7 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold tabular-nums ${
-                          state === "done"
-                            ? "border-ink bg-ink text-paper"
-                            : state === "current"
-                              ? "border-action text-action"
-                              : "border-control-border"
-                        }`}
-                      >
-                        {state === "done" ? (
-                          <Check size={14} strokeWidth={2.5} />
-                        ) : (
-                          i + 1
-                        )}
-                      </span>
+                      <StepDot n={i + 1} state={state} />
                       <span className="whitespace-nowrap">
                         {name}
                         <span className="sr-only">
@@ -219,9 +253,10 @@ export default async function CoachOnboardingPage() {
             </ol>
           </nav>
 
-          <div className="min-w-0 max-w-[720px]">
+          <div className="sh-stagger min-w-0 max-w-[760px] space-y-4">
             <Section
               id="profile"
+              n={1}
               title="Your profile"
               state={stateOf("profile")}
             >
@@ -230,6 +265,7 @@ export default async function CoachOnboardingPage() {
 
             <Section
               id="document"
+              n={2}
               title="Background check"
               state={stateOf("document")}
             >
@@ -284,6 +320,7 @@ export default async function CoachOnboardingPage() {
 
             <Section
               id="review"
+              n={3}
               title="Review by Shoulder"
               state={stateOf("review")}
             >
@@ -303,7 +340,12 @@ export default async function CoachOnboardingPage() {
               )}
             </Section>
 
-            <Section id="payouts" title="Payouts" state={stateOf("payouts")}>
+            <Section
+              id="payouts"
+              n={4}
+              title="Payouts"
+              state={stateOf("payouts")}
+            >
               {profile?.status === "verified" ? (
                 profile.charges_enabled ? (
                   <p className="text-[16px] leading-6 text-ink-2">
@@ -327,7 +369,12 @@ export default async function CoachOnboardingPage() {
               )}
             </Section>
 
-            <Section id="slots" title="Open times" state={stateOf("slots")}>
+            <Section
+              id="slots"
+              n={5}
+              title="Open times"
+              state={stateOf("slots")}
+            >
               {live && profile ? (
                 <div className="space-y-8">
                   <SlotForm formats={profile.formats} />
@@ -336,7 +383,7 @@ export default async function CoachOnboardingPage() {
                       Your times couldn&apos;t load. Try again in a moment.
                     </p>
                   ) : (
-                    <SlotList slots={slots?.data ?? []} />
+                    <SlotAgenda slots={slots?.data ?? []} />
                   )}
                 </div>
               ) : (
@@ -346,7 +393,12 @@ export default async function CoachOnboardingPage() {
               )}
             </Section>
 
-            <Section id="bookings" title="Bookings" state={stateOf("bookings")}>
+            <Section
+              id="bookings"
+              n={6}
+              title="Bookings"
+              state={stateOf("bookings")}
+            >
               {live ? (
                 bookings?.data === null ? (
                   <p role="alert" className={errorBox}>
@@ -368,53 +420,6 @@ export default async function CoachOnboardingPage() {
   );
 }
 
-function SlotList({ slots }: { slots: CoachSlot[] }) {
-  const shown = slots
-    .filter((s) => s.status !== "cancelled")
-    .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-  if (!shown.length)
-    return (
-      <div className={emptyBox}>
-        <p className="text-[16px] font-semibold">No open times yet.</p>
-        <p className="mt-1 text-[16px] leading-6 text-ink-2">
-          Add a time above and players can book it.
-        </p>
-      </div>
-    );
-  return (
-    <ul className="divide-y divide-line border-y border-line">
-      {shown.map((slot) => (
-        <li
-          key={slot.id}
-          className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start"
-        >
-          <div className="min-w-0">
-            <When
-              iso={slot.starts_at}
-              className="block text-[16px] font-semibold tabular-nums"
-            />
-            <p className="text-[15px] leading-6 text-ink-2">
-              {minutesBetween(slot.starts_at, slot.ends_at)} min,{" "}
-              {formatLabel[slot.format]}
-              {slot.venue ? `, ${slot.venue}` : ""}
-            </p>
-            <p className="text-[14px] text-muted">
-              {slot.status === "open"
-                ? "Open"
-                : slot.status === "held"
-                  ? "Someone is paying now"
-                  : "Booked"}
-            </p>
-          </div>
-          {slot.status !== "held" ? (
-            <CancelSlot id={slot.id} booked={slot.status === "booked"} />
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function BookingList({ bookings }: { bookings: CoachBooking[] }) {
   if (!bookings.length)
     return (
@@ -426,16 +431,25 @@ function BookingList({ bookings }: { bookings: CoachBooking[] }) {
       </div>
     );
   return (
-    <ul className="divide-y divide-line border-y border-line">
+    <ul className="space-y-3">
       {[...bookings]
         .sort((a, b) => b.starts_at.localeCompare(a.starts_at))
         .map((b) => (
-          <li key={b.id} className="py-4">
-            <When
-              iso={b.starts_at}
-              className="block text-[16px] font-semibold tabular-nums"
-            />
-            <p className="text-[16px] leading-6">
+          <li key={b.id} className="rounded-xl border border-line p-4">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <When
+                iso={b.starts_at}
+                className="text-[16px] font-semibold tabular-nums"
+              />
+              <StatusChip
+                status={b.status}
+                label={bookingStatusLabel[b.status].replace(
+                  "You cancelled",
+                  "Player cancelled",
+                )}
+              />
+            </div>
+            <p className="mt-1 text-[16px] leading-6">
               {b.player_first_name}
               <span className="text-ink-2">
                 {", "}
@@ -444,16 +458,12 @@ function BookingList({ bookings }: { bookings: CoachBooking[] }) {
               </span>
             </p>
             <p className="text-[14px] text-muted tabular-nums">
-              {bookingStatusLabel[b.status].replace(
-                "You cancelled",
-                "Player cancelled",
-              )}
-              , {dollars(b.price_cents - b.platform_fee_cents)} to you after the
+              {dollars(b.price_cents - b.platform_fee_cents)} to you after the
               10% fee
             </p>
             {b.note ? (
-              <p className="mt-1 max-w-[60ch] text-[15px] leading-6 text-ink-2">
-                Note: {b.note}
+              <p className="mt-2 max-w-[60ch] rounded-lg bg-surface-subtle px-3 py-2 text-[15px] leading-6 text-ink-2">
+                <span className="font-semibold text-ink">Note:</span> {b.note}
               </p>
             ) : null}
           </li>

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { formatBytes } from "../../../../lib/upload";
 import { When } from "../../../coaching/client";
 import { dollars, formatLabel, specialtyLabel } from "../../../coaching/format";
+import { Monogram } from "../../../coaching/parts";
 import { read, requireSignedIn } from "../../../coaching/server";
 import type { CoachReviewDetail, CoachStatus } from "../../../coaching/types";
 import {
@@ -24,6 +25,14 @@ const statusName: Record<CoachStatus, string> = {
   rejected: "Changes needed",
   verified: "Verified",
   suspended: "Suspended",
+};
+
+const statusTone: Record<CoachStatus, string> = {
+  draft: "border border-control-border text-ink-2",
+  pending_review: "border border-warning/50 text-warning",
+  rejected: "bg-error-soft text-error",
+  verified: "bg-action-soft text-ink",
+  suspended: "border border-line-strong bg-surface-subtle text-muted",
 };
 
 const kindName = {
@@ -57,20 +66,30 @@ export default async function AdminCoachPage({
           This profile couldn&apos;t load. Try again in a moment.
         </p>
       ) : (
-        <div className="mt-4 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-14">
+        <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-14">
           <article className="min-w-0">
-            <h1 className={pageTitle}>{coach.data.display_name}</h1>
-            <p className="mt-2 text-[15px] text-ink-2">
-              <span className="font-semibold text-ink">
-                {statusName[coach.data.status]}
-              </span>
-              {coach.data.verified_at ? (
-                <>
-                  {", verified "}
-                  <When iso={coach.data.verified_at} />
-                </>
-              ) : null}
-            </p>
+            <div className="flex items-center gap-4">
+              <Monogram
+                name={coach.data.display_name}
+                size="size-16 text-[26px]"
+              />
+              <div className="min-w-0">
+                <h1 className={pageTitle}>{coach.data.display_name}</h1>
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-[15px] text-ink-2">
+                  <span
+                    className={`inline-flex min-h-7 items-center rounded-full px-2.5 text-[13px] font-semibold ${statusTone[coach.data.status]}`}
+                  >
+                    {statusName[coach.data.status]}
+                  </span>
+                  {coach.data.verified_at ? (
+                    <>
+                      {"verified "}
+                      <When iso={coach.data.verified_at} />
+                    </>
+                  ) : null}
+                </p>
+              </div>
+            </div>
             <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-y border-line py-5 sm:grid-cols-4">
               <div>
                 <dt className="text-[13px] text-muted">Rate</dt>
@@ -112,19 +131,19 @@ export default async function AdminCoachPage({
               after about a minute. Every open is recorded.
             </p>
             {coach.data.documents.length ? (
-              <ul className="mt-4 divide-y divide-line border-y border-line">
+              <ul className="mt-4 space-y-2">
                 {coach.data.documents.map((doc) => (
                   <li
                     key={doc.id}
-                    className="flex flex-wrap items-center justify-between gap-3 py-3"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-3 md:px-4"
                   >
                     <span className="flex min-w-0 items-center gap-3">
-                      <FileText
-                        size={20}
-                        strokeWidth={2}
+                      <span
                         aria-hidden="true"
-                        className="shrink-0 text-muted"
-                      />
+                        className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-ink-2"
+                      >
+                        <FileText size={20} strokeWidth={2} />
+                      </span>
                       <span className="min-w-0">
                         <span className="block text-[16px] font-semibold">
                           {kindName[doc.kind]}

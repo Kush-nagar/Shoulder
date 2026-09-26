@@ -21,6 +21,15 @@ const archivo = localFont({
   declarations: [{ prop: "font-stretch", value: "62% 125%" }],
 });
 
+// Data face (ADR 0026): timestamps, halves, shirt numbers, match ids.
+const geistMono = localFont({
+  src: "../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2",
+  weight: "400 600",
+  style: "normal",
+  display: "swap",
+  variable: "--font-geist-mono",
+});
+
 export const metadata: Metadata = {
   title: "Shoulder",
   description: "A quiet space for coach-led development.",
@@ -32,8 +41,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf9f7" },
-    { media: "(prefers-color-scheme: dark)", color: "#141311" },
+    { media: "(prefers-color-scheme: light)", color: "#0a0a09" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a09" },
   ],
   // Lets the player shell pad itself with env(safe-area-inset-*).
   viewportFit: "cover",
@@ -45,7 +54,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${interTight.variable} ${archivo.variable}`}>
+    <html
+      lang="en"
+      className={`${interTight.variable} ${archivo.variable} ${geistMono.variable}`}
+    >
       <body>
         {children}
         <NativeBridge />

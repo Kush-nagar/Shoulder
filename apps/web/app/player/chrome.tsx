@@ -25,14 +25,14 @@ function Avatar({
   return (
     <span
       aria-hidden="true"
-      className={`${size} flex shrink-0 items-center justify-center rounded-full bg-ink text-[15px] font-semibold text-paper`}
+      className={`${size} flex shrink-0 items-center justify-center rounded-full bg-surface-subtle font-mono text-[13px] font-medium text-ink ring-1 ring-line-strong`}
     >
       {letter}
     </span>
   );
 }
 
-const sheetRow = `flex min-h-12 items-center gap-3 rounded-lg px-3 text-[16px] hover:bg-surface-subtle ${focus}`;
+const sheetRow = `flex min-h-12 items-center gap-3 rounded-lg px-3 text-[16px] text-ink hover:bg-surface-subtle ${focus}`;
 
 /**
  * Responsive player shell (ADR 0022, 0023): bottom tabs below 768 px, an icon
@@ -61,37 +61,42 @@ export async function PlayerChrome({
         aria-label="Shoulder sections"
         className="sticky top-0 z-30 hidden h-dvh md:block"
       >
-        <div className="sh-side-panel flex h-full flex-col border-r border-line bg-paper pt-[env(safe-area-inset-top)]">
+        <div className="sh-side-panel flex h-full flex-col border-r border-line bg-rail pt-[env(safe-area-inset-top)]">
           <Link
             href="/player"
             aria-label="Shoulder home"
-            className={`mx-3 mt-3 flex h-20 shrink-0 items-center justify-center rounded-xl ${focus}`}
+            className={`mx-2.5 mt-2.5 flex h-16 shrink-0 items-center justify-center rounded-lg ${focus}`}
           >
             <ShoulderMark
-              className="sh-sb-narrow size-10 text-ink"
+              className="sh-sb-narrow size-8 text-ink"
               aria-hidden="true"
             />
             <ShoulderWordmark
-              className="sh-sb-wide h-auto w-[164px] text-ink"
+              className="sh-sb-wide h-auto w-[128px] text-ink"
               aria-hidden="true"
             />
           </Link>
-          <div className="mt-4">
+          <div className="mt-3">
             <SideNav />
           </div>
-          <div className="mt-5 px-3">
+          <div className="mt-4 px-2.5">
             <Link
               href="/player/practice/new"
-              className={`${sideRow} bg-action font-semibold text-on-action hover:bg-action-hover active:scale-[0.98]`}
+              className={`${sideRow} border border-line-strong bg-surface-subtle font-medium text-ink hover:border-control-border hover:bg-popover active:scale-[0.98]`}
             >
-              <Video size={20} strokeWidth={2} aria-hidden="true" />
+              <Video
+                size={18}
+                strokeWidth={1.75}
+                aria-hidden="true"
+                className="text-signal"
+              />
               <span className="sh-sb-label">Film practice</span>
               <span aria-hidden="true" className={sideTip}>
                 Film practice
               </span>
             </Link>
           </div>
-          <div className="mt-auto space-y-1 px-3 pb-4">
+          <div className="mt-auto space-y-0.5 border-t border-line px-2.5 pt-2.5 pb-3">
             <SidebarToggle
               collapsed={collapsed}
               className={`${sideRow} w-full text-muted hover:bg-surface-subtle hover:text-ink`}
@@ -100,14 +105,14 @@ export async function PlayerChrome({
             <Link
               href="/player/profile"
               aria-label="Profile and settings"
-              className={`${sideRow} h-14 hover:bg-surface-subtle`}
+              className={`${sideRow} h-12 hover:bg-surface-subtle`}
             >
-              <Avatar letter={letter} />
+              <Avatar letter={letter} size="size-7" />
               <span className="sh-sb-label min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-semibold">
+                <span className="block truncate text-[14px] font-medium">
                   {me.display_name}
                 </span>
-                <span className="block truncate text-[13px] text-muted">
+                <span className="block truncate text-[12px] text-muted">
                   {me.email}
                 </span>
               </span>
@@ -126,14 +131,14 @@ export async function PlayerChrome({
       </aside>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-30 border-b border-line bg-paper/95 pt-[env(safe-area-inset-top)] md:hidden">
+        <header className="sticky top-0 z-30 border-b border-line bg-rail pt-[env(safe-area-inset-top)] md:hidden">
           <div className="flex h-14 items-center gap-2 px-2 min-[375px]:px-3">
             <Link
               href="/player"
               aria-label="Shoulder home"
               className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg ${focus}`}
             >
-              <ShoulderMark className="size-7" aria-hidden="true" />
+              <ShoulderMark className="size-7 text-ink" aria-hidden="true" />
             </Link>
             <div className="min-w-0 flex-1">
               <TopBarTitle />
@@ -163,7 +168,7 @@ export async function PlayerChrome({
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1200px] px-4 pt-6 pb-[calc(64px+env(safe-area-inset-bottom)+32px)] min-[375px]:px-5 md:px-8 md:pt-10 md:pb-16">
+        <main className="mx-auto w-full max-w-[1200px] px-4 pt-6 pb-[calc(64px+env(safe-area-inset-bottom)+32px)] min-[375px]:px-5 md:px-8 md:pt-8 md:pb-16">
           <PageTransition>{children}</PageTransition>
         </main>
       </div>

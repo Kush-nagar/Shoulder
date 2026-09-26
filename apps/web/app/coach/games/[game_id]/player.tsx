@@ -1,5 +1,15 @@
 "use client";
 
+import {
+  FastForward,
+  Keyboard,
+  Maximize,
+  Pause,
+  Play,
+  Rewind,
+  StepBack,
+  StepForward,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Judgment,
@@ -27,7 +37,12 @@ import {
   spriteLayout,
   tileOffset,
 } from "../../../../lib/timeline";
-import { focus, metadata, panel, secondary } from "../../ui";
+import { focus, metadata, secondary } from "../../ui";
+import { MatchTimeline } from "./timeline";
+
+/** Focus ring on the night stage: lime reads on the video's black. */
+const nightFocus =
+  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action-on-night";
 
 /**
  * The coach playback wrapper.
@@ -110,6 +125,7 @@ export function CoachPlayer({
   initialJudgmentId?: string;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const requestedTimeSeconds = useRef(0);
   const seekingToSeconds = useRef<number | null>(null);
   const savingClip = useRef(false);
@@ -124,6 +140,7 @@ export function CoachPlayer({
   const [message, setMessage] = useState("");
   const [currentMs, setCurrentMs] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const [hover, setHover] = useState<number | null>(null);
   const [inMs, setInMs] = useState<number | null>(null);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
@@ -806,316 +823,502 @@ export function CoachPlayer({
     });
   };
 
+  const seekTo = (atMs: number) => {
+    requestedTimeSeconds.current = atMs / 1000;
+    seekingToSeconds.current = atMs / 1000;
+    setCurrentMs(atMs);
+    if (video.current) video.current.currentTime = atMs / 1000;
+  };
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void stage.current?.requestFullscreen().catch(() => undefined);
+  };
+
+  const transport = `relative inline-flex size-9 shrink-0 items-center justify-center rounded-md text-on-night/80 transition-[background-color,color,transform] duration-140 hover:bg-on-night/10 hover:text-on-night active:scale-95 ${nightFocus}`;
+  const markButton = `relative inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-night-line px-2.5 text-[13px] font-medium text-on-night transition-[background-color,border-color,transform] duration-140 hover:border-on-night/30 hover:bg-on-night/8 active:scale-[0.97] ${nightFocus}`;
+
   return (
-    <section className={`${panel} p-5`} aria-labelledby="player-heading">
-      <h2
-        id="player-heading"
-        className="text-[17px] font-semibold leading-[1.35]"
-      >
-        Match video
-      </h2>
-      <p className={`${metadata} mt-1`}>{label}</p>
+    <section
+      aria-labelledby="player-heading"
+      className={
+        playerId
+          ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] xl:gap-5"
+          : "grid gap-3"
+      }
+    >
+      <div className="min-w-0">
+        <div className="mb-2 flex items-baseline justify-between gap-4">
+          <h2
+            id="player-heading"
+            className="text-[13px] font-medium leading-[1.35] text-ink-2"
+          >
+            Match video
+            <span className="sr-only">: {label}</span>
+          </h2>
+          <p className="hidden font-mono text-[12px] text-muted md:block">
+            {formatClock(currentMs)} / {formatClock(durationMs)}
+          </p>
+        </div>
 
-      {message ? (
-        <p role="alert" className="mt-4 text-[15px] leading-[1.5]">
-          {message}
-        </p>
-      ) : null}
+        {message ? (
+          <p
+            role="alert"
+            className="mb-3 rounded-lg border border-error/30 bg-error-soft px-4 py-3 text-[14px] leading-[1.5] text-ink"
+          >
+            {message}
+          </p>
+        ) : null}
 
-      {playback ? (
-        <>
-          {/* A fixed 16:9 box, so the frame never shifts the page as it loads. */}
-          <div className="mt-4 aspect-video w-full bg-ink">
-            <video
-              ref={video}
-              tabIndex={0}
-              src={playback.url}
-              preload="metadata"
-              playsInline
-              controls={false}
-              className="size-full"
-              onTimeUpdate={(event) => {
-                if (seekingToSeconds.current === null)
+        {playback ? (
+          <div
+            ref={stage}
+            className="overflow-hidden rounded-2xl bg-night text-on-night ring-1 ring-night-line [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:justify-end [&:fullscreen]:rounded-none"
+          >
+            {/* A fixed 16:9 box, so the frame never shifts the page as it loads. */}
+            <div className="aspect-video w-full bg-night [:fullscreen_&]:aspect-auto [:fullscreen_&]:flex-1">
+              <video
+                ref={video}
+                tabIndex={0}
+                src={playback.url}
+                preload="metadata"
+                playsInline
+                controls={false}
+                onClick={toggle}
+                className={`size-full cursor-pointer ${nightFocus} focus-visible:-outline-offset-2`}
+                onTimeUpdate={(event) => {
+                  if (seekingToSeconds.current === null)
+                    requestedTimeSeconds.current =
+                      event.currentTarget.currentTime;
+                  setCurrentMs(event.currentTarget.currentTime * 1000);
+                }}
+                onSeeked={(event) => {
+                  const desired = seekingToSeconds.current;
+                  if (
+                    desired !== null &&
+                    Math.abs(event.currentTarget.currentTime - desired) > 0.05
+                  ) {
+                    // WebKit can finish an older seek after a newer keyboard
+                    // seek. Re-apply the latest requested position once.
+                    event.currentTarget.currentTime = desired;
+                    return;
+                  }
+                  seekingToSeconds.current = null;
                   requestedTimeSeconds.current =
                     event.currentTarget.currentTime;
-                setCurrentMs(event.currentTarget.currentTime * 1000);
-              }}
-              onSeeked={(event) => {
-                const desired = seekingToSeconds.current;
-                if (
-                  desired !== null &&
-                  Math.abs(event.currentTarget.currentTime - desired) > 0.05
-                ) {
-                  // WebKit can finish an older seek after a newer keyboard
-                  // seek. Re-apply the latest requested position once.
-                  event.currentTarget.currentTime = desired;
-                  return;
+                  setCurrentMs(event.currentTarget.currentTime * 1000);
+                }}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onRateChange={(event) =>
+                  setSpeed(event.currentTarget.playbackRate)
                 }
-                seekingToSeconds.current = null;
-                requestedTimeSeconds.current = event.currentTarget.currentTime;
-                setCurrentMs(event.currentTarget.currentTime * 1000);
-              }}
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-            >
-              <track kind="captions" />
-            </video>
-          </div>
+              >
+                <track kind="captions" />
+              </video>
+            </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={toggle}
-              className={secondary}
-              aria-label={playing ? "Pause" : "Play"}
-            >
-              {playing ? "Pause" : "Play"}
-            </button>
-            <button
-              type="button"
-              onClick={() => seekBy(-10)}
-              className={secondary}
-              aria-label="Back ten seconds"
-            >
-              −10s
-            </button>
-            <button
-              type="button"
-              onClick={() => seekBy(10)}
-              className={secondary}
-              aria-label="Forward ten seconds"
-            >
-              +10s
-            </button>
-            <p className={`${metadata} tabular-nums`} aria-live="off">
-              {formatClock(currentMs)} / {formatClock(durationMs)}
-            </p>
-            {playerId ? (
-              <>
-                <button type="button" onClick={markIn} className={secondary}>
-                  Set clip in (I)
-                </button>
+            <MatchTimeline
+              durationMs={durationMs}
+              currentMs={currentMs}
+              hover={hover}
+              onHover={setHover}
+              onSeek={seekTo}
+              markers={
+                playerId
+                  ? drafts.map((draft) => ({
+                      id: draft.localId,
+                      startMs: draft.clipStartMs,
+                      endMs: draft.clipEndMs,
+                      selected: draft.localId === selectedDraftId,
+                    }))
+                  : []
+              }
+              inMs={playerId ? inMs : null}
+              timeline={timeline}
+              preview={
+                previewSheet && preview
+                  ? { url: previewSheet.url, x: preview.x, y: preview.y }
+                  : null
+              }
+            />
+
+            <div className="flex flex-wrap items-center gap-1 border-t border-night-line px-2 py-1.5 md:px-3">
+              <button
+                type="button"
+                onClick={() => seekBy(-10)}
+                className={transport}
+                aria-label="Back ten seconds"
+              >
+                <Rewind size={16} strokeWidth={1.75} aria-hidden="true" />
+                <Tip>Back 10s · J</Tip>
+              </button>
+              <button
+                type="button"
+                onClick={() => seekBy(-1)}
+                className={transport}
+                aria-label="Back one second"
+              >
+                <StepBack size={16} strokeWidth={1.75} aria-hidden="true" />
+                <Tip>Back 1s · ←</Tip>
+              </button>
+              <button
+                type="button"
+                onClick={toggle}
+                className={`${transport} size-10 bg-on-night/10 text-on-night`}
+                aria-label={playing ? "Pause" : "Play"}
+              >
+                {playing ? (
+                  <Pause size={18} strokeWidth={2} aria-hidden="true" />
+                ) : (
+                  <Play size={18} strokeWidth={2} aria-hidden="true" />
+                )}
+                <Tip>{`${playing ? "Pause" : "Play"} · Space`}</Tip>
+              </button>
+              <button
+                type="button"
+                onClick={() => seekBy(1)}
+                className={transport}
+                aria-label="Forward one second"
+              >
+                <StepForward size={16} strokeWidth={1.75} aria-hidden="true" />
+                <Tip>Forward 1s · →</Tip>
+              </button>
+              <button
+                type="button"
+                onClick={() => seekBy(10)}
+                className={transport}
+                aria-label="Forward ten seconds"
+              >
+                <FastForward size={16} strokeWidth={1.75} aria-hidden="true" />
+                <Tip>Forward 10s · L</Tip>
+              </button>
+              <p
+                className="ml-2 font-mono text-[13px] text-on-night tabular-nums"
+                aria-live="off"
+              >
+                {formatClock(currentMs)}
+                <span className="text-night-muted">
+                  {" "}
+                  / {formatClock(durationMs)}
+                </span>
+              </p>
+
+              <div className="ml-auto flex items-center gap-1.5">
+                {playerId ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={markIn}
+                      className={markButton}
+                    >
+                      <kbd className="font-mono text-[11px] text-night-muted">
+                        I
+                      </kbd>
+                      Set clip in
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void markOut()}
+                      className={`${markButton} ${inMs !== null ? "border-action-on-night/60 text-action-on-night" : ""}`}
+                    >
+                      <kbd className="font-mono text-[11px] text-night-muted">
+                        O
+                      </kbd>
+                      Set clip out
+                    </button>
+                  </>
+                ) : null}
+                <label className="relative">
+                  <span className="sr-only">Playback speed</span>
+                  <select
+                    value={speed}
+                    onChange={(event) => {
+                      const rate = Number(event.currentTarget.value);
+                      setSpeed(rate);
+                      if (video.current) video.current.playbackRate = rate;
+                    }}
+                    className={`h-8 cursor-pointer appearance-none rounded-md bg-transparent px-2 font-mono text-[12px] text-on-night/80 hover:bg-on-night/10 hover:text-on-night ${nightFocus}`}
+                  >
+                    {[0.5, 1, 1.5, 2].map((rate) => (
+                      <option key={rate} value={rate} className="bg-night">
+                        {rate}×
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   type="button"
-                  onClick={() => void markOut()}
-                  className={secondary}
+                  onClick={toggleFullscreen}
+                  className={transport}
+                  aria-label="Full screen"
                 >
-                  Set clip out (O)
+                  <Maximize size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <Tip>Full screen</Tip>
                 </button>
-                <p role="status" aria-live="polite" className={metadata}>
-                  {saveState}
-                </p>
-              </>
-            ) : null}
-          </div>
-
-          <div className="relative mt-3">
-            {playerId ? (
-              <div aria-hidden="true" className="absolute inset-x-0 top-0 h-1">
-                {drafts.map((draft) => (
-                  <span
-                    key={draft.localId}
-                    className="absolute h-1 min-w-px bg-ink"
-                    style={{
-                      left: `${(draft.clipStartMs / durationMs) * 100}%`,
-                      width: `${(((draft.clipEndMs ?? draft.clipStartMs) - draft.clipStartMs) / durationMs) * 100}%`,
-                    }}
-                  />
-                ))}
-                {inMs !== null ? (
-                  <span
-                    className="absolute h-2 w-0.5 bg-ink"
-                    style={{ left: `${(inMs / durationMs) * 100}%` }}
-                  />
-                ) : null}
               </div>
-            ) : null}
-            <label htmlFor="scrubber" className="sr-only">
-              Seek through the match
-            </label>
-            <input
-              id="scrubber"
-              type="range"
-              min={0}
-              max={Math.max(0, Math.round(durationMs))}
-              step={100}
-              value={Math.round(currentMs)}
-              aria-valuetext={formatClock(currentMs)}
-              onChange={(event) => {
-                const at = Number(event.target.value);
-                requestedTimeSeconds.current = at / 1000;
-                seekingToSeconds.current = at / 1000;
-                setCurrentMs(at);
-                if (video.current) video.current.currentTime = at / 1000;
-              }}
-              onMouseMove={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-                const ratio = (event.clientX - box.left) / box.width;
-                setHover(Math.max(0, Math.min(1, ratio)) * durationMs);
-              }}
-              onMouseLeave={() => setHover(null)}
-              className={`w-full ${focus}`}
-            />
+            </div>
           </div>
+        ) : message ? null : (
+          <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl bg-night ring-1 ring-night-line">
+            <span className="relative block h-px w-40 overflow-hidden bg-night-line">
+              <span className="sh-scan absolute inset-y-0 left-0 w-10 bg-action-on-night/70" />
+            </span>
+            <p className="text-[13px] text-night-muted">
+              Opening the match video…
+            </p>
+          </div>
+        )}
 
-          {previewSheet && preview && timeline ? (
-            <div
-              aria-hidden="true"
-              className="mt-2 border border-line"
-              style={{
-                width: timeline.tile_width,
-                height: timeline.tile_height,
-                backgroundImage: `url(${previewSheet.url})`,
-                backgroundPosition: `${preview.x}px ${preview.y}px`,
-              }}
-            />
+        <details className="group mt-3 text-[13px] text-muted">
+          <summary
+            className={`inline-flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-ink [&::-webkit-details-marker]:hidden ${focus}`}
+          >
+            <Keyboard size={15} strokeWidth={1.75} aria-hidden="true" />
+            Keyboard shortcuts
+          </summary>
+          <dl className="mt-2 grid max-w-xl grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-lg border border-line bg-surface p-3 sm:grid-cols-[auto_1fr_auto_1fr]">
+            {[
+              ["Space / K", "Play or pause"],
+              ["J / L", "Back or forward 10 seconds"],
+              ["← / →", "Step 1 second"],
+              ["Shift ← / →", "Step 10 seconds"],
+              ...(playerId
+                ? [
+                    ["I / O", "Set clip in / out"],
+                    ["1 · 2 · 3", "Verdict for the selected clip"],
+                    ["C", "Write the coach comment"],
+                    ["Esc", "Back to the video"],
+                  ]
+                : []),
+            ].map(([keys, action]) => (
+              <div key={keys} className="contents">
+                <dt className="font-mono text-[12px] text-ink">{keys}</dt>
+                <dd className="text-ink-2">{action}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      </div>
+
+      {playerId && playback ? (
+        <aside
+          aria-labelledby="clips-heading"
+          className="sh-inspector-in flex min-h-0 flex-col rounded-2xl border border-line bg-surface xl:sticky xl:top-[72px] xl:max-h-[calc(100dvh-88px)]"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+            <h3 id="clips-heading" className="text-[14px] font-semibold">
+              Marked clips
+              <span className="ml-2 font-mono text-[12px] font-normal text-muted">
+                {drafts.filter((draft) => draft.clipEndMs !== null).length}
+              </span>
+            </h3>
+            <p
+              role="status"
+              aria-live="polite"
+              className={`text-[12px] ${
+                saveState === "Needs attention"
+                  ? "text-error"
+                  : saveState === "Saved"
+                    ? "text-ink-2"
+                    : "text-warning"
+              }`}
+            >
+              {saveState}
+            </p>
+          </div>
+          {markingMessage ? (
+            <p className="border-b border-line px-4 py-2 font-mono text-[12px] text-action">
+              {markingMessage}
+            </p>
           ) : null}
-
-          <p className={`${metadata} mt-2`}>
-            Space plays and pauses. J and L jump ten seconds. Arrow keys step
-            one second, or ten with Shift.
-            {playerId ? " I sets the clip in; O saves the clip out." : ""}
-          </p>
-
-          {playerId ? (
-            <section className="mt-5 border-t border-line pt-4">
-              <h3 className="text-[15px] font-semibold">Marked clips</h3>
-              {markingMessage ? (
-                <p className={`${metadata} mt-2`}>{markingMessage}</p>
-              ) : null}
-              {drafts.length ? (
-                <ul aria-label="Marked clips" className="mt-2 space-y-2">
-                  {drafts.map((draft, index) => (
-                    <li
-                      key={draft.localId}
-                      className="rounded-lg border border-line px-3 py-3"
-                      onFocusCapture={() => setSelectedDraftId(draft.localId)}
-                    >
-                      <p className={`${metadata} tabular-nums`}>
-                        Clip {index + 1} · {formatClock(draft.clipStartMs)}–
-                        {draft.clipEndMs === null
-                          ? "Set out point"
-                          : formatClock(draft.clipEndMs)}{" "}
-                        · Manual
-                      </p>
-                      {draft.clipEndMs !== null ? (
-                        <div className="mt-3 space-y-3">
-                          <fieldset>
-                            <legend className="text-[15px] font-medium">
-                              Verdict for clip {index + 1}
-                            </legend>
-                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
-                              {(
-                                [
-                                  ["applied", "You did this"],
-                                  ["opportunity", "Chance to do this"],
-                                  ["not_relevant", "Not relevant"],
-                                ] as const
-                              ).map(([value, text]) => (
-                                <label
-                                  key={value}
-                                  className="flex items-center gap-2"
-                                >
-                                  <input
-                                    type="radio"
-                                    name={`verdict-${draft.localId}`}
-                                    value={value}
-                                    checked={draft.verdict === value}
-                                    onChange={() =>
-                                      editDraft(draft.localId, {
-                                        verdict: value,
-                                      })
-                                    }
-                                    disabled={draft.saveState === "conflict"}
-                                  />
-                                  <span>{text}</span>
-                                </label>
-                              ))}
-                            </div>
-                            <p className={`${metadata} mt-1`}>
-                              Not relevant is kept for the coach and excluded
-                              from publishing.
-                            </p>
-                          </fieldset>
-                          <label className="block text-[15px] font-medium">
-                            Coach comment for clip {index + 1}
-                            <textarea
-                              data-comment-for={draft.localId}
-                              value={draft.commentText}
-                              maxLength={400}
-                              rows={2}
-                              disabled={draft.saveState === "conflict"}
-                              onChange={(event) =>
-                                editDraft(draft.localId, {
-                                  commentText: event.currentTarget.value,
-                                })
-                              }
-                              className={`mt-1 block w-full rounded-lg border border-line bg-paper px-3 py-2 ${focus}`}
-                            />
-                          </label>
-                          <p className={metadata} aria-live="polite">
-                            {draft.saveState === "offline"
-                              ? "Offline — saved on this device"
-                              : draft.saveState === "attention"
-                                ? "Needs attention"
-                                : draft.saveState === "pending" ||
-                                    draft.saveState === "saving"
-                                  ? "Saving"
-                                  : draft.saveState === "conflict"
-                                    ? "Needs attention"
-                                    : "Saved"}
-                          </p>
-                          {draft.conflict ? (
-                            <div
-                              role="alert"
-                              className="rounded-lg border border-line p-3"
-                            >
-                              <p className="text-[15px] font-semibold">
-                                This clip changed in another session.
-                              </p>
-                              <p className={`${metadata} mt-1`}>
-                                Your draft: {draft.commentText || "No comment"}
-                              </p>
-                              <p className={`${metadata} mt-1`}>
-                                Server version:{" "}
-                                {draft.conflict.commentText || "No comment"}
-                              </p>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  className={secondary}
-                                  onClick={() => keepLocalDraft(draft.localId)}
-                                >
-                                  Keep my draft
-                                </button>
-                                <button
-                                  type="button"
-                                  className={secondary}
-                                  onClick={() =>
-                                    acceptServerDraft(draft.localId)
+          {drafts.length ? (
+            <ul
+              aria-label="Marked clips"
+              className="min-h-0 flex-1 divide-y divide-line overflow-y-auto"
+            >
+              {drafts.map((draft, index) => {
+                const selected = draft.localId === selectedDraftId;
+                return (
+                  <li
+                    key={draft.localId}
+                    className={`relative px-4 py-3 transition-colors duration-140 ${selected ? "bg-signal-soft" : ""}`}
+                    onFocusCapture={() => setSelectedDraftId(draft.localId)}
+                  >
+                    {selected ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-y-3 left-0 w-0.5 rounded-r-sm bg-signal"
+                      />
+                    ) : null}
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedDraftId(draft.localId);
+                          seekTo(draft.clipStartMs);
+                        }}
+                        className={`-mx-1 inline-flex items-center gap-2 rounded-sm px-1 text-left ${focus}`}
+                      >
+                        <span className="text-[13px] font-semibold text-ink">
+                          Clip {index + 1}
+                        </span>
+                        <span className="font-mono text-[12px] text-ink-2">
+                          {formatClock(draft.clipStartMs)}–
+                          {draft.clipEndMs === null
+                            ? "Set out point"
+                            : formatClock(draft.clipEndMs)}
+                        </span>
+                      </button>
+                      <span className="text-[12px] text-muted">
+                        Manual ·{" "}
+                        <span
+                          className={
+                            draft.saveState === "saved"
+                              ? ""
+                              : draft.saveState === "conflict" ||
+                                  draft.saveState === "attention"
+                                ? "text-error"
+                                : "text-warning"
+                          }
+                          aria-live="polite"
+                        >
+                          {draft.saveState === "offline"
+                            ? "Offline — saved on this device"
+                            : draft.saveState === "attention"
+                              ? "Needs attention"
+                              : draft.saveState === "pending" ||
+                                  draft.saveState === "saving"
+                                ? "Saving"
+                                : draft.saveState === "conflict"
+                                  ? "Needs attention"
+                                  : "Saved"}
+                        </span>
+                      </span>
+                    </div>
+                    {draft.clipEndMs !== null ? (
+                      <div className="mt-3 space-y-3">
+                        <fieldset>
+                          <legend className="sr-only">
+                            Verdict for clip {index + 1}
+                          </legend>
+                          <div className="flex flex-wrap gap-1 rounded-lg bg-paper p-1">
+                            {(
+                              [
+                                ["applied", "You did this"],
+                                ["opportunity", "Chance to do this"],
+                                ["not_relevant", "Not relevant"],
+                              ] as const
+                            ).map(([value, text]) => (
+                              <label
+                                key={value}
+                                className="relative flex min-h-8 flex-auto cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-[12px] leading-tight text-ink-2 transition-colors duration-140 hover:text-ink has-[:checked]:bg-popover has-[:checked]:text-ink has-[:checked]:shadow-pop has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus"
+                              >
+                                <input
+                                  type="radio"
+                                  name={`verdict-${draft.localId}`}
+                                  value={value}
+                                  checked={draft.verdict === value}
+                                  onChange={() =>
+                                    editDraft(draft.localId, {
+                                      verdict: value,
+                                    })
                                   }
-                                >
-                                  Use server version
-                                </button>
-                              </div>
+                                  disabled={draft.saveState === "conflict"}
+                                  className="size-3.5 shrink-0 appearance-none rounded-full border border-control-border outline-none checked:border-4 checked:border-action"
+                                />
+                                <span className="flex-1">{text}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <p className="mt-1.5 text-[12px] leading-[1.4] text-muted">
+                            Not relevant is kept for the coach and excluded from
+                            publishing.
+                          </p>
+                        </fieldset>
+                        <label className="block text-[12px] font-medium text-ink-2">
+                          Coach comment for clip {index + 1}
+                          <textarea
+                            data-comment-for={draft.localId}
+                            value={draft.commentText}
+                            maxLength={400}
+                            rows={2}
+                            placeholder="One sentence the player will read before the clip."
+                            disabled={draft.saveState === "conflict"}
+                            onChange={(event) =>
+                              editDraft(draft.localId, {
+                                commentText: event.currentTarget.value,
+                              })
+                            }
+                            className={`mt-1 block w-full resize-y rounded-md border border-control-border bg-paper px-3 py-2 text-[14px] font-normal leading-[1.45] text-ink placeholder:text-muted hover:border-ink-2 ${focus}`}
+                          />
+                        </label>
+                        {draft.conflict ? (
+                          <div
+                            role="alert"
+                            className="rounded-lg border border-warning/40 bg-warning-soft p-3"
+                          >
+                            <p className="text-[14px] font-semibold">
+                              This clip changed in another session.
+                            </p>
+                            <p className={`${metadata} mt-1`}>
+                              Your draft: {draft.commentText || "No comment"}
+                            </p>
+                            <p className={`${metadata} mt-1`}>
+                              Server version:{" "}
+                              {draft.conflict.commentText || "No comment"}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className={secondary}
+                                onClick={() => keepLocalDraft(draft.localId)}
+                              >
+                                Keep my draft
+                              </button>
+                              <button
+                                type="button"
+                                className={secondary}
+                                onClick={() => acceptServerDraft(draft.localId)}
+                              >
+                                Use server version
+                              </button>
                             </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={`${metadata} mt-2`}>
-                  No clips marked for this player yet.
-                </p>
-              )}
-            </section>
-          ) : null}
-        </>
-      ) : message ? null : (
-        <p className={`${metadata} mt-4`}>Opening the match video…</p>
-      )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="m-4 flex flex-1 flex-col items-center justify-center rounded-xl border border-line px-5 py-10 text-center">
+              <span aria-hidden="true" className="sh-pitch mb-4" />
+              <p className="font-mono text-[12px] text-muted uppercase">
+                No clips yet
+              </p>
+              <p className="mt-2 max-w-[30ch] text-[14px] leading-[1.5] text-ink">
+                Press <kbd className="font-mono text-[12px]">I</kbd> at the
+                start of a moment and{" "}
+                <kbd className="font-mono text-[12px]">O</kbd> at its end.
+              </p>
+            </div>
+          )}
+        </aside>
+      ) : null}
     </section>
+  );
+}
+
+/** Fast, concise tooltip for an icon-only transport control. */
+function Tip({ children }: { children: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="sh-tip rounded-md bg-popover px-2 py-1 font-sans text-[12px] font-medium leading-none text-ink shadow-pop"
+    >
+      {children}
+    </span>
   );
 }

@@ -4,10 +4,16 @@ import { ExternalLink, FileUp, Send, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useRef, useState } from "react";
 import { formatBytes } from "../../../lib/upload";
-import { send } from "../client";
-import { formatLabel, specialtyLabel, stripeUrl } from "../format";
+import { dayKey, dayParts, send, timeLabel, useInBrowser } from "../client";
+import {
+  formatLabel,
+  minutesBetween,
+  specialtyLabel,
+  stripeUrl,
+} from "../format";
 import {
   type CoachProfile,
+  type CoachSlot,
   type DocumentUploadStart,
   FORMATS,
   type Format,
@@ -317,7 +323,7 @@ export function DocumentUpload() {
   const percent = file ? Math.round((loaded / file.size) * 100) : 0;
   return (
     <form onSubmit={(event) => void upload(event)} className="space-y-4">
-      <div className="rounded-xl border border-dashed border-control-border p-4 md:p-5">
+      <div className="rounded-xl border border-line p-4 md:p-5">
         <label className="relative inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-control-border bg-surface px-4 text-[16px] font-semibold transition-[background-color,transform] duration-150 ease-out hover:bg-surface-subtle active:scale-[0.98] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-45 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus">
           <FileUp size={20} strokeWidth={2} aria-hidden="true" />
           Choose a file
@@ -662,5 +668,104 @@ export function CancelSlot({ id, booked }: { id: string; booked: boolean }) {
         </button>
       </div>
     </div>
+  );
+}
+
+const slotState: Record<CoachSlot["status"], [string, string]> = {
+  open: ["Open", "border border-control-border text-ink-2"],
+  held: ["Someone is paying now", "bg-surface-subtle text-ink-2"],
+  booked: ["Booked", "bg-action-soft text-ink"],
+  cancelled: ["Cancelled", "bg-surface-subtle text-muted"],
+};
+
+/** Open times as a day-by-day agenda: a date tile, then that day's times. */
+export function SlotAgenda({ slots }: { slots: CoachSlot[] }) {
+  const ready = useInBrowser();
+  const shown = slots
+    .filter((s) => s.status !== "cancelled")
+    .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  if (!shown.length)
+    return (
+      <div className="rounded-xl border border-line px-5 py-8">
+        <p className="text-[16px] font-semibold">No open times yet.</p>
+        <p className="mt-1 text-[16px] leading-6 text-ink-2">
+          Add a time above and players can book it.
+        </p>
+      </div>
+    );
+  const days: { key: string; first: string; slots: CoachSlot[] }[] = [];
+  for (const slot of shown) {
+    const key = ready ? dayKey(slot.starts_at) : slot.starts_at.slice(0, 10);
+    const last = days.at(-1);
+    if (last?.key === key) last.slots.push(slot);
+    else days.push({ key, first: slot.starts_at, slots: [slot] });
+  }
+  return (
+    <ol className="space-y-3">
+      {days.map((day) => {
+        const parts = ready ? dayParts(day.first) : null;
+        return (
+          <li
+            key={day.key}
+            className="grid grid-cols-[56px_minmax(0,1fr)] gap-4 rounded-xl border border-line p-3 md:p-4"
+          >
+            <span
+              aria-hidden="true"
+              className="flex h-16 flex-col items-center justify-center rounded-lg bg-surface-subtle"
+            >
+              <span className="text-[12px] font-semibold text-ink-2">
+                {parts?.weekday ?? " "}
+              </span>
+              <span className="font-display text-[24px] leading-none tabular-nums">
+                {parts?.day ?? " "}
+              </span>
+              <span className="text-[11px] text-muted">
+                {parts?.month ?? " "}
+              </span>
+            </span>
+            <ul className="min-w-0 divide-y divide-line">
+              {day.slots.map((slot) => {
+                const [label, tone] = slotState[slot.status];
+                return (
+                  <li
+                    key={slot.id}
+                    className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-2 first:pt-0 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-center gap-2">
+                        <time
+                          dateTime={slot.starts_at}
+                          className="text-[16px] font-semibold tabular-nums"
+                        >
+                          {ready
+                            ? `${timeLabel(slot.starts_at)} to ${timeLabel(slot.ends_at)}`
+                            : " "}
+                        </time>
+                        <span
+                          className={`inline-flex min-h-6 items-center rounded-full px-2 text-[12px] font-semibold ${tone}`}
+                        >
+                          {label}
+                        </span>
+                      </p>
+                      <p className="text-[14px] leading-6 text-ink-2">
+                        {minutesBetween(slot.starts_at, slot.ends_at)} min,{" "}
+                        {formatLabel[slot.format]}
+                        {slot.venue ? `, ${slot.venue}` : ""}
+                      </p>
+                    </div>
+                    {slot.status !== "held" ? (
+                      <CancelSlot
+                        id={slot.id}
+                        booked={slot.status === "booked"}
+                      />
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

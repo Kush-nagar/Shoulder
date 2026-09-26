@@ -30,7 +30,7 @@ const periods: [Period, string][] = [
 ];
 
 const chipBase = `inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] font-semibold transition-colors duration-150 ease-out ${focus}`;
-const chipOn = "border-ink bg-ink text-paper";
+const chipOn = "border-signal bg-signal-soft text-ink";
 const chipOff =
   "border-control-border text-ink-2 hover:bg-surface-subtle hover:text-ink";
 

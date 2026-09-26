@@ -12,7 +12,6 @@ import type {
 import {
   field,
   fieldError,
-  focus,
   hint,
   label,
   primaryButton,
@@ -178,7 +177,7 @@ export function OpenDocument({
         type="button"
         onClick={() => void open()}
         disabled={busy}
-        className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] font-semibold text-action underline-offset-4 hover:underline ${focus}`}
+        className={secondaryButton}
       >
         {busy ? "Opening…" : "Open"}
         <ExternalLink size={16} strokeWidth={2} aria-hidden="true" />

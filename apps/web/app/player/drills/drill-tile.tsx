@@ -50,10 +50,10 @@ export function DrillTile({
       {forGoal ? (
         <span
           aria-hidden="true"
-          className="absolute inset-x-0 top-0 h-[3px] bg-brand"
+          className="absolute inset-y-4 left-0 w-0.5 rounded-r-sm bg-signal"
         />
       ) : null}
-      <span className="text-[13px] font-semibold text-action">
+      <span className="text-[12px] font-medium text-ink-2">
         {drill.focus}
         {forGoal ? (
           <span className="font-normal text-muted">, for your goal</span>

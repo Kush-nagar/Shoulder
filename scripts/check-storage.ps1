@@ -17,7 +17,7 @@ try {
     & ./scripts/infra.ps1 start
     $password = New-Secret
     $env:MIGRATION_DATABASE_URL = 'postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres'
-    & ./.tools/uv.exe run --locked alembic upgrade head
+    & ./.tools/uv.exe run --locked python -m alembic upgrade head
     if ($LASTEXITCODE) { throw 'Migration upgrade failed' }
     foreach ($role in @('shoulder_api', 'shoulder_operator', 'shoulder_worker')) {
         "ALTER ROLE $role PASSWORD '$password';" |

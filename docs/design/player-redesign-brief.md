@@ -503,3 +503,52 @@ Rules kept: one accent, no gradients for decoration, no emoji, no badges,
 streaks, nudges or scores. Changed from section 3.5: skeleton shimmer is the
 single allowed loop (loading placeholders only), and rail items may be
 icon-only when they carry an accessible name and a tooltip.
+
+---
+
+## Coach marketplace, 2026-09-26
+
+Visual pass on the Block 10M pilot screens (`/coaching/**`, `/admin/coaches/**`)
+in the ADR 0022/0024 system: same tokens, Archivo for names and titles, lucide
+icons, skeletons, motion behind `prefers-reduced-motion`, both themes. No
+photos of people and no external images: coaches get an initials tile.
+Patterns adopted:
+
+| # | Pattern | Where it lands | Source |
+|---|---|---|---|
+| 1 | Day and time chosen on one screen, not a multi-step wizard | Coach page booking panel: day strip, then that day's times, then summary | https://calendly.com/blog/new-scheduling-page-ui |
+| 2 | Column view that hides days with no open times | Day strip lists only days that have open slots; each tile is weekday, date, month | https://cal.com/blog/v-3-3 , https://cal.com/blog/enhanced-flexibility-take-advantage-of-cal-com-s-multiple-booking-layouts |
+| 3 | Sticky reservation card on desktop that becomes a sticky bottom bar on phones, with the price and one action | Booking panel sticks beside the profile from 1024 px; below it the price, chosen time and "Book and pay" pin to the bottom (above the phone tabs) | https://getdesign.md/design-md/airbnb/preview |
+| 4 | Fee breakdown beside the pay button, before checkout | "No booking fee for you. The coach receives $X after Shoulder's 10%." and the exact refund deadline for the chosen time | https://www.airbnb.com/help/article/3640 |
+| 5 | A verification badge on the profile once the team has checked documents | "Background check verified" pill on every card and profile hero | https://www.superprof.ca/blog/private-tutors-guarantees/ |
+| 6 | Upcoming vs past bookings as separate tabs; the cancellation window stated up front | Bookings page tabs with counts; cancel opens an inline refund preview that defaults focus to "Keep it" | https://help.classpass.com/hc/en-us/articles/26002263289741-How-do-I-know-if-my-booking-cancellation-processed , https://blog.classpass.com/how-the-classpass-late-cancellation-policy-works/ |
+| 7 | Skeletons shaped like the final cards, sharing one moving gradient; empty states that say what to do next | New `loading.tsx` for browse, coach and bookings; empty filter result offers "Clear filters" | https://carbondesignsystem.com/patterns/loading-pattern/ |
+| 8 | One quiet search bar plus a horizontally scrollable row of pill filters | Browse filter bar: city field and specialty pills (scroll on phones, wrap on desktop); results counted and marked "In no particular order" | https://superdesign.dev/blog/airbnb-design-system , https://github.com/kwakseongjae/oh-my-design/blob/main/design-md/airbnb/DESIGN.md |
+
+Rules kept: no ratings, rankings or "top coach" surfaces (ADR 0023), one
+accent, no stock photos. Demo profiles (bio starts "Demo coach profile.") show
+a dashed "Demo" tag instead of the "(demo)" name suffix. When Stripe is not
+configured the booking API answers 503 `payments-unavailable` and the panel
+shows "Booking opens soon — payments are being set up." instead of an error.
+
+---
+
+## Dark app system research, 2026-09-26
+
+Research for ADR 0026 (dark-first authenticated app). Principles were taken,
+not layouts; every screen still follows Shoulder's product rules (no scores,
+no computer vision on match footage, coach-authored verdicts only).
+
+| Reference | Principle borrowed | How it landed in Shoulder |
+|---|---|---|
+| Linear UI redesign (https://linear.app/now/how-we-redesigned-the-linear-ui) | Chrome recedes so content leads; fewer, calmer surfaces; hierarchy through contrast, not borders; dark theme built from base, accent, contrast | Rail colour one step off the page, 14 px nav rows, one accent, lines at 8 to 12% white, surface steps before borders |
+| Raycast design system (https://getdesign.md/raycast/design-md , https://styles.refero.design/style/3b6a17f0-3bdf-418c-a95e-0b89e5a8b2f8) | Near-black canvas with barely visible elevation steps; one warm accent; compact uniform rows with a high-contrast selected state driven by the keyboard; mono for metadata | Warm `#0A0A09` to `#1D1D19` steps, lime selected row tint plus edge marker, Geist Mono for timestamps and numbers |
+| Metrica Nexus / PlayBase (https://www.metrica-sports.com/blog/metrica-nexus-2.0-tutorial-the-complete-walkthrough , https://www.metrica-sports.com/help-center/playbase-fundamentals/quick-tagging) | Events land on the timeline as ranges; a playback needle; arrow keys step the match; record and save clips from the keyboard | Match timeline with clip ranges, lime playhead, I and O on the transport bar with their keys shown, arrow-key stepping |
+| Hudl Sportscode (https://www.hudl.com/products/sportscode , https://www.hudl.com/blog/multi-game-analysis-hudl-sportscode) | Timeline, video player and code window as the three core parts, kept adjacent | Video, timeline, and clip inspector side by side in the review workspace; no dashboard cards around the footage |
+| Veo Editor (https://www.veo.com/en-us/product/veo-editor , https://support.veo.com/hc/en-us/articles/4454946199057-Veo-Editor-overview-features-and-available-tools) | The timeline shows every clip so key moments are easy to revisit | Clip rows seek the video to their in point; the selected clip is the one lime range. Veo's AI-detected events are deliberately not copied: match footage has no CV here |
+| Professional editors (DaVinci Resolve, Premiere; general practice) | Ruler with timecode labels beside ticks, thin hover line, frame preview on hover, dark stage around the picture | Mono ruler, hover time chip with the sprite frame above the track, night stage framing in both themes |
+
+Transformations: lime replaces Veo/Hudl brand colours as the only "look here"
+signal; the tactical-board feel comes from the halfway-line geometry in empty
+states and the chalk-white type, not from pitch wallpaper; nothing here adds
+analytics, confidence, or percentages.
