@@ -162,6 +162,27 @@ export default async function SignIn({
             d="M207 254 Q316 214 394 217 Q496 171 568 114"
             pathLength={1}
           />
+          <path
+            d="M394 217 568 114 490 317Z"
+            className="text-lime"
+            fill="currentColor"
+            fillOpacity={0.12}
+            stroke="none"
+          />
+          <g fill="currentColor" stroke="none" className="text-on-night">
+            <circle cx="207" cy="122" r="6" />
+            <circle cx="207" cy="380" r="6" />
+            <circle cx="310" cy="148" r="6" />
+            <circle cx="312" cy="351" r="6" />
+            <circle cx="490" cy="317" r="6" />
+            <circle cx="576" cy="386" r="6" />
+            <circle cx="650" cy="250" r="6" />
+          </g>
+          <g fill="currentColor" stroke="none" className="text-lime">
+            <circle cx="207" cy="254" r="8" />
+            <circle cx="394" cy="217" r="8" />
+            <circle cx="568" cy="114" r="8" />
+          </g>
         </svg>
         <p className="sh-lift relative max-w-[14ch] font-display text-[64px] leading-[0.98] uppercase">
           Check your shoulder before you receive.

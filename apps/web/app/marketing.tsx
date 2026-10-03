@@ -602,7 +602,7 @@ export function MarketingPage() {
           id="product"
           aria-labelledby="mk-both-title"
         >
-          <div className="mk-both-head" data-reveal>
+          <div className="mk-both-head">
             <h2 id="mk-both-title">Shoulder to shoulder.</h2>
             <p>
               The coach stands beside the player, not above them. One workspace
@@ -694,7 +694,7 @@ export function MarketingPage() {
 
         {/* ------------------------------------------- Between matches */}
         <section className="mk-train" aria-labelledby="mk-train-title">
-          <div className="mk-train-head" data-reveal>
+          <div className="mk-train-head">
             <h2 id="mk-train-title">
               Between matches, <span>the work keeps going.</span>
             </h2>
@@ -888,7 +888,7 @@ export function MarketingPage() {
           id="about"
           aria-labelledby="mk-privacy-title"
         >
-          <h2 id="mk-privacy-title" data-reveal>
+          <h2 id="mk-privacy-title">
             Their game.
             <br />
             Their space.

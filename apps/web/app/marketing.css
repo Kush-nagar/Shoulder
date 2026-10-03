@@ -307,9 +307,6 @@
 }
 .mk-line > span {
   display: block;
-  width: fit-content;
-  background: var(--mk-paper);
-  box-shadow: 0 0 0 0.12em var(--mk-paper);
 }
 .mk-hero-bottom {
   display: flex;
@@ -364,6 +361,12 @@
 }
 .mk-hero .mk-pitch {
   color: rgba(17, 17, 15, 0.2);
+}
+/* Lines fade out behind the headline instead of crossing it. */
+@media (min-width: 900px) {
+  .mk-hero .mk-pitch {
+    mask-image: linear-gradient(90deg, transparent 0 18%, #000 42%);
+  }
 }
 .mk-formation .mk-players circle {
   fill: var(--mk-ink);
