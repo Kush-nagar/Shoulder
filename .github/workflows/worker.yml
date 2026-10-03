@@ -1,0 +1,56 @@
+# CPU worker (ADR 0028): transcodes, clip exports, emails, retention sweeps.
+# Woken by the database (`worker_wake.dispatch`, migration 0021) when a job is
+# queued; the schedule is the safety net and runs the retention sweep. Each
+# run drains the queue and exits, so minutes are only spent on real work.
+name: worker
+
+on:
+  repository_dispatch:
+    types: [worker]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */6 * * *'
+
+# Bursts of wake-ups collapse to one running plus one pending run. Leases in
+# app.processing_job keep two runs from claiming the same job regardless.
+concurrency:
+  group: worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  drain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      WORKER_DATABASE_URL: ${{ secrets.WORKER_DATABASE_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_REGION: ${{ secrets.R2_REGION }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      APP_ORIGIN: https://shoulderapp.vercel.app
+      WORKER_LOG_LEVEL: INFO
+      FFMPEG_BINARY: /usr/bin/ffmpeg
+      FFPROBE_BINARY: /usr/bin/ffprobe
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+          python-version: '3.11.16'
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked --no-dev
+      - name: Drain the queue
+        run: uv run --locked --no-dev python -m services.worker.main --drain
