@@ -166,6 +166,13 @@ class Worker:
     def drain(self, idle_seconds: float = DRAIN_IDLE_SECONDS) -> int:
         """Run until the queue has stayed empty for `idle_seconds`; return jobs run."""
         logger.info("worker %s draining; kinds=%s", self.identity, sorted(HANDLERS))
+        # Sweep once per wake-up. The sweep enqueues a retention job every
+        # minute, so sweeping inside the loop would never let the queue idle.
+        try:
+            self.maybe_sweep()
+        except jobs.QueueError:
+            logger.exception("queue unavailable")
+        self._last_sweep = float("inf")
         handled = 0
         idle_since = time.monotonic()
         while not self.stopping.is_set():
