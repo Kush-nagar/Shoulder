@@ -4,6 +4,8 @@ packages:
 overrides:
   # The parent pins vulnerable 4.3.1; use the GHSA-2883-xcg3-v3hh patch.
   '@redocly/openapi-core>js-yaml': 4.3.2
+  # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p, GHSA-q2hr-2g5m-vwhr.
+  'minimatch>brace-expansion': 2.1.7
 minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - '@playwright/test@1.63.0'
