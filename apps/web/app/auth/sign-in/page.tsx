@@ -1,6 +1,8 @@
+import type { CSSProperties } from "react";
 import { ShoulderMark, ShoulderWordmark } from "../../../components/brand";
 import { verifiedRedirectPath } from "../../../lib/auth/policy";
 import { savedTheme, themeAttribute } from "../../../lib/theme";
+import { Submit } from "./submit";
 
 /** Google's mark, inline and decorative; the button's text is its label. */
 function GoogleMark() {
@@ -48,16 +50,20 @@ export default async function SignIn({
           <ShoulderWordmark className="h-auto w-36" />
         </header>
         <div className="my-auto w-full max-w-sm py-12">
-          <h1 className="font-display text-[34px] leading-[1.05] md:text-[40px]">
+          <h1 className="sh-lift font-display text-[34px] uppercase leading-[1.05] md:text-[40px]">
             Sign in to Shoulder
           </h1>
-          <p className="mt-3 text-[16px] leading-6 text-ink-2">
-            Your coach&apos;s clips and your own practice, in one private place.
+          <p
+            className="sh-lift mt-3 text-[16px] leading-6 text-ink-2"
+            style={{ "--i": 1 } as CSSProperties}
+          >
+            Coaches review the match and publish a few moments. Players watch
+            their own clips and practice, in one private place.
           </p>
           {state.sent && (
             <p
               role="status"
-              className="mt-6 rounded-xl border border-line bg-surface p-4 text-[16px] leading-6"
+              className="sh-lift mt-6 rounded-xl border border-line bg-surface p-4 text-[16px] leading-6"
             >
               If sign-in is available, check your email for a link. Open it in
               this browser.
@@ -66,26 +72,34 @@ export default async function SignIn({
           {state.error && (
             <p
               role="alert"
-              className="mt-6 rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
+              className="sh-lift mt-6 rounded-xl bg-error-soft p-4 text-[16px] leading-6 text-error"
             >
               We could not sign you in. Try again.
             </p>
           )}
-          <form action="/auth/google" method="post" className="mt-8">
+          <form
+            action="/auth/google"
+            method="post"
+            className="sh-lift mt-8"
+            style={{ "--i": 2 } as CSSProperties}
+          >
             {next ? <input type="hidden" name="next" value={next} /> : null}
-            <button
-              type="submit"
+            <Submit
+              pending="Opening Google…"
               className={`${button} border border-control-border bg-surface hover:bg-surface-subtle`}
             >
               {/* Inline, not an <img> or a Google-hosted asset: the sign-in page is
                   asserted to make no cross-origin request and to contain no image. */}
               <GoogleMark />
               Continue with Google
-            </button>
+            </Submit>
           </form>
           {/* Deliberately not a heading: the sign-in page's tests locate its only
               heading without scoping, so a second one would make them ambiguous. */}
-          <p className="mt-6 flex items-center gap-3 text-[14px] text-muted">
+          <p
+            className="sh-lift mt-6 flex items-center gap-3 text-[14px] text-muted"
+            style={{ "--i": 3 } as CSSProperties}
+          >
             <span aria-hidden="true" className="h-px flex-1 bg-line" />
             Or use your email address
             <span aria-hidden="true" className="h-px flex-1 bg-line" />
@@ -93,7 +107,8 @@ export default async function SignIn({
           <form
             action="/auth/magic-link"
             method="post"
-            className="mt-4 flex flex-col gap-2"
+            className="sh-lift mt-4 flex flex-col gap-2"
+            style={{ "--i": 4 } as CSSProperties}
           >
             {next ? <input type="hidden" name="next" value={next} /> : null}
             <label htmlFor="email" className="text-[16px] font-semibold">
@@ -108,12 +123,12 @@ export default async function SignIn({
               maxLength={254}
               className={field}
             />
-            <button
-              type="submit"
+            <Submit
+              pending="Sending link…"
               className={`${button} mt-2 bg-action text-on-action hover:bg-action-hover`}
             >
               Email a sign-in link
-            </button>
+            </Submit>
           </form>
         </div>
         <footer className="flex items-center gap-3 border-t border-line pt-6">
@@ -125,13 +140,38 @@ export default async function SignIn({
         aria-hidden="true"
         className="relative hidden overflow-hidden bg-night text-on-night lg:flex lg:flex-col lg:justify-end lg:p-16"
       >
-        <span className="absolute inset-y-0 left-0 w-0.5 bg-brand" />
-        <p className="max-w-[14ch] font-display text-[64px] leading-[0.98] uppercase">
+        <span className="absolute inset-y-0 left-0 w-px bg-night-line" />
+        {/* Inline pitch, drawn on arrival; no image or remote asset. */}
+        <svg
+          className="sh-draw mb-auto h-auto max-h-[44vh] w-full text-night-line"
+          viewBox="0 0 760 500"
+          fill="none"
+          stroke="currentColor"
+          preserveAspectRatio="xMidYMid meet"
+          aria-hidden="true"
+        >
+          <rect x="1" y="1" width="758" height="498" pathLength={1} />
+          <path d="M380 1v498" pathLength={1} />
+          <circle cx="380" cy="250" r="70" pathLength={1} />
+          <path d="M1 140h120v220H1M759 140H639v220h120" pathLength={1} />
+          <path
+            className="text-lime"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            d="M207 254 Q316 214 394 217 Q496 171 568 114"
+            pathLength={1}
+          />
+        </svg>
+        <p className="sh-lift relative max-w-[14ch] font-display text-[64px] leading-[0.98] uppercase">
           Check your shoulder before you receive.
         </p>
-        <p className="mt-6 max-w-[40ch] text-[17px] leading-7 text-night-muted">
-          Your coach picks a few moments from each game and writes one line on
-          each. You watch, practise, and notice.
+        <p
+          className="sh-lift relative mt-6 max-w-[40ch] text-[17px] leading-7 text-night-muted"
+          style={{ "--i": 2 } as CSSProperties}
+        >
+          A coach picks a few moments from each game and writes one line on
+          each. The player watches, practises, and notices.
         </p>
       </div>
     </main>

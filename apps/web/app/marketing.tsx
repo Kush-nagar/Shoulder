@@ -1,35 +1,76 @@
 "use client";
 
+/*
+ * Public homepage (ADR 0025, refreshed 2026-10-03).
+ * THESIS: "Check your shoulder" as the page's motion: the visitor scans across
+ * one pitch, from a whole match to the single clip a player receives. Refuses
+ * the stacked feature-card landing.
+ * OWN-WORLD: warm paper, ink, one signal lime that means "look here";
+ * Archivo condensed caps for display, Inter Tight for reading, Geist Mono only
+ * for match time. Pitch lines, timecodes and in/out brackets are the ornament.
+ * STORY: a coach turns film into a few moments; the player receives only their
+ * clip in the coach's words; both sides then work through the week.
+ * FIRST VIEWPORT: headline left at display scale, a live formation and photo
+ * iris right, "Open Shoulder" under the headline.
+ * FORM: horizontal scan (own structural list, position 5; seed 27bce56a).
+ */
+
+import { ArrowRight, ArrowUpRight, Menu, Pause, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef } from "react";
-import { ShoulderWordmark } from "../components/brand";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { ShoulderMark, ShoulderWordmark } from "../components/brand";
+import pitch from "../public/marketing-pitch.jpg";
 import "./marketing.css";
+
+const STEPS = ["Watch", "Mark", "Say why", "Share"] as const;
+
+// Inlined at build time; the same switch as lib/marketplace.
+const PILOT = process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === "on";
+
+const SENTENCE =
+  "You checked your shoulder before the ball arrived. That look gave you time to turn.";
+
+const DRILLS = [
+  "Scanning",
+  "First touch",
+  "Half-turn",
+  "Passing",
+  "Ball mastery",
+  "1v1",
+  "Both feet",
+  "Defending",
+];
 
 function PitchLines({ className = "" }: { className?: string }) {
   return (
     <svg
-      className={className}
+      className={`mk-pitch ${className}`}
       viewBox="0 0 760 500"
       fill="none"
       aria-hidden="true"
       preserveAspectRatio="xMidYMid meet"
     >
-      <rect x="38" y="38" width="684" height="424" stroke="currentColor" />
+      <rect x="38" y="38" width="684" height="424" pathLength={1} />
+      <path d="M380 38v424" pathLength={1} />
+      <path d="M38 146h115v208H38M722 146H607v208h115" pathLength={1} />
+      <path d="M38 191h45v118H38M722 191h-45v118h45" pathLength={1} />
+      <circle cx="380" cy="250" r="66" pathLength={1} />
       <path
-        d="M380 38v424M38 146h115v208H38m684-208H607v208h115M38 191h45v118H38m684-118h-45v118h45"
-        stroke="currentColor"
-      />
-      <circle cx="380" cy="250" r="66" stroke="currentColor" />
-      <circle cx="380" cy="250" r="3" fill="currentColor" />
-      <path
-        d="M153 182a76 76 0 0 1 0 136m454-136a76 76 0 0 0 0 136"
-        stroke="currentColor"
+        d="M153 182a76 76 0 0 1 0 136M607 182a76 76 0 0 0 0 136"
+        pathLength={1}
       />
     </svg>
   );
 }
 
+/** Eleven shapes, one pass, one run into space. Decoration only. */
 function Formation() {
   return (
     <svg
@@ -38,96 +79,157 @@ function Formation() {
       fill="none"
       aria-hidden="true"
     >
-      <path className="mk-route mk-route-one" d="M207 254 Q316 214 394 217" />
-      <path className="mk-route mk-route-two" d="M394 217 Q496 171 568 114" />
-      <path className="mk-run" d="M490 317 Q526 224 568 114" />
       <path className="mk-space" d="M394 217 568 114 490 317Z" />
+      <path
+        className="mk-route mk-route-one"
+        d="M207 254 Q316 214 394 217"
+        pathLength={1}
+      />
+      <path
+        className="mk-route mk-route-two"
+        d="M394 217 Q496 171 568 114"
+        pathLength={1}
+      />
+      <path className="mk-run" d="M490 317 Q526 224 568 114" pathLength={1} />
       <g className="mk-players">
-        <circle cx="112" cy="250" r="7" />
-        <circle cx="207" cy="122" r="7" />
-        <circle cx="207" cy="254" r="9" className="mk-active-player" />
-        <circle cx="207" cy="380" r="7" />
-        <circle cx="310" cy="148" r="7" />
-        <circle cx="394" cy="217" r="9" className="mk-second-player" />
-        <circle cx="312" cy="351" r="7" />
-        <circle cx="490" cy="317" r="7" className="mk-runner" />
-        <circle cx="570" cy="114" r="9" className="mk-receiver" />
-        <circle cx="576" cy="386" r="7" />
-        <circle cx="650" cy="250" r="7" />
+        {[
+          [207, 122],
+          [207, 380],
+          [310, 148],
+          [312, 351],
+          [576, 386],
+          [650, 250],
+        ].map(([cx, cy], i) => (
+          <circle
+            key={`${cx}-${cy}`}
+            cx={cx}
+            cy={cy}
+            r="7"
+            style={{ "--i": i } as CSSProperties}
+          />
+        ))}
+        <circle
+          cx="207"
+          cy="254"
+          r="9"
+          className="mk-key"
+          style={{ "--i": 7 } as CSSProperties}
+        />
+        <circle
+          cx="394"
+          cy="217"
+          r="9"
+          className="mk-key"
+          style={{ "--i": 8 } as CSSProperties}
+        />
+        <circle
+          cx="568"
+          cy="114"
+          r="9"
+          className="mk-key mk-receiver"
+          style={{ "--i": 9 } as CSSProperties}
+        />
       </g>
-      <circle className="mk-ball" cx="224" cy="242" r="4" />
-      <path className="mk-ball-tail" d="M233 239h18" />
-      <text x="580" y="100" className="mk-field-number">
+      <circle className="mk-ball" r="5" />
+      <text x="582" y="100" className="mk-num">
         17
       </text>
-      <text x="374" y="198" className="mk-field-number">
+      <text x="374" y="197" className="mk-num">
         08
       </text>
     </svg>
   );
 }
 
-function Arrow() {
+/** Ticking match clock for the hero label; frozen under reduced motion. */
+function MatchClock() {
+  const [seconds, setSeconds] = useState(73 * 60 + 38);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const id = window.setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const m = Math.floor(seconds / 60);
+  const s = String(seconds % 60).padStart(2, "0");
   return (
-    <span aria-hidden="true" className="mk-arrow">
-      ↗
+    <span className="mk-clock">
+      {m}:{s}
     </span>
   );
 }
 
+function CtaLink({
+  className = "",
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Link className={`mk-button ${className}`} href="/auth/sign-in">
+      <span>{children}</span>
+      <ArrowUpRight aria-hidden="true" size={18} strokeWidth={2} />
+    </Link>
+  );
+}
+
 export function MarketingPage() {
-  const heroRef = useRef<HTMLElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
-  const poseRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLElement>(null);
+  const scanRef = useRef<HTMLElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [step, setStep] = useState(0);
+  const menuOpenRef = useRef(false);
+  menuOpenRef.current = menuOpen;
 
-  // Draw the movement skeleton once, when its card scrolls into view. Without
-  // JS or with reduced motion the finished pose is simply shown.
+  // Scroll: nav state and reading progress, hero iris, and the pinned scan.
   useEffect(() => {
-    const pose = poseRef.current;
-    if (!pose || !("IntersectionObserver" in window)) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    pose.dataset.draw = "pending";
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        pose.dataset.draw = "go";
-        observer.disconnect();
-      },
-      { threshold: 0.4 },
-    );
-    observer.observe(pose);
-    return () => observer.disconnect();
-  }, []);
-  const menuRef = useRef<HTMLDetailsElement>(null);
-  const closeMenu = () => {
-    if (menuRef.current) menuRef.current.open = false;
-  };
-
-  useEffect(() => {
-    const hero = heroRef.current;
+    const root = rootRef.current;
     const nav = navRef.current;
-    if (!hero || !nav) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
+    const hero = heroRef.current;
+    const scan = scanRef.current;
+    if (!root || !nav || !hero || !scan) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const pinned = window.matchMedia("(min-width: 900px)");
     let frame = 0;
+    let lastY = window.scrollY;
+
     const update = () => {
       frame = 0;
-      if (window.innerWidth > 760) {
-        const distance = Math.max(1, hero.offsetHeight - window.innerHeight);
-        const progress = Math.min(
-          1,
-          Math.max(0, -hero.getBoundingClientRect().top / distance),
-        );
-        hero.style.setProperty("--mk-progress", progress.toFixed(3));
-        hero.style.setProperty(
-          "--mk-aperture",
-          `${(21 + progress * 87).toFixed(1)}%`,
-        );
-      } else {
-        hero.style.removeProperty("--mk-progress");
-        hero.style.removeProperty("--mk-aperture");
+      const y = window.scrollY;
+      const max = Math.max(
+        1,
+        document.documentElement.scrollHeight - innerHeight,
+      );
+      root.style.setProperty("--mk-read", (y / max).toFixed(4));
+      nav.dataset.scrolled = y > 24 ? "true" : "false";
+      // Hide on the way down, return on the way up.
+      if (Math.abs(y - lastY) > 6) {
+        nav.dataset.hidden =
+          y > lastY && y > 400 && !menuOpenRef.current ? "true" : "false";
+        lastY = y;
       }
-      nav.dataset.scrolled = window.scrollY > 24 ? "true" : "false";
+      if (still.matches) return;
+
+      const heroP = Math.min(
+        1,
+        Math.max(0, y / Math.max(1, hero.offsetHeight)),
+      );
+      hero.style.setProperty("--mk-hero", heroP.toFixed(3));
+
+      if (pinned.matches) {
+        const rect = scan.getBoundingClientRect();
+        const run = Math.max(1, scan.offsetHeight - innerHeight);
+        const p = Math.min(1, Math.max(0, -rect.top / run));
+        scan.style.setProperty("--mk-scan", p.toFixed(4));
+        setStep(
+          Math.min(
+            STEPS.length - 1,
+            Math.floor(p * STEPS.length * 0.999 + 0.12),
+          ),
+        );
+      }
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
@@ -142,457 +244,478 @@ export function MarketingPage() {
     };
   }, []);
 
+  // Reveals: content is visible by default and only waits once JS is here.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const targets = root.querySelectorAll<HTMLElement>("[data-reveal]");
+    if (
+      !("IntersectionObserver" in window) ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      for (const t of targets) t.dataset.in = "";
+      return;
+    }
+    // Whatever is already on screen stays put; only what is below the fold
+    // waits to rise in.
+    for (const t of targets) {
+      const box = t.getBoundingClientRect();
+      if (box.top < innerHeight && box.bottom > 0 && box.left < innerWidth)
+        t.dataset.in = "";
+    }
+    root.classList.add("mk-ready");
+    // A masked element has no visible area, so it can never "intersect".
+    // Watch its unmasked parent and release everything waiting inside it.
+    const unmasked = (t: HTMLElement) =>
+      t.matches(".mk-frame, .mk-final, .mk-promises")
+        ? t
+        : (t.parentElement ?? t);
+    const waiting = new Map<Element, HTMLElement[]>();
+    for (const t of targets) {
+      if ("in" in t.dataset) continue;
+      const key = unmasked(t);
+      waiting.set(key, [...(waiting.get(key) ?? []), t]);
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          for (const t of waiting.get(entry.target) ?? []) t.dataset.in = "";
+          observer.unobserve(entry.target);
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
+    );
+    for (const key of waiting.keys()) observer.observe(key);
+    return () => observer.disconnect();
+  }, []);
+
+  // Escape closes the phone menu.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setMenuOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
+  const words = SENTENCE.split(" ");
+
   return (
-    <div className="marketing" id="top">
+    <div className="marketing" id="top" ref={rootRef}>
       <a className="mk-skip" href="#main">
         Skip to content
       </a>
-      <header className="mk-nav" ref={navRef}>
+
+      <div className="mk-intro" aria-hidden="true">
+        <ShoulderMark className="mk-intro-mark" />
+      </div>
+
+      <header
+        className="mk-nav"
+        ref={navRef}
+        data-open={menuOpen ? "true" : "false"}
+      >
         <Link href="#top" className="mk-logo" aria-label="Shoulder home">
           <ShoulderWordmark />
         </Link>
         <nav className="mk-desktop-nav" aria-label="Main navigation">
-          <a href="#approach">The approach</a>
+          <a href="#approach">How it works</a>
           <a href="#product">Product</a>
-          <a href="#about">About</a>
+          <a href="#about">Privacy</a>
         </nav>
         <div className="mk-nav-actions">
           <Link href="/auth/sign-in" className="mk-sign-in">
-            Sign in <Arrow />
+            Sign in
           </Link>
-          <details className="mk-mobile-menu" ref={menuRef}>
-            <summary>
-              Menu <span aria-hidden="true">+</span>
+          <details
+            className="mk-mobile-menu"
+            open={menuOpen}
+            onToggle={(e) => setMenuOpen(e.currentTarget.open)}
+          >
+            <summary aria-label={menuOpen ? "Close menu" : "Open menu"}>
+              {menuOpen ? (
+                <X aria-hidden="true" size={20} />
+              ) : (
+                <Menu aria-hidden="true" size={20} />
+              )}
             </summary>
             <nav aria-label="Mobile navigation">
-              <Link href="#approach" onClick={closeMenu}>
-                The approach
-              </Link>
-              <Link href="#product" onClick={closeMenu}>
-                Product
-              </Link>
-              <Link href="#about" onClick={closeMenu}>
-                About
-              </Link>
-              <Link href="/auth/sign-in" onClick={closeMenu}>
-                Sign in
-              </Link>
+              {[
+                ["#approach", "How it works"],
+                ["#product", "Product"],
+                ["#about", "Privacy"],
+                ["/auth/sign-in", "Sign in"],
+              ].map(([href, label], i) => (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => setMenuOpen(false)}
+                  style={{ "--i": i } as CSSProperties}
+                >
+                  {label}
+                  <ArrowRight aria-hidden="true" size={18} />
+                </Link>
+              ))}
             </nav>
           </details>
         </div>
+        <span className="mk-read" aria-hidden="true" />
       </header>
 
       <main id="main">
+        {/* ---------------------------------------------------------- Hero */}
         <section
           className="mk-hero"
           ref={heroRef}
           aria-labelledby="mk-hero-title"
         >
-          <div className="mk-hero-sticky">
-            <div className="mk-hero-copy">
-              <p className="mk-eyebrow">
-                <span className="mk-signal-dot" /> Soccer, seen clearly{" "}
-                <span className="mk-index">01 / 05</span>
+          <div className="mk-hero-copy">
+            <h1 id="mk-hero-title">
+              <span className="mk-line">
+                <span>SEE THE GAME</span>
+              </span>{" "}
+              <span className="mk-line">
+                <span>TAKE SHAPE.</span>
+              </span>
+            </h1>
+            <div className="mk-hero-bottom">
+              <p>
+                Turn match film into a few moments worth another look. Chosen by
+                a coach. Made for the player.
               </p>
-              <h1 id="mk-hero-title">
-                SEE THE GAME <br />
-                <em>TAKE SHAPE.</em>
-              </h1>
-              <div className="mk-hero-bottom">
-                <p>
-                  Turn match film into moments worth another look. Chosen by a
-                  coach. Made for the player.
-                </p>
-                <Link className="mk-button" href="/auth/sign-in">
-                  Open Shoulder <Arrow />
-                </Link>
-              </div>
+              <CtaLink>Open Shoulder</CtaLink>
             </div>
-            <div className="mk-hero-visual" aria-hidden="true">
-              <div className="mk-photo-aperture">
+          </div>
+
+          <div className="mk-hero-visual" aria-hidden="true">
+            <div className="mk-iris">
+              <div className="mk-iris-inner">
                 <Image
-                  src="/marketing-pitch.jpg"
+                  src={pitch}
                   alt=""
                   fill
                   priority
-                  sizes="(max-width: 760px) 100vw, 62vw"
+                  placeholder="blur"
+                  sizes="(max-width: 900px) 100vw, 60vw"
                 />
               </div>
-              <PitchLines className="mk-hero-pitch" />
-              <Formation />
-              <div className="mk-art-label mk-art-label-top">
-                MATCH FILM / 73:42
-              </div>
-              <div className="mk-art-label mk-art-label-bottom">
-                <span>THE SPACE BETWEEN</span>
-                <span>17 / RUN INTO SPACE</span>
-              </div>
-              <div className="mk-hero-corner">S</div>
             </div>
-            <div className="mk-hero-scroll" aria-hidden="true">
-              <span>Scroll to follow the play</span>
-              <span className="mk-scroll-line" />
+            <PitchLines />
+            <Formation />
+            <div className="mk-tag mk-tag-top">
+              <span className="mk-live" /> Match film <MatchClock />
             </div>
           </div>
         </section>
 
+        {/* ------------------------------------------------- The scan */}
         <section
-          className="mk-scale mk-section"
-          aria-labelledby="mk-scale-title"
+          className="mk-scan"
           id="approach"
+          ref={scanRef}
+          aria-label="How Shoulder works, from match film to one clip"
+          data-step={step}
         >
-          <div className="mk-section-top">
-            <span>01 / THE MATCH</span>
-            <span>EVERY MINUTE HOLDS CONTEXT</span>
-          </div>
-          <div className="mk-scale-grid">
-            <p className="mk-scale-number" aria-hidden="true">
-              90<span>MIN</span>
-            </p>
-            <h2 id="mk-scale-title">
-              A WHOLE MATCH.
-              <br />
-              <em>A FEW MOMENTS</em>
-              <br />
-              WORTH RETURNING TO.
-            </h2>
-            <p className="mk-scale-note">
-              The game moves quickly. Development takes another look. Shoulder
-              gives a coach the space to find a moment and say what they saw.
-            </p>
-          </div>
-          <div className="mk-timeline" aria-hidden="true">
-            <span>00:00</span>
-            <div>
-              <i />
-              <i />
-              <i />
-              <i />
+          <div className="mk-scan-stick">
+            <div className="mk-scan-track">
+              {/* 1 · Watch */}
+              <article className="mk-frame mk-frame-watch" data-reveal>
+                <div className="mk-frame-copy">
+                  <h2>
+                    A whole match.
+                    <br />
+                    <span>A few moments worth returning to.</span>
+                  </h2>
+                  <p>
+                    The game moves quickly. Development takes another look.
+                    Shoulder gives a coach room to find a moment and say what
+                    they saw.
+                  </p>
+                </div>
+                <div className="mk-ruler-wrap" aria-hidden="true">
+                  <div className="mk-thumbs">
+                    {["12:04", "31:50", "58:12", "73:38"].map((t, i) => (
+                      <figure
+                        key={t}
+                        style={
+                          {
+                            "--i": i,
+                            "--x": `${[13, 35, 65, 82][i]}%`,
+                            "--y": `${[34, 64, 30, 66][i]}%`,
+                          } as CSSProperties
+                        }
+                      >
+                        <Image src={pitch} alt="" fill sizes="220px" />
+                        <figcaption>{t}</figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                  <div className="mk-ruler">
+                    <div className="mk-ticks" />
+                    {[13, 35, 65, 82].map((left, i) => (
+                      <i
+                        key={left}
+                        style={{ left: `${left}%`, "--i": i } as CSSProperties}
+                      />
+                    ))}
+                    <b className="mk-playhead" />
+                  </div>
+                  <div className="mk-ruler-labels">
+                    <span>00:00</span>
+                    <span>45:00</span>
+                    <span>90:00</span>
+                  </div>
+                </div>
+              </article>
+
+              {/* 2 · Mark */}
+              <article className="mk-frame mk-frame-mark" data-reveal>
+                <div className="mk-frame-copy">
+                  <h2>
+                    Look closer.
+                    <br />
+                    <span>Mark where it starts and ends.</span>
+                  </h2>
+                  <p>
+                    Find the sequence, set its in and out points, and keep the
+                    rest of the match where it belongs: with the coach.
+                  </p>
+                </div>
+                <div className="mk-viewer" aria-hidden="true">
+                  <div className="mk-viewer-film">
+                    <Image
+                      src={pitch}
+                      alt=""
+                      fill
+                      sizes="(max-width: 900px) 100vw, 50vw"
+                    />
+                    <span className="mk-bracket mk-bracket-l" />
+                    <span className="mk-bracket mk-bracket-r" />
+                    <span className="mk-viewer-time">73:42</span>
+                  </div>
+                  <div className="mk-viewer-bar">
+                    <span>IN 73:38</span>
+                    <div>
+                      <i />
+                    </div>
+                    <span>OUT 73:48</span>
+                  </div>
+                </div>
+              </article>
+
+              {/* 3 · Say why */}
+              <article className="mk-frame mk-frame-say" data-reveal>
+                <div className="mk-frame-copy">
+                  <h2>
+                    The film shows the play.
+                    <br />
+                    <span>The coach gives it meaning.</span>
+                  </h2>
+                  <p>
+                    Shoulder does not grade a player. The coach chooses the
+                    moment, writes one sentence in their own words, and decides
+                    what to share.
+                  </p>
+                </div>
+                <div className="mk-judgment" aria-hidden="true">
+                  <div className="mk-judgment-head">
+                    <span>73:38 – 73:48</span>
+                    <span>Goal: check your shoulder</span>
+                  </div>
+                  <div className="mk-verdicts">
+                    <span className="mk-verdict mk-verdict-on">
+                      You did this.
+                    </span>
+                    <span className="mk-verdict">Chance to do this.</span>
+                  </div>
+                  <p className="mk-sentence">
+                    {words.map((w, i) => (
+                      <span
+                        key={`w${String(i).padStart(2, "0")}${w}`}
+                        style={{ "--w": i } as CSSProperties}
+                      >
+                        {w}{" "}
+                      </span>
+                    ))}
+                    <i className="mk-caret" />
+                  </p>
+                  <div className="mk-judgment-foot">
+                    <span>Written by the coach</span>
+                    <span className="mk-publish">Publish</span>
+                  </div>
+                </div>
+              </article>
+
+              {/* 4 · Share */}
+              <article className="mk-frame mk-frame-share" data-reveal>
+                <div className="mk-frame-copy">
+                  <h2>
+                    Only their clip.
+                    <br />
+                    <span>Only their coach&apos;s words.</span>
+                  </h2>
+                  <p>
+                    Three to six short clips per game, tied to one development
+                    goal. Players watch on their phone and never receive the
+                    full match.
+                  </p>
+                </div>
+                <div className="mk-phone" aria-hidden="true">
+                  <div className="mk-phone-screen">
+                    <div className="mk-phone-top">
+                      <ShoulderMark width={18} height={18} />
+                      <span>Clip 2 of 4</span>
+                    </div>
+                    <div className="mk-phone-clip">
+                      <Image src={pitch} alt="" fill sizes="260px" />
+                      <span className="mk-phone-pause">
+                        <Pause size={16} />
+                      </span>
+                      <div className="mk-phone-progress">
+                        <i />
+                      </div>
+                    </div>
+                    <span className="mk-phone-verdict">You did this.</span>
+                    <p>{SENTENCE}</p>
+                    <div className="mk-phone-reflect">
+                      What did you notice? <small>Optional</small>
+                    </div>
+                  </div>
+                </div>
+              </article>
             </div>
-            <span>90:00</span>
+
+            <ol className="mk-steps" aria-hidden="true">
+              {STEPS.map((s, i) => (
+                <li key={s} data-on={step >= i ? "" : undefined}>
+                  <span>{s}</span>
+                </li>
+              ))}
+            </ol>
           </div>
         </section>
 
+        {/* ------------------------------------------ Shoulder to shoulder */}
         <section
-          className="mk-process mk-section"
-          aria-labelledby="mk-process-title"
-        >
-          <div className="mk-section-top">
-            <span>02 / FROM FILM TO MOMENT</span>
-            <span>ONE CONTINUOUS PLAY</span>
-          </div>
-          <div className="mk-process-head">
-            <h2 id="mk-process-title">
-              LOOK CLOSER.
-              <br />
-              <em>THEN SAY WHY.</em>
-            </h2>
-            <p>
-              Find the sequence. Mark its beginning and end. Add a coach&apos;s
-              judgment. Publish only the clip a player needs.
-            </p>
-          </div>
-          <div className="mk-film-strip">
-            <div className="mk-film-photo">
-              <Image
-                src="/marketing-pitch.jpg"
-                alt="Aerial view of a soccer match under lights"
-                fill
-                sizes="(max-width: 760px) 100vw, 72vw"
-              />
-              <div className="mk-film-crosshair" aria-hidden="true">
-                <span>IN 73:38</span>
-                <span>OUT 73:48</span>
-              </div>
-            </div>
-            <div className="mk-film-side" aria-hidden="true">
-              <span>FRAME / 024</span>
-              <span className="mk-film-time">73:42</span>
-              <span>
-                OPEN SPACE
-                <br />
-                AHEAD OF THE BALL
-              </span>
-              <div className="mk-film-mini-line" />
-            </div>
-          </div>
-          <div className="mk-process-steps">
-            <span>
-              <b>01</b> Watch the match
-            </span>
-            <span>
-              <b>02</b> Mark the moment
-            </span>
-            <span>
-              <b>03</b> Add your words
-            </span>
-            <span>
-              <b>04</b> Share the clip
-            </span>
-          </div>
-        </section>
-
-        <section className="mk-editorial" aria-labelledby="mk-editorial-title">
-          <div className="mk-editorial-image">
-            <Image
-              src="/marketing-pitch.jpg"
-              alt="Floodlit soccer pitch seen from above during play"
-              fill
-              sizes="100vw"
-            />
-            <span className="mk-image-caption">
-              A VIEW OF THE WHOLE PITCH / NIGHT MATCH
-            </span>
-          </div>
-          <div className="mk-editorial-copy">
-            <p className="mk-kicker">THE GAME IS IN THE SPACE</p>
-            <h2 id="mk-editorial-title">
-              A RUN.
-              <br />A PASS.
-              <br />
-              <em>A POSSIBILITY.</em>
-            </h2>
-            <p>
-              What matters may happen away from the ball. A second look gives
-              that movement room to speak.
-            </p>
-          </div>
-        </section>
-
-        <section
-          className="mk-dark mk-section"
-          aria-labelledby="mk-dark-title"
-          id="about"
-        >
-          <div className="mk-section-top">
-            <span>03 / HUMAN JUDGMENT</span>
-            <span>THE COACH MAKES THE CALL</span>
-          </div>
-          <div className="mk-dark-grid">
-            <h2 id="mk-dark-title">
-              THE FILM
-              <br />
-              SHOWS THE PLAY.
-              <br />
-              <em>
-                THE COACH
-                <br />
-                GIVES IT MEANING.
-              </em>
-            </h2>
-            <div className="mk-dark-aside">
-              <div className="mk-bracket" aria-hidden="true">
-                [&nbsp;&nbsp;&nbsp;]
-              </div>
-              <p>
-                Shoulder does not grade a player. The coach chooses the moment,
-                writes the note, and decides what to share.
-              </p>
-              <div className="mk-verdicts">
-                <span>You did this.</span>
-                <span>Chance to do this.</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          className="mk-product mk-section"
-          aria-labelledby="mk-product-title"
+          className="mk-both"
           id="product"
+          aria-labelledby="mk-both-title"
         >
-          <div className="mk-section-top">
-            <span>04 / THE WORKSPACE</span>
-            <span>BUILT AROUND THE MATCH</span>
-          </div>
-          <div className="mk-product-head">
-            <h2 id="mk-product-title">
-              ONE MATCH.
-              <br />
-              <em>ONE CLEAR NEXT STEP.</em>
-            </h2>
+          <div className="mk-both-head" data-reveal>
+            <h2 id="mk-both-title">Shoulder to shoulder.</h2>
             <p>
-              Coach review stays close to the footage. Players receive only
-              their own short, published clips.
+              The coach stands beside the player, not above them. One workspace
+              for the coach&apos;s week, one private home for the player.
             </p>
           </div>
-          <div className="mk-workspace">
-            <div className="mk-workspace-top">
-              <span className="mk-workspace-brand">
-                SHOULDER / COACH REVIEW
-              </span>
-              <span>
-                MARK MOMENT&nbsp; · &nbsp;ADD NOTE&nbsp; · &nbsp;PUBLISH
-              </span>
-            </div>
-            <div className="mk-workspace-body">
-              <div className="mk-workspace-film">
+
+          <div className="mk-both-grid">
+            <article className="mk-side mk-side-coach" data-reveal>
+              <h3>
+                For the coach. <span>From the match into the week.</span>
+              </h3>
+              <ol className="mk-week">
+                {[
+                  ["Set a development goal", "One active focus per player"],
+                  [
+                    "Choose the match moments",
+                    "Three to six clips, one sentence each",
+                  ],
+                  [
+                    "Plan the next week",
+                    "One to eight library drills for a player or team",
+                  ],
+                  [
+                    "Read what comes back",
+                    "Optional reflections and player sessions",
+                  ],
+                ].map(([title, sub], i) => (
+                  <li key={title} style={{ "--i": i } as CSSProperties}>
+                    <strong>{title}</strong>
+                    <small>{sub}</small>
+                  </li>
+                ))}
+              </ol>
+              <div className="mk-plan">
+                <div className="mk-plan-head">
+                  <span>Coach plan</span>
+                  <span>This week</span>
+                </div>
+                <p>Check your shoulder before you receive.</p>
+                {[
+                  ["Scanning", "Look before the pass"],
+                  ["First touch", "Open body, first touch"],
+                  ["Half-turn", "Receive and turn"],
+                ].map(([focus, title]) => (
+                  <div className="mk-plan-item" key={focus}>
+                    <span>{focus}</span>
+                    <strong>{title}</strong>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="mk-side mk-side-player" data-reveal>
+              <h3>
+                For the player. <span>A goal to follow. Room to grow.</span>
+              </h3>
+              <div className="mk-home">
+                <div className="mk-home-goal">
+                  <small>Your active goal</small>
+                  <strong>Check your shoulder before you receive.</strong>
+                  <span>One focus, chosen with your coach.</span>
+                </div>
+                <div className="mk-home-grid">
+                  {[
+                    ["Latest coach clips", "Moments from the match"],
+                    ["Your notes", "What did you notice?"],
+                    ["Try this today", "Scan, then receive"],
+                    ["From your coach", "A plan for the week"],
+                  ].map(([k, v], i) => (
+                    <div key={k} style={{ "--i": i } as CSSProperties}>
+                      <small>{k}</small>
+                      <strong>{v}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p className="mk-side-note">
+                A record of moments, not a rating. Clips sit in a Progress
+                timeline organized by goal; reflection is always optional.
+              </p>
+            </article>
+          </div>
+          <p className="mk-fineprint">
+            Product illustrations with licensed match photography. No player
+            account, private footage, or personal data shown.
+          </p>
+        </section>
+
+        {/* ------------------------------------------- Between matches */}
+        <section className="mk-train" aria-labelledby="mk-train-title">
+          <div className="mk-train-head" data-reveal>
+            <h2 id="mk-train-title">
+              Between matches, <span>the work keeps going.</span>
+            </h2>
+            <p>
+              Train away from match day without turning practice into a score.
+              The tools stay close to the coach&apos;s goal while the player
+              decides what to film, explore, and track.
+            </p>
+          </div>
+          <div className="mk-bento">
+            <article className="mk-tile mk-tile-film" data-reveal>
+              <div className="mk-tile-art" aria-hidden="true">
                 <Image
-                  src="/marketing-pitch.jpg"
-                  alt="Overhead soccer match illustrating the coach playback area"
+                  src={pitch}
+                  alt=""
                   fill
-                  sizes="(max-width: 760px) 100vw, 65vw"
+                  sizes="(max-width: 900px) 100vw, 40vw"
                 />
-                <span className="mk-workspace-play" aria-hidden="true">
-                  ▶
+                <span className="mk-rec">
+                  <i /> Rec
                 </span>
-                <div className="mk-workspace-time">
-                  73:42 <span> / MATCH FILM</span>
-                </div>
-              </div>
-              <div className="mk-workspace-panel">
-                <span className="mk-panel-label">SELECTED MOMENT</span>
-                <strong>73:38 — 73:48</strong>
-                <div className="mk-panel-rule" />
-                <span className="mk-panel-label">COACH JUDGMENT</span>
-                <p>You did this.</p>
-                <div className="mk-panel-rule" />
-                <span className="mk-panel-label">COACH&apos;S NOTE</span>
-                <div className="mk-note-lines" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </div>
-                <span className="mk-panel-foot">
-                  Only coach-authored words reach the player.
-                </span>
-              </div>
-            </div>
-            <div className="mk-workspace-track">
-              <span>00:00</span>
-              <div>
-                <i />
-                <i />
-                <i />
-              </div>
-              <span>90:00</span>
-            </div>
-          </div>
-          <p className="mk-preview-note">
-            Workflow illustration with licensed match photography. No private
-            player footage or data shown.
-          </p>
-          <div className="mk-product-outro">
-            <span>THREE TO SIX MOMENTS</span>
-            <p>
-              A private sequence of clips, grouped by game and tied to one
-              development goal. The player can watch and reflect when ready.
-            </p>
-          </div>
-        </section>
-
-        <section
-          className="mk-player mk-section"
-          aria-labelledby="mk-player-title"
-        >
-          <div className="mk-section-top">
-            <span>05 / THE PLAYER&apos;S SPACE</span>
-            <span>THE WORK CONTINUES BETWEEN GAMES</span>
-          </div>
-          <div className="mk-expansion-head">
-            <h2 id="mk-player-title">
-              A GOAL TO FOLLOW.
-              <br />
-              <em>ROOM TO GROW.</em>
-            </h2>
-            <p>
-              Shoulder brings the coach&apos;s moments and the player&apos;s own
-              practice into one private home. Each player has one active
-              development goal and sees only their own published clips.
-            </p>
-          </div>
-          <div className="mk-player-layout">
-            <div className="mk-player-screen">
-              <div className="mk-screen-top">
-                <strong>shoulder</strong>
-                <span>PLAYER / HOME</span>
-              </div>
-              <div className="mk-screen-goal">
-                <span>YOUR ACTIVE GOAL</span>
-                <strong>Check your shoulder before you receive.</strong>
-                <small>One focus, chosen with your coach.</small>
-              </div>
-              <div className="mk-screen-grid">
-                <div className="mk-screen-tile mk-screen-tile-signal">
-                  <span>TRY THIS TODAY</span>
-                  <strong>Scan, then receive</strong>
-                  <small>A coach-written drill for your goal</small>
-                </div>
-                <div className="mk-screen-tile">
-                  <span>LATEST COACH CLIPS</span>
-                  <strong>Moments from the match</strong>
-                  <small>Watch the clips your coach published</small>
-                </div>
-                <div className="mk-screen-tile">
-                  <span>YOUR NOTES</span>
-                  <strong>What did you notice?</strong>
-                  <small>Reflection is always optional</small>
-                </div>
-                <div className="mk-screen-tile">
-                  <span>THIS WEEK</span>
-                  <strong>Your training, in view</strong>
-                  <small>Sessions and recent practice</small>
-                </div>
-                <div className="mk-screen-tile mk-screen-tile-wide">
-                  <span>FROM YOUR COACH</span>
-                  <strong>A plan for the week</strong>
-                  <small>Library drills picked for you or your team</small>
-                </div>
-              </div>
-              <div className="mk-screen-foot">
-                HOME &nbsp; / &nbsp; PROGRESS &nbsp; / &nbsp; PRACTICE &nbsp; /
-                &nbsp; DRILLS
-              </div>
-            </div>
-            <div className="mk-player-aside">
-              <span className="mk-detail-index">01 / FOLLOW THE GOAL</span>
-              <h3>A record of moments, not a rating.</h3>
-              <p>
-                Three to six short clips from a game sit in a Progress timeline
-                organized by goal. A player can watch on their phone, add an
-                optional reflection, and return to earlier moments over time.
-              </p>
-              <div className="mk-player-aside-rule" />
-              <span className="mk-detail-index">02 / MAKE IT YOURS</span>
-              <p>
-                The home dashboard also brings together recent practice with
-                thumbnails, training ideas, a weekly session summary, coach
-                plans, and a short guide to how Shoulder works.
-              </p>
-            </div>
-          </div>
-          <p className="mk-preview-note">
-            Product illustration. No player account, private footage, or
-            personal training data shown.
-          </p>
-        </section>
-
-        <section
-          className="mk-training mk-section"
-          aria-labelledby="mk-training-title"
-        >
-          <div className="mk-section-top">
-            <span>06 / BETWEEN MATCHES</span>
-            <span>TRAIN ON YOUR OWN TERMS</span>
-          </div>
-          <div className="mk-expansion-head">
-            <h2 id="mk-training-title">
-              FILM IT.
-              <br />
-              <em>FEEL THE DIFFERENCE.</em>
-            </h2>
-            <p>
-              A player can train away from match day without turning practice
-              into a score. The tools stay close to the coach&apos;s goal while
-              the player decides what to film, explore, and track.
-            </p>
-          </div>
-          <div className="mk-training-grid">
-            <article className="mk-training-card mk-training-card-film">
-              <span className="mk-detail-index">01 / PRACTICE</span>
-              <div className="mk-practice-frame" aria-hidden="true">
-                <PitchLines />
-                <span>REC &nbsp; ●</span>
               </div>
               <h3>Your own practice film.</h3>
               <p>
@@ -600,59 +723,18 @@ export function MarketingPage() {
                 private from the coach, and is deleted after 90 days.
               </p>
             </article>
-            <article className="mk-training-card mk-training-card-pose">
-              <span className="mk-detail-index">02 / MOVEMENT</span>
-              <div ref={poseRef} className="mk-pose-graphic" aria-hidden="true">
-                {/* A landscape phone filming practice: pitch lines on the
-                    video, one striking skeleton over it, ball at the foot. */}
-                <svg
-                  viewBox="0 0 320 190"
-                  fill="none"
-                  preserveAspectRatio="xMidYMid meet"
-                  aria-hidden="true"
-                >
-                  <rect
-                    className="mk-pose-phone"
-                    x="6"
-                    y="5"
-                    width="308"
-                    height="180"
-                    rx="24"
-                  />
-                  <rect
-                    className="mk-pose-camera"
-                    x="13"
-                    y="80"
-                    width="4"
-                    height="30"
-                    rx="2"
-                  />
-                  <rect
-                    className="mk-pose-screen"
-                    x="24"
-                    y="15"
-                    width="280"
-                    height="160"
-                    rx="13"
-                  />
+
+            <article className="mk-tile mk-tile-pose" data-reveal>
+              <div className="mk-tile-art" aria-hidden="true">
+                <svg viewBox="0 0 320 190" fill="none" aria-hidden="true">
                   <path
-                    className="mk-pose-pitch"
-                    d="M24 162h280M236 162l28-40h40M60 162l18-24"
+                    className="mk-pose-ground"
+                    d="M0 162h320M236 162l28-40h56M60 162l18-24"
                   />
-                  <text className="mk-pose-ui" x="38" y="34">
-                    ON-DEVICE VIEW
-                  </text>
-                  <text
-                    className="mk-pose-ui mk-pose-ui-meta"
-                    x="290"
-                    y="34"
-                    textAnchor="end"
-                  >
-                    POSE / LOCAL
-                  </text>
                   <path
                     className="mk-pose-swing"
                     d="M178 150c14 4 26 -2 34 -16"
+                    pathLength={1}
                   />
                   <path
                     className="mk-pose-bones"
@@ -661,24 +743,35 @@ export function MarketingPage() {
                   />
                   <circle className="mk-pose-head" cx="158" cy="42" r="9" />
                   <g className="mk-pose-joints">
-                    <circle cx="160" cy="53" r="3.6" />
-                    <circle cx="148" cy="59" r="3.6" />
-                    <circle cx="172" cy="57" r="3.6" />
-                    <circle cx="126" cy="67" r="3.6" />
-                    <circle cx="190" cy="70" r="3.6" />
-                    <circle cx="158" cy="98" r="3.6" />
-                    <circle cx="172" cy="96" r="3.6" />
-                    <circle cx="150" cy="126" r="3.6" />
-                    <circle cx="190" cy="118" r="3.6" />
-                    <circle cx="152" cy="156" r="3.6" />
-                  </g>
-                  <g className="mk-pose-endpoints">
-                    <circle cx="108" cy="60" r="3.4" />
-                    <circle cx="199" cy="86" r="3.4" />
-                    <circle cx="163" cy="158" r="3.4" />
-                    <circle cx="212" cy="130" r="3.4" />
+                    {[
+                      [160, 53],
+                      [148, 59],
+                      [172, 57],
+                      [126, 67],
+                      [190, 70],
+                      [158, 98],
+                      [172, 96],
+                      [150, 126],
+                      [190, 118],
+                      [152, 156],
+                      [108, 60],
+                      [199, 86],
+                      [163, 158],
+                      [212, 130],
+                    ].map(([cx, cy], i) => (
+                      <circle
+                        key={`${cx}-${cy}`}
+                        cx={cx}
+                        cy={cy}
+                        r="3.4"
+                        style={{ "--i": i } as CSSProperties}
+                      />
+                    ))}
                   </g>
                   <circle className="mk-pose-ball" cx="224" cy="137" r="6.5" />
+                  <text x="12" y="22">
+                    On-device pose
+                  </text>
                 </svg>
               </div>
               <h3>See the movement.</h3>
@@ -688,218 +781,153 @@ export function MarketingPage() {
                 angles are shared when training ideas are requested.
               </p>
             </article>
-            <article className="mk-training-card mk-training-card-drills">
-              <span className="mk-detail-index">03 / DRILLS &amp; IDEAS</span>
-              <div className="mk-drill-graphic" aria-hidden="true">
-                <span>SCANNING</span>
-                <span>FIRST TOUCH</span>
-                <span>HALF-TURN</span>
-                <span>PASSING</span>
-                <span>BALL MASTERY</span>
-                <span>1V1</span>
-                <span>BOTH FEET</span>
-                <span>DEFENDING</span>
+
+            <article className="mk-tile mk-tile-drills" data-reveal>
+              <div className="mk-tile-art mk-marquee" aria-hidden="true">
+                {[0, 1].map((row) => (
+                  <div key={row} className="mk-marquee-row" data-row={row}>
+                    {["a", "b"].flatMap((copy) =>
+                      DRILLS.map((d) => <span key={copy + d}>{d}</span>),
+                    )}
+                  </div>
+                ))}
               </div>
               <h3>Find the next repetition.</h3>
               <p>
                 Explore 12 coach-written drills by focus. Up to three software
-                training ideas can be suggested for a goal, with a limit of 10
-                requests a day. They are labelled “AI suggestion”; the
-                coach&apos;s notes always come from the coach.
+                training ideas can be suggested for a goal, labelled “AI
+                suggestion”. The coach&apos;s notes always come from the coach.
               </p>
             </article>
-            <article className="mk-training-card mk-training-card-sessions">
-              <span className="mk-detail-index">04 / SESSIONS</span>
-              <div className="mk-session-graphic" aria-hidden="true">
-                <PitchLines />
-                <i />
-                <i />
-                <i />
-                <i />
-                <i />
-                <span>TRAINING / MATCH</span>
+
+            <article className="mk-tile mk-tile-sessions" data-reveal>
+              <div className="mk-tile-art" aria-hidden="true">
+                <PitchLines className="mk-pitch-dark" />
+                <svg
+                  className="mk-heat"
+                  viewBox="0 0 760 500"
+                  aria-hidden="true"
+                >
+                  <path
+                    className="mk-heat-path"
+                    pathLength={1}
+                    d="M150 380 C240 300 300 360 360 270 S520 160 600 220 S640 340 520 360 S300 420 260 300"
+                  />
+                  {[
+                    [360, 270, 70],
+                    [520, 200, 54],
+                    [250, 330, 46],
+                    [560, 340, 40],
+                  ].map(([cx, cy, r], i) => (
+                    <circle
+                      key={`${cx}-${cy}`}
+                      cx={cx}
+                      cy={cy}
+                      r={r}
+                      style={{ "--i": i } as CSSProperties}
+                    />
+                  ))}
+                </svg>
               </div>
               <h3>Remember where you played.</h3>
               <p>
-                Record a training session or match on the phone. View distance,
-                top speed, sprints, a position heatmap, half-time split, and
-                12-week history. Raw GPS location stays on the device.
+                Record a session on the phone: distance, top speed, sprints, a
+                position heatmap, half-time split, and 12-week history. Raw GPS
+                location stays on the device.
               </p>
             </article>
           </div>
         </section>
 
-        <section
-          className="mk-coach-week mk-section"
-          aria-labelledby="mk-coach-week-title"
-        >
-          <div className="mk-section-top">
-            <span>07 / FOR THE COACH</span>
-            <span>THE WHOLE WEEK, ONE WORKSPACE</span>
-          </div>
-          <div className="mk-expansion-head">
-            <h2 id="mk-coach-week-title">
-              FROM THE MATCH.
-              <br />
-              <em>INTO THE WEEK.</em>
-            </h2>
-            <p>
-              The coach keeps the human thread: a “This week” dashboard, roster,
-              match upload, clip marking and publishing, plus a view of player
-              reflections and sessions.
-            </p>
-          </div>
-          <div className="mk-coach-week-grid">
-            <div className="mk-coach-week-list">
-              <div>
-                <span>01</span>
-                <strong>Set a development goal</strong>
-                <small>One active focus per player</small>
+        {/* Pilot: only while the marketplace flag is on (lib/marketplace). */}
+        {PILOT ? (
+          <>
+            <section className="mk-pilot" aria-labelledby="mk-pilot-title">
+              <div className="mk-pilot-copy" data-reveal>
+                <h2 id="mk-pilot-title">Another way to train together.</h2>
+                <p className="mk-pilot-chip">
+                  Adults-only pilot · 18+ · Stripe test mode
+                </p>
+                <p>
+                  Adults who confirm their birth year can browse verified
+                  coaches and book a one-to-one session at a public venue.
+                  Under-18s cannot browse or book. Four demo coaches are listed
+                  and no real charge or payout occurs yet.
+                </p>
               </div>
-              <div>
-                <span>02</span>
-                <strong>Choose the match moments</strong>
-                <small>Three to six clips, one sentence each</small>
-              </div>
-              <div>
-                <span>03</span>
-                <strong>Plan the next week</strong>
-                <small>One to eight library drills for a player or team</small>
-              </div>
-              <div>
-                <span>04</span>
-                <strong>Read what comes back</strong>
-                <small>Optional reflections and player sessions</small>
-              </div>
-            </div>
-            <div className="mk-plan-card">
-              <div>
-                <span>SHOULDER / COACH PLAN</span>
-                <span>THIS WEEK</span>
-              </div>
-              <p>
-                CHECK YOUR SHOULDER
-                <br />
-                BEFORE YOU RECEIVE.
-              </p>
-              <div className="mk-plan-item">
-                <span>01 / SCANNING</span>
-                <strong>Look before the pass</strong>
-              </div>
-              <div className="mk-plan-item">
-                <span>02 / FIRST TOUCH</span>
-                <strong>Open body, first touch</strong>
-              </div>
-              <div className="mk-plan-item">
-                <span>03 / HALF-TURN</span>
-                <strong>Receive and turn</strong>
-              </div>
-              <small>A coach chooses the drills and writes the plan.</small>
-            </div>
-          </div>
-        </section>
+              <ol className="mk-pilot-steps" data-reveal>
+                <li>
+                  <strong>Find</strong>
+                  <span>
+                    Coaches whose background-check document has been reviewed by
+                    the Shoulder team.
+                  </span>
+                </li>
+                <li>
+                  <strong>Book</strong>
+                  <span>
+                    A public-venue slot. Cancel 24 hours or more ahead for a
+                    refund; report a concern when needed.
+                  </span>
+                </li>
+                <li>
+                  <strong>Coach</strong>
+                  <span>
+                    Set up a profile and time slots, submit checks for approval,
+                    and connect Stripe payouts.
+                  </span>
+                </li>
+              </ol>
+            </section>
+          </>
+        ) : null}
 
+        {/* ------------------------------------------------ Privacy */}
         <section
-          className="mk-marketplace mk-section"
-          aria-labelledby="mk-marketplace-title"
-        >
-          <div className="mk-section-top">
-            <span>08 / ADULTS-ONLY PILOT</span>
-            <span>STRIPE TEST MODE / NO REAL MONEY MOVES</span>
-          </div>
-          <div className="mk-marketplace-layout">
-            <div>
-              <p className="mk-marketplace-tag">
-                LIVE PILOT &nbsp; ● &nbsp; 18+
-              </p>
-              <h2 id="mk-marketplace-title">
-                ANOTHER WAY
-                <br />
-                <em>TO TRAIN TOGETHER.</em>
-              </h2>
-              <p className="mk-marketplace-intro">
-                Adults who confirm their birth year can browse verified coaches
-                and book a one-to-one session at a public venue. Under-18s
-                cannot browse or book in this pilot.
-              </p>
-              <p className="mk-marketplace-test">
-                Four demo coaches are listed. Payments use Stripe test mode, so
-                no real charge or payout occurs yet.
-              </p>
-            </div>
-            <div className="mk-marketplace-panel">
-              <div>
-                <span>01 / FIND</span>
-                <p>
-                  Browse coaches whose background-check document has been
-                  reviewed by the Shoulder team.
-                </p>
-              </div>
-              <div>
-                <span>02 / BOOK</span>
-                <p>
-                  Choose a public-venue slot. Cancel 24 hours or more ahead for
-                  a refund; report a concern when needed.
-                </p>
-              </div>
-              <div>
-                <span>03 / COACH</span>
-                <p>
-                  Coaches set up profiles and time slots, submit checks for
-                  admin approval, and connect Stripe payouts.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          className="mk-privacy mk-section"
+          className="mk-privacy"
+          id="about"
           aria-labelledby="mk-privacy-title"
         >
-          <div className="mk-section-top">
-            <span>09 / THE PLAYER&apos;S CONTROL</span>
-            <span>PRIVATE BY DESIGN</span>
-          </div>
-          <h2 id="mk-privacy-title">
-            THEIR GAME.
+          <h2 id="mk-privacy-title" data-reveal>
+            Their game.
             <br />
-            <em>THEIR SPACE.</em>
+            Their space.
           </h2>
-          <div className="mk-privacy-grid">
-            <p>
-              Players see only their own published match clips. Practice video
-              belongs to the player. Reflections are optional and only their
-              author can edit or delete them.
-            </p>
-            <p>
-              The Profile keeps account controls, System / Light / Dark theme, a
-              clear “how your data is used” guide, and sign out within reach.
-            </p>
-          </div>
+          <ul className="mk-promises" data-reveal>
+            {[
+              "Players see only their own published clips. Never the full match.",
+              "Practice video belongs to the player and is deleted after 90 days.",
+              "Reflections are optional. Only their author can edit or delete them.",
+            ].map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </section>
 
-        <section className="mk-final" aria-label="Get started with Shoulder">
+        {/* ------------------------------------------------ Close */}
+        <section
+          className="mk-final"
+          aria-labelledby="mk-final-title"
+          data-reveal
+        >
           <PitchLines className="mk-final-pitch" />
           <div className="mk-final-inner">
-            <p className="mk-kicker">THE NEXT PLAY STARTS WITH A CLOSER LOOK</p>
             <h2 id="mk-final-title">
-              SEE THE GAME <br />
-              <em>TAKE SHAPE.</em>
+              The next play starts <br />
+              with a closer look.
             </h2>
-            <Link className="mk-button mk-button-light" href="/auth/sign-in">
-              Open Shoulder <Arrow />
-            </Link>
+            <CtaLink className="mk-button-signal">Open Shoulder</CtaLink>
           </div>
           <span className="mk-final-time" aria-hidden="true">
             90+4
           </span>
         </section>
       </main>
+
       <footer className="mk-footer">
         <ShoulderWordmark />
         <p>Coach-led soccer development. Private by design.</p>
-        <a href="#top">Back to top ↑</a>
+        <a href="#top">Back to top</a>
         <span>© {new Date().getFullYear()} Shoulder</span>
       </footer>
     </div>

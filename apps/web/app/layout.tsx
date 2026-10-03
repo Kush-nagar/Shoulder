@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { RouteProgress } from "../components/route-progress";
 import { NativeBridge } from "./native-bridge";
 
 const interTight = localFont({
@@ -59,6 +60,7 @@ export default function RootLayout({
       className={`${interTight.variable} ${archivo.variable} ${geistMono.variable}`}
     >
       <body>
+        <RouteProgress />
         {children}
         <NativeBridge />
       </body>
