@@ -841,45 +841,43 @@ export function MarketingPage() {
 
         {/* Pilot: only while the marketplace flag is on (lib/marketplace). */}
         {PILOT ? (
-          <>
-            <section className="mk-pilot" aria-labelledby="mk-pilot-title">
-              <div className="mk-pilot-copy" data-reveal>
-                <h2 id="mk-pilot-title">Another way to train together.</h2>
-                <p className="mk-pilot-chip">
-                  Adults-only pilot · 18+ · Stripe test mode
-                </p>
-                <p>
-                  Adults who confirm their birth year can browse verified
-                  coaches and book a one-to-one session at a public venue.
-                  Under-18s cannot browse or book. Four demo coaches are listed
-                  and no real charge or payout occurs yet.
-                </p>
-              </div>
-              <ol className="mk-pilot-steps" data-reveal>
-                <li>
-                  <strong>Find</strong>
-                  <span>
-                    Coaches whose background-check document has been reviewed by
-                    the Shoulder team.
-                  </span>
-                </li>
-                <li>
-                  <strong>Book</strong>
-                  <span>
-                    A public-venue slot. Cancel 24 hours or more ahead for a
-                    refund; report a concern when needed.
-                  </span>
-                </li>
-                <li>
-                  <strong>Coach</strong>
-                  <span>
-                    Set up a profile and time slots, submit checks for approval,
-                    and connect Stripe payouts.
-                  </span>
-                </li>
-              </ol>
-            </section>
-          </>
+          <section className="mk-pilot" aria-labelledby="mk-pilot-title">
+            <div className="mk-pilot-copy" data-reveal>
+              <h2 id="mk-pilot-title">Another way to train together.</h2>
+              <p className="mk-pilot-chip">
+                Adults-only pilot · 18+ · Stripe test mode
+              </p>
+              <p>
+                Adults who confirm their birth year can browse verified coaches
+                and book a one-to-one session at a public venue. Under-18s
+                cannot browse or book. Four demo coaches are listed and no real
+                charge or payout occurs yet.
+              </p>
+            </div>
+            <ol className="mk-pilot-steps" data-reveal>
+              <li>
+                <strong>Find</strong>
+                <span>
+                  Coaches whose background-check document has been reviewed by
+                  the Shoulder team.
+                </span>
+              </li>
+              <li>
+                <strong>Book</strong>
+                <span>
+                  A public-venue slot. Cancel 24 hours or more ahead for a
+                  refund; report a concern when needed.
+                </span>
+              </li>
+              <li>
+                <strong>Coach</strong>
+                <span>
+                  Set up a profile and time slots, submit checks for approval,
+                  and connect Stripe payouts.
+                </span>
+              </li>
+            </ol>
+          </section>
         ) : null}
 
         {/* ------------------------------------------------ Privacy */}

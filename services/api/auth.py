@@ -22,6 +22,9 @@ class TokenVerifier:
             cache_jwk_set=True,
             lifespan=300,
             timeout=5,
+            # PyJWT 2.15 waits 30 s before refetching for an unknown key ID;
+            # keep the earlier behaviour so a rotated Auth key works at once.
+            cooldown_duration=0,
         )
 
     def verify(self, token: str) -> str:
