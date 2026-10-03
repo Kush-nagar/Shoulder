@@ -3,8 +3,21 @@
 import unittest
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 from test_database import DatabaseTestCase
+
+
+def queued_requests(connection: Connection) -> int:
+    """pg_net's outbound queue size, or 0 where pg_net is not installed."""
+    if connection.execute(
+        text("SELECT to_regclass('net.http_request_queue') IS NULL")
+    ).scalar_one():
+        return 0
+    return int(
+        connection.execute(
+            text("SELECT count(*) FROM net.http_request_queue")
+        ).scalar_one()
+    )
 
 
 class WorkerWakeTests(DatabaseTestCase):
@@ -42,23 +55,21 @@ class WorkerWakeTests(DatabaseTestCase):
     def test_enqueue_without_a_token_succeeds_and_sends_nothing(self) -> None:
         key = f"wake-test-{uuid4()}"
         with self.admin.connect() as connection, connection.begin():
-            has_token = connection.execute(
-                text("""
-                    SELECT to_regclass('vault.decrypted_secrets') IS NOT NULL
-                       AND EXISTS (SELECT 1 FROM vault.decrypted_secrets
+            has_vault = connection.execute(
+                text("SELECT to_regclass('vault.decrypted_secrets') IS NOT NULL")
+            ).scalar_one()
+            has_token = (
+                has_vault
+                and connection.execute(
+                    text("""
+                    SELECT EXISTS (SELECT 1 FROM vault.decrypted_secrets
                                    WHERE name = 'worker_dispatch_token')
                 """)
-            ).scalar_one()
+                ).scalar_one()
+            )
             if has_token:
                 self.skipTest("a dispatch token is configured on this database")
-            before = connection.execute(
-                text("""
-                    SELECT CASE
-                        WHEN to_regclass('net.http_request_queue') IS NULL THEN 0
-                        ELSE (SELECT count(*) FROM net.http_request_queue)
-                    END
-                """)
-            ).scalar_one()
+            before = queued_requests(connection)
             connection.execute(
                 text("""
                     INSERT INTO app.processing_job (kind, idempotency_key, max_attempts)
@@ -66,14 +77,7 @@ class WorkerWakeTests(DatabaseTestCase):
                 """),
                 {"key": key},
             )
-            after = connection.execute(
-                text("""
-                    SELECT CASE
-                        WHEN to_regclass('net.http_request_queue') IS NULL THEN 0
-                        ELSE (SELECT count(*) FROM net.http_request_queue)
-                    END
-                """)
-            ).scalar_one()
+            after = queued_requests(connection)
             connection.execute(
                 text("DELETE FROM app.processing_job WHERE idempotency_key = :key"),
                 {"key": key},
