@@ -11,7 +11,9 @@ param(
     [string]$ApiProject = 'shoulder-api',
     [string]$ApiOrigin = 'https://shoulderapp-api.vercel.app',
     [string]$WebOrigin = 'https://shoulderapp.vercel.app',
-    [string]$DemoTeamId
+    [string]$DemoTeamId,
+    # Mirrors the web's NEXT_PUBLIC_MARKETPLACE_ENABLED; the API 404s the pilot otherwise.
+    [ValidateSet('on', 'off')][string]$Marketplace = 'on'
 )
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell prefixes piped native stdin with a UTF-8 BOM otherwise,
@@ -68,6 +70,7 @@ switch ($Step) {
         $secrets['DEMO_MODE'] = 'on'
         $secrets['DEMO_TEAM_ID'] = $DemoTeamId
         $secrets['APP_ORIGIN'] = $WebOrigin
+        $secrets['MARKETPLACE_ENABLED'] = $Marketplace
         # Vercel builds Python 3.12 from requirements.txt (ADR 0028), so the
         # deploy uploads a staged copy: the API package plus exported pins.
         $stage = Join-Path ([System.IO.Path]::GetTempPath()) "shoulder-api-$PID"
