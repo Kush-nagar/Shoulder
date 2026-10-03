@@ -30,6 +30,16 @@ function Read-EnvFile([string]$Path) {
     return $values
 }
 
+# Supabase's direct host is IPv6-only; Vercel functions and GitHub runners
+# reach Postgres over IPv4 through the session pooler (ADR 0028). The pooler
+# login is `<role>.<project ref>`.
+function ConvertTo-Pooler([string]$Url, [string]$PoolerHost = 'aws-0-us-east-1.pooler.supabase.com') {
+    if ($Url -notmatch '^(?<scheme>[^:]+)://(?<user>[^:@/]+):(?<pass>[^@]*)@db\.(?<ref>[a-z0-9]+)\.supabase\.co:5432(?<rest>/.*)?$') {
+        return $Url
+    }
+    return "$($Matches.scheme)://$($Matches.user).$($Matches.ref):$($Matches.pass)@${PoolerHost}:5432$($Matches.rest)"
+}
+
 $remote = Read-EnvFile '.env.remote'
 switch ($Step) {
     'migrate' {
@@ -50,7 +60,9 @@ switch ($Step) {
         $api = Read-EnvFile 'services/api/.env'
         $local = Read-EnvFile '.env.local'
         $secrets = [ordered]@{}
-        foreach ($name in $api.Keys) { $secrets[$name] = $api[$name] }
+        foreach ($name in $api.Keys) {
+            $secrets[$name] = if ($name -like '*DATABASE_URL') { ConvertTo-Pooler $api[$name] } else { $api[$name] }
+        }
         $secrets['OPENROUTER_API_KEY'] = $local['OPENROUTER_API_KEY']
         if ($local['AI_COACH_MODEL']) { $secrets['AI_COACH_MODEL'] = $local['AI_COACH_MODEL'] }
         $secrets['DEMO_MODE'] = 'on'
@@ -96,7 +108,8 @@ switch ($Step) {
         try {
             foreach ($name in $worker.Keys) {
                 if ($name -in @('APP_ORIGIN', 'WORKER_LOG_LEVEL')) { continue }
-                [System.IO.File]::WriteAllText($file, $worker[$name], (New-Object System.Text.UTF8Encoding $false))
+                $value = if ($name -like '*DATABASE_URL') { ConvertTo-Pooler $worker[$name] } else { $worker[$name] }
+                [System.IO.File]::WriteAllText($file, $value, (New-Object System.Text.UTF8Encoding $false))
                 & cmd /c "gh secret set $name < `"$file`""
                 if ($LASTEXITCODE) { throw "gh secret set $name failed" }
             }

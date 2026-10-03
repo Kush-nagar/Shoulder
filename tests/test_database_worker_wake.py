@@ -25,7 +25,7 @@ class WorkerWakeTests(DatabaseTestCase):
         with self.admin.connect() as connection:
             row = connection.execute(
                 text("""
-                    SELECT t.tgtype, p.prosecdef,
+                    SELECT t.tgtype, t.tgnewtable, p.prosecdef,
                            coalesce(array_to_string(p.proconfig, ','), '') AS config
                     FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
                     WHERE t.tgrelid = 'app.processing_job'::regclass
@@ -35,6 +35,9 @@ class WorkerWakeTests(DatabaseTestCase):
         # tgtype bit 0 = row-level; bit 2 = INSERT. Statement level, on insert.
         self.assertEqual(row.tgtype & 1, 0)
         self.assertTrue(row.tgtype & 4)
+        # Sweeps alone must not wake the worker (0022): it reads the inserted
+        # rows through a transition table.
+        self.assertEqual(row.tgnewtable, "inserted_jobs")
         self.assertTrue(row.prosecdef)
         self.assertIn('search_path=""', row.config)
 
