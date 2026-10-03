@@ -16,6 +16,7 @@ import logging
 import os
 import signal
 import socket
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -40,6 +41,10 @@ HANDLERS: dict[str, Handler] = {
 
 IDLE_SLEEP_SECONDS = 2.0
 SWEEP_INTERVAL_SECONDS = 30.0
+# `--drain` (GitHub Actions, ADR 0028): keep polling this long after the queue
+# empties, so follow-up work a job enqueues (thumbnail after transcode, emails)
+# runs in the same wake-up instead of waiting for the next dispatch.
+DRAIN_IDLE_SECONDS = 90.0
 
 # The signal a handler raises when `keep_going()` goes false. It lives in
 # `services/worker/jobs.py` so a handler module can raise it without importing
@@ -158,6 +163,25 @@ class Worker:
                 self.stopping.wait(IDLE_SLEEP_SECONDS)
         logger.info("worker %s stopped", self.identity)
 
+    def drain(self, idle_seconds: float = DRAIN_IDLE_SECONDS) -> int:
+        """Run until the queue has stayed empty for `idle_seconds`; return jobs run."""
+        logger.info("worker %s draining; kinds=%s", self.identity, sorted(HANDLERS))
+        handled = 0
+        idle_since = time.monotonic()
+        while not self.stopping.is_set():
+            try:
+                if self.run_once():
+                    handled += 1
+                    idle_since = time.monotonic()
+                    continue
+            except jobs.QueueError:
+                logger.exception("queue unavailable")
+            if time.monotonic() - idle_since >= idle_seconds:
+                break
+            self.stopping.wait(IDLE_SLEEP_SECONDS)
+        logger.info("worker %s drained %s job(s)", self.identity, handled)
+        return handled
+
 
 def main() -> None:  # pragma: no cover - process entrypoint
     logging.basicConfig(
@@ -167,7 +191,10 @@ def main() -> None:  # pragma: no cover - process entrypoint
     worker = Worker()
     for received in (signal.SIGINT, signal.SIGTERM):
         signal.signal(received, worker.stop)
-    worker.run()
+    if "--drain" in sys.argv[1:]:
+        worker.drain()
+    else:
+        worker.run()
 
 
 if __name__ == "__main__":  # pragma: no cover - process entrypoint

@@ -34,7 +34,7 @@ If a task conflicts with rules 1–4, stop and report the conflict. Do not imple
 | Video | ffmpeg to seekable H.264/AAC MP4; separate player clip exports |
 | Background work | Postgres job table with `FOR UPDATE SKIP LOCKED` |
 | Email | Resend |
-| Hosting | Vercel for web; Fly.io for API and CPU worker |
+| Hosting | Vercel for web and API; GitHub Actions for the CPU worker, woken per queued job (ADR 0028) |
 | Deferred GPU | Manual RunPod Secure Cloud batch only |
 
 ## Source of truth

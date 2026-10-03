@@ -14,12 +14,12 @@
 Browser
   ├─ same-origin pages and JSON ──> Next.js on Vercel
   │                                  ├─ Supabase SSR session cookies
-  │                                  └─ BFF forwards bearer JWT ──> FastAPI on Fly.io
+  │                                  └─ BFF forwards bearer JWT ──> FastAPI on Vercel
   │                                                                  ├─ Postgres on Supabase
   │                                                                  └─ mints R2 object URLs
   └─ presigned PUT/GET ─────────────────────────────────────────────> private R2
 
-Postgres processing_job ──> CPU worker on Fly.io ──> ffmpeg ──> private R2
+Postgres processing_job ──> CPU worker on GitHub Actions ──> ffmpeg ──> private R2
 ```
 
 The BFF handles only session-aware JSON. Large uploads and media downloads go directly between the browser and R2 through object-specific, short-lived presigned URLs.
