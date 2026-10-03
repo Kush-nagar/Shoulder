@@ -1,7 +1,7 @@
 # Mobile app (Capacitor)
 
 Block 09B, workstream W4. `apps/mobile` is a thin Capacitor 7 shell around the
-production web app at `https://shoulder-demo.vercel.app`. There is no bundled
+production web app at `https://shoulderapp.vercel.app`. There is no bundled
 web build: `server.url` in `capacitor.config.ts` loads the live site directly,
 so the app always shows what's deployed. `www/index.html` is only an offline
 fallback the WebView shows if it can't reach the network.
@@ -96,7 +96,7 @@ here at the plugin/config level:
 (W4 must not touch `apps/web`): when running inside Capacitor, the "Sign in
 with Google" button must call `Browser.open({ url: googleOAuthUrl })` instead
 of a plain `location.href` navigation, and the OAuth redirect must return to
-either an HTTPS App Link (`https://shoulder-demo.vercel.app/auth/callback`,
+either an HTTPS App Link (`https://shoulderapp.vercel.app/auth/callback`,
 already same-origin, works with no native change) or a custom scheme
 (`app.shoulder.player://auth/callback`) that `@capacitor/app`'s
 `appUrlOpen` listener hands back into the page. Given Supabase Auth already

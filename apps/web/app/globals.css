@@ -314,6 +314,93 @@ body {
   }
 }
 
+/*
+ * Transform-only entrances: text is never mid-fade, so contrast holds at
+ * every frame (and for audits that scroll content into view).
+ */
+@keyframes sh-lift {
+  from {
+    transform: translateY(14px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sh-lift {
+    animation: sh-lift 520ms var(--sh-ease) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
+}
+
+/* Below-the-fold sections rise as they scroll in (scroll-driven, no JS). */
+@keyframes sh-reveal {
+  from {
+    transform: translateY(32px) scale(0.985);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .sh-reveal {
+      animation: sh-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 70%;
+    }
+  }
+  @supports not (animation-timeline: view()) {
+    .sh-reveal {
+      animation: sh-rise var(--sh-dur-page) var(--sh-ease) both;
+      animation-delay: calc(var(--i, 0) * 40ms);
+    }
+  }
+}
+
+/* Line art that draws itself once (pathLength=1 on each shape). */
+@media (prefers-reduced-motion: no-preference) {
+  .sh-draw > * {
+    stroke-dasharray: 1;
+    animation: sh-draw 1.6s cubic-bezier(0.65, 0, 0.35, 1) both;
+  }
+  .sh-draw > :nth-child(n + 3) {
+    animation-delay: 0.25s;
+  }
+  .sh-draw > :last-child {
+    animation-duration: 1.2s;
+    animation-delay: 0.9s;
+  }
+}
+@keyframes sh-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Route progress: a signal line while a link navigation is pending. */
+.sh-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 60;
+  height: 2px;
+  background: var(--sh-signal);
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+  pointer-events: none;
+}
+.sh-progress[data-state="busy"] {
+  opacity: 1;
+  transform: scaleX(0.86);
+  transition:
+    transform 8s cubic-bezier(0.08, 0.75, 0.2, 1),
+    opacity 120ms ease-out;
+}
+.sh-progress[data-state="done"] {
+  transform: scaleX(1);
+  transition:
+    transform 180ms ease-out,
+    opacity 260ms ease-out 140ms;
+}
+
 @keyframes sh-shimmer {
   from {
     background-position: 130% 0;

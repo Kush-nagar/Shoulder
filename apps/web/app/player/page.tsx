@@ -107,7 +107,7 @@ function Section({
     <section
       aria-labelledby={id}
       style={{ "--i": index } as CSSProperties}
-      className={`sh-rise min-w-0 ${className}`}
+      className={`${index >= 4 ? "sh-reveal" : "sh-rise"} min-w-0 ${className}`}
     >
       <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h2 id={id} className={`${sectionTitle} flex items-center gap-2.5`}>

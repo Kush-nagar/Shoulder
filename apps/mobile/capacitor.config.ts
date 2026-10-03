@@ -6,11 +6,11 @@ const config: CapacitorConfig = {
   appName: "Shoulder",
   webDir: "www",
   server: {
-    url: "https://shoulder-demo.vercel.app",
+    url: "https://shoulderapp.vercel.app",
     // Only the app and Supabase load inside the WebView. Google sign-in runs
     // in the system browser (apps/web/app/native-bridge.tsx), never here.
     allowNavigation: [
-      "shoulder-demo.vercel.app",
+      "shoulderapp.vercel.app",
       "gzbwlancwxhtausyokxt.supabase.co",
     ],
   },
