@@ -10,7 +10,7 @@ primary_region = "iad"
 [env]
   R2_REGION = "auto"
   WORKER_LOG_LEVEL = "INFO"
-  APP_ORIGIN = "https://shoulder-demo.vercel.app"
+  APP_ORIGIN = "https://shoulderapp.vercel.app"
 
 [[vm]]
   size = "shared-cpu-2x"
