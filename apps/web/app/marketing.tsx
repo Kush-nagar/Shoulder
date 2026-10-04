@@ -158,6 +158,46 @@ function MatchClock() {
   );
 }
 
+/**
+ * Licensed Pexels drill footage (video 6084027, Pexels License). Loads and
+ * plays only while on screen; reduced motion keeps the still frame.
+ */
+function PracticeFilm() {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || !("IntersectionObserver" in window)) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          video.preload = "auto";
+          video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <video
+      ref={ref}
+      className="mk-practice-video"
+      src="/practice-drill.mp4"
+      poster="/practice-drill.jpg"
+      muted
+      loop
+      playsInline
+      preload="none"
+      disablePictureInPicture
+      tabIndex={-1}
+    />
+  );
+}
+
 function CtaLink({
   className = "",
   children,
@@ -707,12 +747,7 @@ export function MarketingPage() {
           <div className="mk-bento">
             <article className="mk-tile mk-tile-film" data-reveal>
               <div className="mk-tile-art" aria-hidden="true">
-                <Image
-                  src={pitch}
-                  alt=""
-                  fill
-                  sizes="(max-width: 900px) 100vw, 40vw"
-                />
+                <PracticeFilm />
                 <span className="mk-rec">
                   <i /> Rec
                 </span>
