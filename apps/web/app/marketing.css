@@ -1005,6 +1005,14 @@
   transform: scale(3.2);
   transform-origin: 72% 58%;
 }
+.mk-practice-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 55% 70%;
+}
 .mk-rec {
   font-size: 0.75rem;
   font-weight: 600;
