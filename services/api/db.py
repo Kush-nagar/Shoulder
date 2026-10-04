@@ -12,9 +12,13 @@ from contextlib import contextmanager
 from functools import lru_cache
 
 from fastapi import HTTPException
-from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy import Connection, Engine, create_engine, make_url, text
+from sqlalchemy.pool import NullPool
 
 NO_STORE = {"Cache-Control": "private, no-store"}
+# Supabase's transaction-mode pooler. `app.user_id` is transaction-local, so a
+# pooled backend never carries one request's identity into another.
+TRANSACTION_POOLER_PORT = 6543
 
 
 @lru_cache
@@ -22,6 +26,13 @@ def get_engine() -> Engine:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise HTTPException(503, "Service unavailable", headers=NO_STORE)
+    if make_url(url).port == TRANSACTION_POOLER_PORT:
+        # Serverless (ADR 0028): Supabase's transaction pooler owns pooling,
+        # so hold no connections between requests and never prepare
+        # statements a different backend would not know about.
+        return create_engine(
+            url, poolclass=NullPool, connect_args={"prepare_threshold": None}
+        )
     return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
 
 

@@ -35,11 +35,11 @@ function Read-EnvFile([string]$Path) {
 # Supabase's direct host is IPv6-only; Vercel functions and GitHub runners
 # reach Postgres over IPv4 through the session pooler (ADR 0028). The pooler
 # login is `<role>.<project ref>`.
-function ConvertTo-Pooler([string]$Url, [string]$PoolerHost = 'aws-0-us-east-1.pooler.supabase.com') {
+function ConvertTo-Pooler([string]$Url, [int]$Port = 5432, [string]$PoolerHost = 'aws-0-us-east-1.pooler.supabase.com') {
     if ($Url -notmatch '^(?<scheme>[^:]+)://(?<user>[^:@/]+):(?<pass>[^@]*)@db\.(?<ref>[a-z0-9]+)\.supabase\.co:5432(?<rest>/.*)?$') {
         return $Url
     }
-    return "$($Matches.scheme)://$($Matches.user).$($Matches.ref):$($Matches.pass)@${PoolerHost}:5432$($Matches.rest)"
+    return "$($Matches.scheme)://$($Matches.user).$($Matches.ref):$($Matches.pass)@${PoolerHost}:${Port}$($Matches.rest)"
 }
 
 $remote = Read-EnvFile '.env.remote'
@@ -63,7 +63,8 @@ switch ($Step) {
         $local = Read-EnvFile '.env.local'
         $secrets = [ordered]@{}
         foreach ($name in $api.Keys) {
-            $secrets[$name] = if ($name -like '*DATABASE_URL') { ConvertTo-Pooler $api[$name] } else { $api[$name] }
+            # Serverless API: transaction pooler (6543; 15-client session cap otherwise).
+            $secrets[$name] = if ($name -like '*DATABASE_URL') { ConvertTo-Pooler $api[$name] 6543 } else { $api[$name] }
         }
         $secrets['OPENROUTER_API_KEY'] = $local['OPENROUTER_API_KEY']
         if ($local['AI_COACH_MODEL']) { $secrets['AI_COACH_MODEL'] = $local['AI_COACH_MODEL'] }
