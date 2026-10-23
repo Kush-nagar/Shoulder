@@ -161,6 +161,56 @@ def _pull_request_finished(number: int, *, repo: str | None = None) -> bool | No
     return str(payload.get("state", "")).upper() != "OPEN"
 
 
+def branch_pull_request_open(branch: str, *, repo: str | None = None) -> bool | None:
+    """Whether any open pull request is on this branch.
+
+    True open, False none, None unanswerable. It lives here beside the other
+    liveness queries because it answers the same question they do -- is there
+    still something in play on this branch -- and its callers fail closed on
+    None for the same reason.
+
+    The branch is asked about rather than a number because the case this
+    exists for is precisely the one where no number was captured.
+    """
+    command = [
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "open",
+        "--json",
+        "number",
+    ]
+    if repo:
+        command += ["--repo", repo]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        return None
+    if not (result.stdout or "").strip():
+        # A zero exit with nothing on stdout is not an answer. Reading it as
+        # "no pull request" would free a lease on a truncated response, which
+        # is exactly what the fail-closed contract above forbids.
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, list):
+        # `--json number` returns an array. Anything else means the command
+        # answered a different question than the one that was asked.
+        return None
+    return bool(payload)
+
+
 def sweep(root: Path, *, repo: str | None = None) -> dict[str, Any]:
     ctx = coordinator.load_context(root)
     recovered: list[dict[str, Any]] = []

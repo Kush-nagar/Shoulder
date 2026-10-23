@@ -65,6 +65,11 @@ jobs:
         if: always()
         continue-on-error: true
         env:
+          # The sweep step above has this; the Control Center is what publishes
+          # it, and reads it from the environment. Without it here the page
+          # renders the committed `enabled: false` seed and reports PAUSED
+          # while autonomy is on. Absent or empty still means off.
+          AUTONOMY_ENABLED: ${{ vars.AUTONOMY_ENABLED }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |

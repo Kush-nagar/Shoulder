@@ -349,6 +349,102 @@ def begin_repair(
     return repaired
 
 
+FAILURE_CLASSES = {
+    # The harness or the model provider fell over. The lane is separately
+    # marked DEGRADED, so the coordinator's next attempt takes the fallback
+    # chain instead of the lane that just failed.
+    "provider": "the provider harness failed before a pull request existed",
+    # The worker itself ended without producing one: a bad brief, a failed
+    # install, a cancelled job. Nothing here blames a lane.
+    "worker": "the worker finished without opening a pull request",
+}
+
+
+def abandon_finished_worker(
+    tasks: dict[str, Any],
+    task_id: int,
+    *,
+    run_id: str,
+    branch: str,
+    failure_class: str,
+    pull_request_open: bool,
+) -> dict[str, Any]:
+    """Free a lease whose worker is provably over and left no pull request.
+
+    Without this the loop stops dead. The lease stays `assigned` and the
+    watchdog cannot touch it until `expires_at` -- the worker's full 90-minute
+    job timeout -- has passed, even though the run died in under a minute and
+    `owner_finished` would already answer "yes". That is an hour and a half of
+    nothing, for a failure the system knew about immediately.
+
+    The caller is the finalize job, which runs only after the work job has
+    reached a conclusion. That job dependency is the liveness proof; no
+    timestamp or API answer is trusted in its place. Every other condition is
+    checked here and refuses rather than guesses, because the one outcome worse
+    than a late recovery is a second writer on a live worker's branch:
+
+    * the lease must still be active -- a terminal one is already resolved, and
+      this makes the whole transition idempotent across the caller's retries;
+    * `run_id` must be the run recorded on the lease, so a re-run, or a
+      finalize job that lost a race and is reporting late, cannot abandon the
+      lease a newer worker now holds;
+    * `branch` must be the leased branch, so a misdispatched run cannot free
+      another task's lease;
+    * no pull request may exist, attached or open. `pull_request_open` is
+      supplied by the caller and must fail closed: an unanswerable query means
+      "a pull request may exist", which leaves the lease alone and lets the
+      normal stale path handle it.
+
+    Attempts and the checkpoint are deliberately left as they are. `acquire`
+    reads both off the existing record, so the next attempt counts against the
+    same budget and starts from whatever progress was saved, rather than
+    beginning again with a fresh allowance.
+    """
+    if failure_class not in FAILURE_CLASSES:
+        raise ValueError(f"{failure_class} is not a worker failure class")
+    lease = tasks.get("leases", {}).get(str(task_id))
+    if lease is None:
+        raise LeaseConflict(f"no lease for task {task_id}")
+    if lease.get("state") not in ACTIVE_STATES:
+        raise LeaseConflict(
+            f"task {task_id} lease is {lease.get('state')}; nothing to recover"
+        )
+    if str(lease.get("worker_run_id") or "") != str(run_id):
+        raise LeaseConflict(
+            f"task {task_id} is attached to worker run "
+            f"{lease.get('worker_run_id')}, not {run_id}"
+        )
+    if str(lease.get("branch") or "") != str(branch):
+        raise LeaseConflict(
+            f"task {task_id} is leased on {lease.get('branch')}, not {branch}"
+        )
+    if lease.get("pull_request") is not None or pull_request_open:
+        raise LeaseConflict(
+            f"task {task_id} has a pull request; the branch is still in play"
+        )
+
+    lease["state"] = "abandoned"
+    lease["abandoned_at"] = now()
+    lease["abandoned_reason"] = FAILURE_CLASSES[failure_class]
+    # Kept separate from the prose reason so the classification stays readable
+    # by something other than a human: a provider failure and a worker failure
+    # lead to different next attempts.
+    lease["failure_class"] = failure_class
+    lease["abandoned_by_run"] = str(run_id)
+    # Detaching the dead run matters for the same reason it does in
+    # `begin_repair`, and this is the whole recovery if it is missed. `acquire`
+    # rebuilds the next lease from this record and does not clear these, so the
+    # successor would inherit a `worker_run_id` naming a run that is over --
+    # and `verify-assignment` runs before a worker can attach its own, so it
+    # would refuse every attempt as "held by worker run <dead one>". The lease
+    # would be freed and still unusable, burning the attempt budget until the
+    # task blocked.
+    lease.pop("worker_run_id", None)
+    lease.pop("worker_run_attempt", None)
+    recovered: dict[str, Any] = lease
+    return recovered
+
+
 def release(tasks: dict[str, Any], task_id: int, state: str) -> dict[str, Any] | None:
     lease = tasks.get("leases", {}).get(str(task_id))
     if lease is None:
